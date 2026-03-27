@@ -1,0 +1,837 @@
+"""
+scientist_agent_causal.py
+
+The Scientist Agent for causal discovery: an LLM-powered agent that reasons
+about causal structure by requesting and analyzing observational and
+interventional data.
+
+The causal discovery task:
+    - The agent is given variable descriptions but NOT the causal graph
+    - It must answer questions about which variables causally affect which others
+    - It can collect two types of data:
+        * Observational: passive measurement — reveals correlations, not causation
+        * Interventional: do(X=x) — fixes X and severs its incoming causal links,
+          revealing which variables X causally affects (X's descendants shift)
+          and confirming that X's parents are unaffected by the intervention
+
+Key questions the agent must answer (from world_gen_causal.py dataset):
+    - "Does A cause B?" / "Does A have a causal effect on B?" (causal_effect)
+    - "What are all the causes of X?" (all_causes_of — lists all ancestors)
+    - "What does X causally affect?" (all_effects_of — lists all descendants)
+    - "Are A and B marginally independent?" (marginal_independence)
+    - "Are A and B conditionally independent given C?" (conditional_independence)
+
+Usage:
+    from scientist_agent_causal import ScientistAgent
+    from world_model_causal import OpenAILLM
+
+    llm = OpenAILLM()
+    scientist = ScientistAgent(llm=llm)
+    scientist.initialize(world_info, question, max_queries=10)
+
+    action = scientist.get_next_action()  # {"type": "query", "content": "..."}
+    scientist.receive_result(result)
+
+    action = scientist.get_next_action()  # {"type": "answer", "content": "..."}
+"""
+
+from __future__ import annotations
+
+import itertools
+import re
+import logging
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+
+import numpy as np
+import pandas as pd
+import torch
+from scipy.stats import chi2_contingency
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
+from schemas import Question, QueryResult, WorldInfo
+
+logger = logging.getLogger(__name__)
+
+
+# -----------------------------------------------------------------------------
+# LLM Backend (can be shared or separate from world model)
+# -----------------------------------------------------------------------------
+
+@dataclass
+class ScientistLLM:
+    """
+    LLM wrapper for the Scientist Agent.
+
+    Can use the same or different model from the World Model.
+    Uses slightly higher temperature for more exploratory reasoning.
+    """
+    model_name: str = "Qwen/Qwen2.5-7B-Instruct"
+    device: Optional[str] = None
+    max_new_tokens: int = 1536
+    temperature: float = 0.3
+    top_p: float = 0.9
+
+    tokenizer: Any = field(default=None, init=False, repr=False)
+    model: Any = field(default=None, init=False, repr=False)
+    _device: str = field(default="cpu", init=False, repr=False)
+
+    def __post_init__(self):
+        if self.device is None:
+            self._device = "cuda" if torch.cuda.is_available() else "cpu"
+        else:
+            self._device = self.device
+
+        dtype = torch.float16 if self._device.startswith("cuda") else torch.float32
+
+        logger.info(f"Loading Scientist LLM: {self.model_name} on {self._device}...")
+
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            self.model_name,
+            trust_remote_code=True
+        )
+        self.model = AutoModelForCausalLM.from_pretrained(
+            self.model_name,
+            torch_dtype=dtype,
+            trust_remote_code=True,
+        ).to(self._device)
+        self.model.eval()
+
+        logger.info("Scientist LLM loaded")
+
+    def generate(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        max_new_tokens: Optional[int] = None,
+    ) -> str:
+        """Generate a response."""
+        return self.generate_messages(
+            [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            max_new_tokens=max_new_tokens,
+        )
+
+    def generate_messages(
+        self,
+        messages: List[Any],
+        max_new_tokens: Optional[int] = None,
+    ) -> str:
+        """Generate from a full message list (supports multi-turn inner loops)."""
+        input_ids = self.tokenizer.apply_chat_template(
+            messages,
+            add_generation_prompt=True,
+            return_tensors="pt",
+        ).to(self._device)
+
+        with torch.no_grad():
+            output_ids = self.model.generate(
+                input_ids=input_ids,
+                attention_mask=torch.ones_like(input_ids),
+                max_new_tokens=max_new_tokens or self.max_new_tokens,
+                do_sample=(self.temperature > 0),
+                temperature=self.temperature if self.temperature > 0 else None,
+                top_p=self.top_p,
+                pad_token_id=self.tokenizer.eos_token_id,
+            )
+
+        new_tokens = output_ids[0, input_ids.shape[1]:]
+        return self.tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
+
+
+# -----------------------------------------------------------------------------
+# Scientist Agent
+# -----------------------------------------------------------------------------
+
+@dataclass
+class ScientistAgent:
+    """
+    LLM-powered agent for causal discovery.
+
+    The scientist must answer questions about causal relationships between
+    variables in an unknown causal graph. It can collect:
+        - Observational data: reveals correlations (but not causal direction)
+        - Interventional data: do(X=x) severs X's incoming causal links and
+          reveals which variables X causally affects
+
+    Each turn, it decides whether to:
+        - Request more data (observational or interventional)
+        - Submit a final answer
+    """
+    llm: Any  # ScientistLLM, OpenAILLM, or any object with generate()
+
+    # State (set during initialize)
+    world_info: Optional[WorldInfo] = field(default=None, init=False)
+    question: Optional[Question] = field(default=None, init=False)
+    max_queries: int = field(default=10, init=False)
+
+    # History
+    _query_history: List[Dict[str, Any]] = field(default_factory=list, init=False)
+    _queries_made: int = field(default=0, init=False)
+    _system_messages: List[str] = field(default_factory=list, init=False)
+
+    # Scientist memory: evolving causal understanding of the world
+    _scientist_memory: str = field(default="", init=False)
+
+    def initialize(
+        self,
+        world_info: WorldInfo,
+        question: Question,
+        max_queries: int,
+    ) -> None:
+        """
+        Initialize the scientist with the causal discovery problem.
+
+        Args:
+            world_info: Variable descriptions and story (no graph structure)
+            question: The causal question to answer
+            max_queries: Maximum number of data queries allowed
+        """
+        self.world_info = world_info
+        self.question = question
+        self.max_queries = max_queries
+        self._query_history = []
+        self._queries_made = 0
+        self._system_messages = []
+        self._scientist_memory = ""
+
+        logger.info(f"Scientist initialized. Question: {question.question_text}")
+
+    def get_next_action(self) -> Dict[str, Any]:
+        """
+        Decide the next action: query for data or submit a causal answer.
+
+        Returns:
+            Dict with:
+                - type: "query" | "answer" | "give_up"
+                - content: the query string or answer
+                - raw_response: the full LLM response
+                - reasoning: extracted reasoning block
+                - scientist_memory: current memory after this turn
+        """
+        if self.world_info is None or self.question is None:
+            raise RuntimeError("Scientist not initialized. Call initialize() first.")
+
+        system_prompt = self._SYSTEM_PROMPT
+        user_prompt = self._get_decision_user_prompt()
+
+        response = self.llm.generate(system_prompt, user_prompt, max_new_tokens=1536)
+        logger.debug(f"Scientist raw response:\n{response}")
+
+        reasoning = self._extract_reasoning(response)
+        if reasoning:
+            logger.info(f"Scientist reasoning: {reasoning[:300]}...")
+
+        self._update_memory_from_response(response)
+
+        action = self._parse_action(response)
+
+        action["raw_response"] = response
+        action["reasoning"] = reasoning
+        action["scientist_memory"] = self._scientist_memory
+
+        logger.info(f"Scientist action: type={action['type']}, content={action['content'][:100]}...")
+
+        return action
+
+    def receive_result(self, result: QueryResult) -> None:
+        """
+        Receive the result of a data query.
+
+        Args:
+            result: QueryResult from the world model
+        """
+        # Only count successful queries toward budget (aligned with orchestrator)
+        if result.success:
+            self._queries_made += 1
+
+        data_summary = ""
+        if result.success and result.data_file:
+            data_summary = self._compute_data_summary(result.data_file, result.query.interventions)
+            logger.info(f"Statistical summary for query:\n{data_summary}")
+
+        self._query_history.append({
+            "query": result.query.raw_query,
+            "success": result.success,
+            "result_xml": result.to_xml(),
+            "data_file": result.data_file,
+            "n_rows": result.n_rows,
+            "interventions": result.query.interventions,
+            "data_summary": data_summary,
+            "scientist_memory_snapshot": self._scientist_memory,
+        })
+
+        logger.info(f"Scientist received result: success={result.success}, n={result.n_rows}")
+
+    def _compute_data_summary(
+        self,
+        data_file: str,
+        interventions: List[Dict[str, str]],
+        max_vars: int = 20,
+    ) -> str:
+        """
+        Compute a comprehensive statistical summary of the data.
+
+        Includes marginal distributions, pairwise independence tests (chi-squared
+        with Cramer's V), conditional distributions for top associated pairs,
+        and interventional shift analysis when applicable.
+        """
+        try:
+            df = pd.read_csv(data_file)
+        except Exception as e:
+            logger.warning(f"Could not read data file {data_file}: {e}")
+            return "(Could not read data)"
+
+        if df.empty:
+            return "(No data)"
+
+        n = len(df)
+        sections = []
+
+        sections.append(f"=== DATA SUMMARY (N={n}, {len(df.columns)} variables) ===")
+
+        if interventions:
+            cond_strs = ["do(" + ", ".join(f"{k}={v}" for k, v in c.items()) + ")" for c in interventions]
+            sections.append(f"Intervention(s): {' | '.join(cond_strs)}")
+
+        # For marginal distributions, drop the indicator column if present
+        data_cols = [c for c in df.columns if c != "__intervention__"]
+        marginal_lines = ["MARGINAL DISTRIBUTIONS:"]
+        for col in data_cols[:max_vars]:
+            vc = df[col].value_counts(normalize=True).sort_index()
+            counts_str = ", ".join(f"{state}: {pct:.0%}" for state, pct in vc.items())
+            marginal_lines.append(f"  {col}: {counts_str}")
+        if len(data_cols) > max_vars:
+            marginal_lines.append(f"  ... and {len(data_cols) - max_vars} more variables")
+        sections.append("\n".join(marginal_lines))
+
+        stats_df = df[data_cols]
+        pairwise_stats = self._compute_pairwise_stats(stats_df)
+        if pairwise_stats:
+            pair_lines = ["PAIRWISE ASSOCIATION TESTS (sorted by significance):"]
+            for var1, var2, chi2, p, v in pairwise_stats:
+                sig = ""
+                if p < 0.001:
+                    sig = " ***"
+                elif p < 0.01:
+                    sig = " **"
+                elif p < 0.05:
+                    sig = " *"
+                pair_lines.append(f"  {var1} vs {var2}: chi2={chi2:.1f}, p={p:.4f}, V={v:.3f}{sig}")
+            pair_lines.append("  (* p<0.05, ** p<0.01, *** p<0.001)")
+            sections.append("\n".join(pair_lines))
+
+        if pairwise_stats:
+            cond_str = self._compute_conditional_distributions(stats_df, pairwise_stats)
+            if cond_str:
+                sections.append("CONDITIONAL DISTRIBUTIONS (top associated pairs):\n" + cond_str)
+
+        if interventions:
+            if len(interventions) == 1:
+                shift_str = self._compute_interventional_shift(df, interventions[0])
+            else:
+                shift_str = self._compute_cross_condition_shift(df, interventions)
+            if shift_str:
+                sections.append("CAUSAL EFFECT ANALYSIS:\n" + shift_str)
+
+        return "\n\n".join(sections)
+
+    def receive_system_message(self, message: str) -> None:
+        """Receive a system message (e.g., budget warning)."""
+        self._system_messages.append(message)
+        logger.info(f"Scientist received system message: {message[:100]}...")
+
+    def _strip_think_block(self, response: str) -> str:
+        """Remove Qwen-style <think>...</think> chain-of-thought block."""
+        stripped = re.sub(r'<think>.*?</think>', '', response, flags=re.DOTALL)
+        return stripped.strip()
+
+    def _update_memory_from_response(self, response: str) -> None:
+        """Extract and update scientist memory from LLM response."""
+        response = self._strip_think_block(response)
+        pattern = r'<scientist_memory>(.*?)</scientist_memory>'
+        match = re.search(pattern, response, re.DOTALL)
+        if match:
+            self._scientist_memory = match.group(1).strip()
+            logger.info(f"Scientist memory updated: {self._scientist_memory[:200]}...")
+        else:
+            logger.warning("No <scientist_memory> block found in LLM response")
+
+    def _extract_reasoning(self, response: str) -> str:
+        """Extract the reasoning block from LLM response."""
+        response = self._strip_think_block(response)
+        pattern = r'<reasoning>(.*?)</reasoning>'
+        match = re.search(pattern, response, re.DOTALL)
+        if match:
+            return match.group(1).strip()
+        return ""
+
+    # -------------------------------------------------------------------------
+    # Statistical Analysis Helpers
+    # -------------------------------------------------------------------------
+
+    def _compute_pairwise_stats(
+        self,
+        df: pd.DataFrame,
+        max_pairs: int = 15,
+    ) -> List[Tuple[str, str, float, float, float]]:
+        """
+        Compute chi-squared independence tests and Cramer's V for all variable pairs.
+
+        Returns list of (var1, var2, chi2, p_value, cramers_v) sorted by p-value ascending.
+        """
+        cols = list(df.columns)
+        results = []
+        for var1, var2 in itertools.combinations(cols, 2):
+            try:
+                contingency = pd.crosstab(df[var1], df[var2])
+                if contingency.shape[0] < 2 or contingency.shape[1] < 2:
+                    continue
+                chi2, p, dof, expected = chi2_contingency(contingency, correction=True)
+                n = len(df)
+                min_dim = min(contingency.shape[0] - 1, contingency.shape[1] - 1)
+                cramers_v = np.sqrt(chi2 / (n * min_dim)) if min_dim > 0 else 0.0
+                results.append((var1, var2, chi2, p, cramers_v))
+            except Exception:
+                continue
+        results.sort(key=lambda x: x[3])
+        return results[:max_pairs]
+
+    def _compute_conditional_distributions(
+        self,
+        df: pd.DataFrame,
+        pairs: List[Tuple[str, str, float, float, float]],
+        top_k: int = 5,
+    ) -> str:
+        """Compute P(Y|X=x) for top associated pairs."""
+        lines = []
+        for var1, var2, _, _, _ in pairs[:top_k]:
+            n_states_1 = df[var1].nunique()
+            n_states_2 = df[var2].nunique()
+            if n_states_1 <= n_states_2:
+                cond_var, target_var = var1, var2
+            else:
+                cond_var, target_var = var2, var1
+
+            try:
+                ct = pd.crosstab(df[cond_var], df[target_var], normalize='index')
+                lines.append(f"  P({target_var} | {cond_var}):")
+                for state in ct.index:
+                    dist_parts = [f"{col}={pct:.0%}" for col, pct in ct.loc[state].items()]
+                    lines.append(f"    {cond_var}={state}: {', '.join(dist_parts)}")
+            except Exception:
+                continue
+        return "\n".join(lines)
+
+    def _compute_interventional_shift(
+        self,
+        df: pd.DataFrame,
+        interventions,
+    ) -> str:
+        """
+        Compare current interventional data with the most recent observational baseline.
+
+        Returns a string describing which variables shifted under the intervention.
+        A significant shift in variable Y after do(X=x) is evidence that X causally
+        affects Y. No shift means X does not causally affect Y.
+        """
+        # Flatten list-of-dicts to single dict
+        if isinstance(interventions, list):
+            merged = {}
+            for d in interventions:
+                if isinstance(d, dict):
+                    merged.update(d)
+            interventions = merged
+
+        obs_file = None
+        for h in reversed(self._query_history):
+            if h["success"] and not h.get("interventions"):
+                obs_file = h.get("data_file")
+                break
+
+        if not obs_file:
+            return "(No observational baseline available for comparison)"
+
+        try:
+            obs_df = pd.read_csv(obs_file)
+        except Exception:
+            return "(Could not read observational baseline)"
+
+        lines = []
+        interv_str = ", ".join(f"{k}={v}" for k, v in interventions.items())
+        lines.append(f"  Intervention: do({interv_str})")
+        lines.append("  Variable shifts (interventional vs observational):")
+        lines.append("  [Significant shift = X likely has a causal effect on this variable]")
+        lines.append("  [No shift = X likely does NOT causally affect this variable]")
+
+        intervened_vars = set(interventions.keys())
+        for col in df.columns:
+            if col in intervened_vars:
+                continue
+            if col not in obs_df.columns:
+                continue
+            try:
+                int_dist = df[col].value_counts(normalize=True).sort_index()
+                obs_dist = obs_df[col].value_counts(normalize=True).sort_index()
+                all_states = sorted(set(int_dist.index) | set(obs_dist.index))
+                shifts = []
+                for state in all_states:
+                    obs_pct = obs_dist.get(state, 0.0)
+                    int_pct = int_dist.get(state, 0.0)
+                    delta = int_pct - obs_pct
+                    if abs(delta) >= 0.02:
+                        shifts.append(f"{state}: {obs_pct:.0%}->{int_pct:.0%} (delta={delta:+.0%})")
+                if shifts:
+                    lines.append(f"    {col}: SHIFTED — {'; '.join(shifts)}")
+                else:
+                    lines.append(f"    {col}: no significant change")
+            except Exception:
+                continue
+
+        return "\n".join(lines)
+
+    def _compute_cross_condition_shift(
+        self,
+        df: pd.DataFrame,
+        interventions: List[Dict[str, str]],
+    ) -> str:
+        """
+        Compare variable distributions across multiple intervention conditions.
+
+        For multi-condition queries (e.g., do(X=a) vs do(X=b)), groups the
+        stacked DataFrame by the __intervention__ label and shows how each
+        non-intervened variable's distribution differs across conditions.
+        """
+        if "__intervention__" not in df.columns:
+            return ""
+
+        all_intervened = set()
+        for c in interventions:
+            all_intervened.update(c.keys())
+
+        condition_labels = df["__intervention__"].unique().tolist()
+        groups = {lbl: df[df["__intervention__"] == lbl] for lbl in condition_labels}
+
+        lines = ["  Cross-condition comparison:"]
+        lines.append(f"  [Significant shift across conditions = the intervened variable causally affects this variable]")
+
+        data_cols = [c for c in df.columns if c != "__intervention__" and c not in all_intervened]
+        for col in data_cols:
+            try:
+                dists = {}
+                for lbl, grp in groups.items():
+                    dists[lbl] = grp[col].value_counts(normalize=True).sort_index()
+                all_states = sorted(set().union(*[d.index for d in dists.values()]))
+                # Compute max delta across any pair of conditions
+                max_delta = 0.0
+                for state in all_states:
+                    vals = [dists[lbl].get(state, 0.0) for lbl in condition_labels]
+                    max_delta = max(max_delta, max(vals) - min(vals))
+                if max_delta >= 0.05:
+                    state_strs = []
+                    for state in all_states:
+                        per_cond = " vs ".join(f"{dists[lbl].get(state, 0.0):.0%}" for lbl in condition_labels)
+                        state_strs.append(f"{state}: {per_cond}")
+                    lines.append(f"    {col}: SHIFTED — {'; '.join(state_strs)}")
+                else:
+                    lines.append(f"    {col}: no significant change across conditions")
+            except Exception:
+                continue
+
+        cond_header = " | ".join(condition_labels)
+        lines.insert(2, f"  Conditions: {cond_header}")
+        return "\n".join(lines)
+
+    # -------------------------------------------------------------------------
+    # Prompt Construction
+    # -------------------------------------------------------------------------
+
+    _SYSTEM_PROMPT = """You are a discovery scientist. Your goal is to determine relationships between variables in an unknown causal graph by collecting and analyzing data.
+
+AVAILABLE ACTIONS (choose one each turn):
+1. QUERY - Request data to test hypotheses. Set N to be a number of samples that is sufficient and specify if you want:
+   - Observational: "Give me N observational samples of variables A, B, C" (reveals correlations only)
+   - Interventional: "Give me N samples of A. B, and X where we intervene to set X=value" (reveals causal effects of X)
+2. ANSWER - Submit your final answer when confident:
+   - For Yes/No questions: answer "Yes" or "No"
+   - For listing questions: provide the specific variable names in a list
+3. GIVE_UP - If the question cannot be answered with available resources
+
+CAUSAL DISCOVERY STRATEGY:
+
+Think like a scientist running experiments.
+
+You have two tools:
+1. Observational data → shows correlations
+2. Interventions do(X=value) → shows causal effects
+
+Key ideas:
+
+- Correlation alone cannot determine causation.
+- To test if X causes Y:
+    → change X (using do(X=...))
+    → see if Y changes
+
+Interpretation:
+- If Y changes when X is changed → X causally affects Y
+- If Y does NOT change → X does NOT cause Y
+- If X and Y are correlated but no effect under intervention → likely common cause
+
+Strategy:
+1. Start with observational data to find which variables are related
+2. Use interventions to test causal direction
+3. Focus only on variables relevant to the question
+4. Prefer the smallest experiment that can answer the question. Use N to be statistically sufficient but not excessive.
+
+Before answering, ensure:
+- You directly tested the claim using interventions
+- Your conclusion is based on observed changes, not assumptions
+
+OUTPUT FORMAT (required, in this exact order):
+<reasoning>[Analysis, updated understanding, hypothesis, decision rationale]</reasoning>
+<action type="query|answer|give_up">[Query, answer, or reason]</action>
+<scientist_memory>
+Tested:
+Known:
+Uncertain:
+Next:
+</scientist_memory>
+Do NOT copy the example text — write your actual analysis and actual query/answer."""
+
+
+    def _get_decision_user_prompt(self) -> str:
+        """User prompt with current state — inverted pyramid structure."""
+        # =======================================================================
+        # SECTION 1: GOAL (most important)
+        # =======================================================================
+        goal_section = f"""════════════════════════════════════════════════════════════════════════════════
+YOUR QUESTION: {self.question.question_text}
+════════════════════════════════════════════════════════════════════════════════"""
+
+        # =======================================================================
+        # SECTION 2: CONSTRAINTS
+        # =======================================================================
+        remaining = self.max_queries - self._queries_made
+        if remaining <= 0:
+            budget_str = f">> BUDGET: {self._queries_made}/{self.max_queries} queries used — NO QUERIES LEFT — You MUST answer now!"
+        elif remaining <= 2:
+            budget_str = f">> BUDGET: {self._queries_made}/{self.max_queries} queries used — Only {remaining} remaining — Answer soon!"
+        else:
+            budget_str = f"BUDGET: {self._queries_made}/{self.max_queries} queries used — {remaining} remaining"
+
+        non_intervenable = self.world_info.non_intervenable_variables
+        if non_intervenable:
+            interv_lines = ["INTERVENTION LIMITS — Cannot intervene on (non-manipulable variables):"]
+            for var, reason in non_intervenable.items():
+                interv_lines.append(f"  - {var}: {reason}")
+            interv_str = "\n".join(interv_lines)
+        else:
+            interv_str = "INTERVENTION LIMITS: All variables are intervenable"
+
+        constraints_section = f"""{budget_str}
+{interv_str}"""
+
+        if self._system_messages:
+            constraints_section += "\n>> SYSTEM ALERTS:\n" + "\n".join(f"  - {msg}" for msg in self._system_messages)
+
+        # =======================================================================
+        # SECTION 3: LATEST QUERY RESULT
+        # =======================================================================
+        if self._query_history:
+            latest = self._query_history[-1]
+            status = "SUCCESS" if latest["success"] else "FAILED"
+            latest_lines = [f"─── LATEST QUERY RESULT (Query {len(self._query_history)}) ───"]
+            latest_lines.append(f"Status: {status}")
+            latest_lines.append(f"Request: {latest['query']}")
+            if latest["success"]:
+                latest_lines.append(f"Samples: {latest['n_rows']}")
+                latest_lines.append("─" * 60)
+                if latest.get("data_summary"):
+                    latest_lines.append(latest["data_summary"])
+            else:
+                error_msg = latest.get("result_xml", "(no details)")
+                latest_lines.append(f"Error: Query failed — {error_msg}")
+                latest_lines.append("─" * 60)
+            latest_section = "\n".join(latest_lines)
+        else:
+            latest_section = (
+                "─── NO QUERIES YET ───\n"
+            )
+
+        # =======================================================================
+        # SECTION 4: YOUR CAUSAL MEMORY
+        # =======================================================================
+        if self._scientist_memory:
+            memory_section = f"""YOUR CURRENT CAUSAL UNDERSTANDING (from previous turn):
+{self._scientist_memory}"""
+        else:
+            memory_section = """YOUR CURRENT CAUSAL UNDERSTANDING:
+(Empty — this is your first turn. After analyzing data, update your memory to track your evolving causal map: which variables are associated, which causal directions are confirmed, what remains uncertain.)"""
+
+        # =======================================================================
+        # SECTION 5: PAST QUERIES SUMMARY
+        # =======================================================================
+        if len(self._query_history) > 1:
+            history_lines = ["PAST QUERIES SUMMARY:"]
+            for i, h in enumerate(self._query_history[:-1], 1):
+                status_icon = "[OK]" if h["success"] else "[FAIL]"
+                if h["success"]:
+                    conditions = h.get("interventions") or []
+                    if conditions:
+                        parts = ["do(" + ", ".join(f"{k}={v}" for k, v in c.items()) + ")" for c in conditions]
+                        interv = " " + " | ".join(parts)
+                    else:
+                        interv = " observational"
+                    history_lines.append(f"  Query {i}: {status_icon} {h['n_rows']} samples —{interv}")
+                else:
+                    history_lines.append(f"  Query {i}: {status_icon} Failed")
+            history_lines.append(f"  Query {len(self._query_history)}: (Latest — see full results above)")
+            history_section = "\n".join(history_lines)
+        else:
+            history_section = ""
+
+        # =======================================================================
+        # SECTION 6: VARIABLES (always shown in full — needed for valid intervention queries)
+        # =======================================================================
+        if self._queries_made == 0:
+            variables_section = f"""AVAILABLE VARIABLES (use exact names and state values for interventions):
+{self.world_info.get_variable_catalog()}
+
+CONTEXT: {self.world_info.story}"""
+        else:
+            variables_section = f"""AVAILABLE VARIABLES (use exact names and state values for interventions):
+{self.world_info.get_variable_catalog()}"""
+
+        # =======================================================================
+        # ASSEMBLE FINAL PROMPT
+        # =======================================================================
+        sections = [
+            goal_section,
+            "",
+            variables_section,
+            "",
+            constraints_section,
+            "",
+            latest_section,
+            "",
+            memory_section,
+        ]
+
+        if history_section:
+            sections.extend(["", history_section])
+
+        sections.extend([
+            "",
+            "=" * 80,
+            "Now: Analyze the latest data → Update your memory → Decide your next action.",
+            "Output: <reasoning>, <action>, and <scientist_memory> blocks (in that order)."
+        ])
+
+        return "\n".join(sections)
+
+    # -------------------------------------------------------------------------
+    # Response Parsing
+    # -------------------------------------------------------------------------
+
+    def _parse_action(self, response: str) -> Dict[str, Any]:
+        """Parse LLM response into an action."""
+        response = self._strip_think_block(response)
+        pattern = r'<action\s+type="(\w+)">\s*(.*?)\s*</action>'
+        match = re.search(pattern, response, re.DOTALL | re.IGNORECASE)
+
+        if match:
+            action_type = match.group(1).lower()
+            content = match.group(2).strip()
+
+            if "your natural language query here" in content.lower() or "your answer here" in content.lower():
+                logger.warning("LLM output example text instead of actual content, falling through to recovery")
+            elif action_type in ("query", "answer", "give_up"):
+                return {"type": action_type, "content": content}
+
+        # Fallback: try to infer intent
+        response_lower = response.lower()
+
+        if any(phrase in response_lower for phrase in ["my answer is", "the answer is", "i conclude"]):
+            return {"type": "answer", "content": self._extract_answer(response)}
+
+        query = self._extract_query(response)
+        if query:
+            return {"type": "query", "content": query}
+
+        logger.warning(f"Could not parse action from response: {response[:200]}...")
+        return {"type": "give_up", "content": f"Parsing failed: {response[:100]}"}
+
+    def _extract_answer(self, response: str) -> str:
+        """Try to extract an answer from unstructured response."""
+        patterns = [
+            r"(?:my answer is|the answer is|i conclude)[:\s]+(.+?)(?:\.|$)",
+            r"(?:yes|no)[,\s]*(.+)?",
+        ]
+
+        for pattern in patterns:
+            match = re.search(pattern, response, re.IGNORECASE)
+            if match:
+                return match.group(0).strip()
+
+        sentences = response.split(".")
+        return sentences[-1].strip() if sentences else response[:100]
+
+    def _extract_query(self, response: str) -> Optional[str]:
+        """Try to extract a query from unstructured response."""
+        patterns = [
+            r"(?:give me|show me|get|request|sample)[:\s]+(.+?)(?:\.|$)",
+            r"(?:observe|intervention|do\()[:\s]*(.+?)(?:\.|$)",
+        ]
+
+        for pattern in patterns:
+            match = re.search(pattern, response, re.IGNORECASE)
+            if match:
+                return match.group(0).strip()
+
+        return None
+
+
+# -----------------------------------------------------------------------------
+# CLI for testing
+# -----------------------------------------------------------------------------
+
+if __name__ == "__main__":
+    import argparse
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    )
+
+    print("Testing ScientistAgent (causal)...")
+
+    from schemas import VariableInfo
+
+    world_info = WorldInfo(
+        story="You are investigating a causal system relating smoking, lung cancer, and tar deposits.",
+        variables=[
+            VariableInfo("Smoking", "Whether the patient smokes", ["yes", "no"]),
+            VariableInfo("TarDeposits", "Level of tar deposits in lungs", ["low", "medium", "high"]),
+            VariableInfo("LungCancer", "Whether the patient has lung cancer", ["yes", "no"]),
+        ]
+    )
+
+    question = Question(
+        question_type="causal_effect",
+        question_text="Does 'Smoking' have a causal effect on 'LungCancer'?",
+        ground_truth=True,
+    )
+
+    print("Loading LLM...")
+    llm = ScientistLLM(model_name="Qwen/Qwen2.5-3B-Instruct")
+
+    scientist = ScientistAgent(llm=llm)
+    scientist.initialize(world_info, question, max_queries=5)
+
+    print("\nGetting first action...")
+    action = scientist.get_next_action()
+    print(f"Action type: {action['type']}")
+    print(f"Content: {action['content']}")
