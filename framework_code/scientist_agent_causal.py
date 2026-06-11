@@ -69,7 +69,7 @@ class ScientistLLM:
     """
     model_name: str = "Qwen/Qwen2.5-7B-Instruct"
     device: Optional[str] = None
-    max_new_tokens: int = 1536
+    max_new_tokens: int = 4096
     temperature: float = 0.3
     top_p: float = 0.9
 
@@ -218,7 +218,7 @@ class ScientistAgent:
         system_prompt = self._SYSTEM_PROMPT
         user_prompt = self._get_decision_user_prompt()
 
-        response = self.llm.generate(system_prompt, user_prompt, max_new_tokens=1536)
+        response = self.llm.generate(system_prompt, user_prompt)
         logger.debug(f"Scientist raw response:\n{response}")
 
         reasoning = self._extract_reasoning(response)
@@ -228,6 +228,27 @@ class ScientistAgent:
         self._update_memory_from_response(response)
 
         action = self._parse_action(response)
+
+        # Truncation recovery: if the response has content but no parseable
+        # action tag (model was too verbose and got cut off), ask it to emit
+        # just the action tag in a short follow-up call.
+        if (action["type"] == "give_up"
+                and "Parsing failed" in action.get("content", "")
+                and response.strip()):
+            logger.warning("Response appears truncated — requesting action completion.")
+            completion = self.llm.generate(
+                "You are a discovery scientist. Output ONLY the action tag, nothing else.",
+                f"Your previous response was cut off before the <action> tag. "
+                f"Based on your reasoning below, output ONLY the appropriate "
+                f"action tag now.\n\n{response[-2000:]}\n\n"
+                f"Reply with EXACTLY one line:\n"
+                f'<action type="query|answer|give_up">your query or answer</action>',
+            )
+            retry_action = self._parse_action(completion)
+            if retry_action["type"] != "give_up":
+                logger.info("Truncation recovery succeeded: %s", retry_action["type"])
+                action = retry_action
+                response = response + "\n[COMPLETION]\n" + completion
 
         action["raw_response"] = response
         action["reasoning"] = reasoning
@@ -549,46 +570,39 @@ class ScientistAgent:
     # Prompt Construction
     # -------------------------------------------------------------------------
 
-    _SYSTEM_PROMPT = """You are a discovery scientist. Your goal is to determine relationships between variables in an unknown causal graph by collecting and analyzing data.
+    _SYSTEM_PROMPT = """You are a discovery scientist. Your goal is to answer the question you are given by collecting and analyzing data from an unknown system. Read the question carefully and decide for yourself what kind of answer it is asking for and what approach will get you there.
 
 AVAILABLE ACTIONS (choose one each turn):
-1. QUERY - Request data to test hypotheses. Set N to be a number of samples that is sufficient and specify if you want:
-   - Observational: "Give me N observational samples of variables A, B, C" (reveals correlations only)
-   - Interventional: "Give me N samples of A. B, and X where we intervene to set X=value" (reveals causal effects of X)
-2. ANSWER - Submit your final answer when confident:
-   - For Yes/No questions: answer "Yes" or "No"
-   - For listing questions: provide the specific variable names in a list
-3. GIVE_UP - If the question cannot be answered with available resources
+1. QUERY - Request data. Choose a sample size that is sufficient for the analysis you plan to run, but not wasteful. Specify the kind of data:
+   - Observational: "Give me N observational samples of variables A, B, C"
+     → samples drawn from the system's natural data-generating process; reveals
+       how variables jointly behave (associations, correlations).
+   - Interventional: "Give me N samples of A, B, and X where we intervene to set X=value"
+     → samples where X is fixed to the given value, severing X's incoming edges;
+       reveals the downstream effect of fixing X.
+2. ANSWER - Submit your final answer when confident. Match the form the question implies (a Yes/No, a single variable, a list, a label, etc.). Variable names must match the VARIABLES catalog exactly.
+3. GIVE_UP - If the question cannot be answered with available resources.
 
-CAUSAL DISCOVERY STRATEGY:
+HOW TO THINK:
 
-Think like a scientist running experiments.
+Think like a scientist running experiments. Different questions call for different
+approaches — choose the data type and analysis that actually answers what is being
+asked, rather than defaulting to one recipe.
 
-You have two tools:
-1. Observational data → shows correlations
-2. Interventions do(X=value) → shows causal effects
-
-Key ideas:
-
-- Correlation alone cannot determine causation.
-- To test if X causes Y:
-    → change X (using do(X=...))
-    → see if Y changes
-
-Interpretation:
-- If Y changes when X is changed → X causally affects Y
-- If Y does NOT change → X does NOT cause Y
-- If X and Y are correlated but no effect under intervention → likely common cause
+Two general principles to keep in mind:
+  - Correlation in observational data is not the same as a causal effect.
+  - Interventional data reveals what happens when you fix a variable, which is
+    a different question from how variables co-vary in the wild.
 
 Strategy:
-1. Start with observational data to find which variables are related
-2. Use interventions to test causal direction
-3. Focus only on variables relevant to the question
-4. Prefer the smallest experiment that can answer the question. Use N to be statistically sufficient but not excessive.
+1. Restate what the question is asking and what kind of evidence would settle it.
+2. Choose data (observational / interventional) and a sample size accordingly.
+3. Focus only on variables relevant to the question.
+4. Prefer the smallest experiment that can answer the question.
 
 Before answering, ensure:
-- You directly tested the claim using interventions
-- Your conclusion is based on observed changes, not assumptions
+- You actually collected the kind of data that can answer this question.
+- Your conclusion is grounded in observed evidence, not assumption.
 
 OUTPUT FORMAT (required, in this exact order):
 <reasoning>[Analysis, updated understanding, hypothesis, decision rationale]</reasoning>

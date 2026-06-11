@@ -1,20 +1,17 @@
 """
 run_zero_shot.py
 
-Zero-shot baseline: present the world description (story, variables, question)
-directly to an LLM and demand an answer — no data queries allowed.
+Zero-shot baseline using a reduced version of the scientist agent's prompt.
+Only the "answer" action type is available — no data queries, no code execution.
+The LLM must reason about causal structure from domain knowledge alone.
+
+Prompt + extraction logic mirrors scientist_agent_causal.ScientistAgent so that
+zero-shot is a clean ablation of the full agent (everything but data access).
 
 Usage:
-    # Run on all worlds in out_bn/
     python run_zero_shot.py --worlds-dir ../dataset_generation_code/out_bn
-
-    # Run on a single world JSON
     python run_zero_shot.py --world-json ../dataset_generation_code/out_bn/world_Education_n10_seed1003.json
-
-    # Use a specific model
-    python run_zero_shot.py --worlds-dir ../dataset_generation_code/out_bn --model Qwen/Qwen2.5-7B-Instruct
-
-    # Custom output path
+    python run_zero_shot.py --worlds-dir ../dataset_generation_code/out_bn --backend openai --model gpt-4o
     python run_zero_shot.py --worlds-dir ../dataset_generation_code/out_bn -o ./results/zero_shot.json
 """
 
@@ -44,32 +41,63 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 class OpenAIZeroShotLLM:
-    """Zero-shot LLM backed by an OpenAI-compatible API."""
+    """Zero-shot LLM backed by an OpenAI-compatible API.
+
+    Auto-applies per-model sampling presets from world_model_causal
+    (Qwen3.6 thinking-mode, gpt-oss) unless explicit kwargs override.
+    Captures reasoning_content (chain of thought) into self.last_reasoning
+    when the server exposes it (vLLM with --reasoning-parser).
+    """
     def __init__(self, model_name: str = "gpt-4o",
                  base_url: Optional[str] = None,
                  api_key: Optional[str] = None,
                  max_new_tokens: int = 1024,
-                 temperature: float = 0.1):
+                 temperature: Optional[float] = None,
+                 top_p: Optional[float] = None,
+                 extra_body: Optional[Dict[str, Any]] = None,
+                 use_preset: bool = True):
         from openai import OpenAI
+        from world_model_causal import resolve_preset
+
         self.model_name = model_name
         self.max_new_tokens = max_new_tokens
-        self.temperature = temperature
+
+        preset = resolve_preset(model_name) if use_preset else None
+        self.temperature = temperature if temperature is not None else (
+            preset["temperature"] if preset else 0.1)
+        self.top_p = top_p if top_p is not None else (
+            preset["top_p"] if preset else 1.0)
+        self.extra_body = extra_body if extra_body is not None else (
+            dict(preset["extra_body"]) if preset and "extra_body" in preset else None)
+
         resolved_key = api_key or os.environ.get("OPENAI_API_KEY", "EMPTY")
         resolved_base = base_url or os.environ.get("OPENAI_BASE_URL")
         self.client = OpenAI(api_key=resolved_key, base_url=resolved_base)
-        logger.info(f"OpenAI zero-shot LLM ready — model={model_name}")
+        self.last_reasoning: Optional[str] = None
+        logger.info(
+            f"OpenAI zero-shot LLM ready — model={model_name}, "
+            f"temperature={self.temperature}, top_p={self.top_p}, "
+            f"extra_body={self.extra_body}, preset={'yes' if preset else 'no'}"
+        )
 
     def generate(self, system_prompt: str, user_prompt: str) -> str:
-        response = self.client.chat.completions.create(
-            model=self.model_name,
-            messages=[
+        kwargs: Dict[str, Any] = {
+            "model": self.model_name,
+            "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            max_tokens=self.max_new_tokens,
-            temperature=self.temperature,
-        )
-        return response.choices[0].message.content.strip()
+            "max_tokens": self.max_new_tokens,
+            "temperature": self.temperature,
+            "top_p": self.top_p,
+        }
+        if self.extra_body:
+            kwargs["extra_body"] = self.extra_body
+        response = self.client.chat.completions.create(**kwargs)
+        msg = response.choices[0].message
+        self.last_reasoning = getattr(msg, "reasoning_content", None)
+        content = msg.content or ""
+        return content.strip()
 
 
 class ZeroShotLLM:
@@ -128,57 +156,109 @@ class ZeroShotLLM:
 
 
 # ---------------------------------------------------------------------------
-# Prompt construction
+# Prompt construction — reduced scientist prompt (answer-only)
 # ---------------------------------------------------------------------------
 
 SYSTEM_PROMPT = """\
-You are an expert in causal inference and Bayesian networks.
-You will be given a description of a scenario, a list of variables, and a question about the causal structure.
-You must answer the question using ONLY your prior knowledge and reasoning — you have no access to data.
+You are a discovery scientist. Your goal is to determine relationships between variables in an unknown causal graph.
 
-IMPORTANT RULES:
-- You MUST first write out your step-by-step reasoning about the causal relationships. Explain which variables are connected, what paths exist, and why your answer follows from the structure.
-- After your reasoning, give your final answer inside <answer>...</answer> tags.
-- For Yes/No questions, answer with exactly "Yes" or "No" inside the tags.
-- For list questions (e.g., "which variables…", "what is the Markov blanket…"), list the variable names separated by commas inside the tags.
-- For single-variable questions, answer with just the variable name inside the tags.
-- The reasoning MUST come before the <answer> tags. Do NOT skip the reasoning."""
+You have NO access to data — you cannot request observational or interventional samples. You must reason from domain knowledge alone.
+
+AVAILABLE ACTIONS:
+1. ANSWER - Submit your final answer:
+   - For Yes/No questions: answer "Yes" or "No"
+   - For listing questions: provide the specific variable names in a list
+
+CAUSAL DISCOVERY STRATEGY:
+
+Think like a scientist reasoning about experiments.
+
+You have two conceptual tools (but NO data access):
+1. Observational data → shows correlations
+2. Interventions do(X=value) → shows causal effects
+
+Key ideas:
+
+- Correlation alone cannot determine causation.
+- To test if X causes Y:
+    → change X (using do(X=...))
+    → see if Y changes
+
+Interpretation:
+- If Y changes when X is changed → X causally affects Y
+- If Y does NOT change → X does NOT cause Y
+- If X and Y are correlated but no effect under intervention → likely common cause
+
+Since you have no data, you must use your domain knowledge to reason about:
+- Which variables are likely causally connected based on the domain
+- What the likely causal directions are
+- Whether variables are independent or dependent
+
+Before answering, ensure:
+- Your conclusion is based on careful causal reasoning about the domain
+- You have considered alternative causal structures
+
+OUTPUT FORMAT (required, in this exact order):
+<reasoning>[Analysis, updated understanding, hypothesis, decision rationale]</reasoning>
+<action type="answer">[Your final answer]</action>
+Do NOT copy the example text — write your actual analysis and actual answer."""
 
 
 def build_user_prompt(world: Dict[str, Any], question: Dict[str, Any]) -> str:
-    """Build the user prompt from world JSON and a question dict."""
+    """Build the user prompt from world JSON and a question dict.
+
+    Mirrors the structure of ScientistAgent._get_decision_user_prompt() from
+    scientist_agent_causal.py, but with no query history, budget, or data
+    sections (zero-shot: domain-knowledge reasoning only).
+    """
     lines = []
 
-    # Story
-    lines.append("SCENARIO:")
-    lines.append(world["story"])
+    # SECTION 1: GOAL (same as scientist agent)
+    lines.append("════════════════════════════════════════════════════════════════════════════════")
+    lines.append(f"YOUR QUESTION: {question['question']}")
+    lines.append("════════════════════════════════════════════════════════════════════════════════")
     lines.append("")
 
-    # Variables
-    lines.append("VARIABLES IN THE SYSTEM:")
+    # SECTION 2: VARIABLES (same as scientist agent — full catalog)
+    lines.append("AVAILABLE VARIABLES (use exact names and state values for interventions):")
     for var in world["variables"]:
         states = ", ".join(var["values"])
-        lines.append(f"- {var['name']}: {var['desc']} (possible values: {states})")
+        desc = var.get("desc", "")
+        if desc:
+            lines.append(f"  {var['name']}: {desc} (states: {states})")
+        else:
+            lines.append(f"  {var['name']} (states: {states})")
     lines.append("")
 
-    # Non-intervenable info (gives domain context)
-    if world.get("non_intervenable_variables"):
-        lines.append("NON-INTERVENABLE VARIABLES (cannot be experimentally manipulated):")
-        ni_vars = world["non_intervenable_variables"]
-        # Handle both list-of-dicts and dict formats
-        if isinstance(ni_vars, list):
-            for entry in ni_vars:
-                lines.append(f"- {entry['name']}: {entry['reason']}")
-        elif isinstance(ni_vars, dict):
-            for name, reason in ni_vars.items():
-                lines.append(f"- {name}: {reason}")
+    story = world.get("story", "")
+    if story:
+        lines.append(f"CONTEXT: {story}")
         lines.append("")
 
-    # Question
-    lines.append("QUESTION:")
-    lines.append(question["question"])
+    # SECTION 3: CONSTRAINTS (non-intervenable variables, matching scientist agent)
+    if world.get("non_intervenable_variables"):
+        ni_vars = world["non_intervenable_variables"]
+        lines.append("INTERVENTION LIMITS — Cannot intervene on (non-manipulable variables):")
+        if isinstance(ni_vars, list):
+            for entry in ni_vars:
+                lines.append(f"  - {entry['name']}: {entry['reason']}")
+        elif isinstance(ni_vars, dict):
+            for name, reason in ni_vars.items():
+                lines.append(f"  - {name}: {reason}")
+    else:
+        lines.append("INTERVENTION LIMITS: All variables are intervenable")
     lines.append("")
-    lines.append("First, explain your reasoning step by step. Then provide your final answer inside <answer>...</answer> tags.")
+
+    # SECTION 4: NO DATA NOTICE (replaces query history / latest result)
+    lines.append("─── NO DATA AVAILABLE ───")
+    lines.append("You have no access to observational or interventional data.")
+    lines.append("You must reason from domain knowledge alone.")
+    lines.append("")
+
+    # ASSEMBLE (same closing as scientist agent)
+    lines.append("=" * 80)
+    lines.append("Now: Use your domain knowledge and causal reasoning to answer the question.")
+    lines.append("Output: <reasoning> and <action type=\"answer\"> blocks (in that order).")
 
     return "\n".join(lines)
 
@@ -188,18 +268,38 @@ def build_user_prompt(world: Dict[str, Any], question: Dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 
 def extract_answer(response: str) -> str:
-    """Extract the content inside <answer>...</answer> tags."""
+    """Extract the content from <action type="answer">...</action> tags."""
+    # Strip think blocks (Qwen / DeepSeek-R1 style). Belt-and-suspenders even
+    # when the server uses --reasoning-parser to route them out of .content.
+    response = re.sub(r'<think>.*?</think>', '', response, flags=re.DOTALL).strip()
+
+    match = re.search(
+        r'<action\s+type="answer">\s*(.*?)\s*</action>',
+        response, re.DOTALL | re.IGNORECASE,
+    )
+    if match:
+        return match.group(1).strip()
+
+    # Fallback: try <answer>...</answer>
     match = re.search(r'<answer>(.*?)</answer>', response, re.DOTALL | re.IGNORECASE)
     if match:
         return match.group(1).strip()
-    # Fallback: try to get the last line
+
+    # Last resort: last non-empty line
     lines = [l.strip() for l in response.strip().split('\n') if l.strip()]
     return lines[-1] if lines else response.strip()
 
 
 def extract_reasoning(response: str) -> str:
-    """Return everything before the <answer> tag as the reasoning text."""
-    match = re.search(r'<answer>', response, re.IGNORECASE)
+    """Extract the content from <reasoning>...</reasoning> tags."""
+    response = re.sub(r'<think>.*?</think>', '', response, flags=re.DOTALL).strip()
+
+    match = re.search(r'<reasoning>(.*?)</reasoning>', response, re.DOTALL)
+    if match:
+        return match.group(1).strip()
+
+    # Fallback: everything before the <action> tag
+    match = re.search(r'<action', response, re.IGNORECASE)
     if match:
         return response[:match.start()].strip()
     return response.strip()
@@ -259,6 +359,7 @@ def run_zero_shot(worlds: List, llm: ZeroShotLLM) -> List[Dict[str, Any]]:
                 "world_name": world_name,
                 "topic": world.get("meta", {}).get("topic", ""),
                 "n_nodes": world.get("meta", {}).get("n_nodes", 0),
+                "topology": world.get("meta", {}).get("topology", ""),
                 "question_id": q_id,
                 "question_text": question["question"],
                 "question_type": question.get("question_type", ""),
@@ -287,8 +388,9 @@ def main():
                         help="Directory containing world_*.json files")
     parser.add_argument("--world-json", default=None,
                         help="Path to a single world JSON file")
-    parser.add_argument("--backend", choices=["local", "openai", "bedrock"], default="local",
-                        help="'local' = HuggingFace model, 'openai' = OpenAI-compatible API, 'bedrock' = AWS Bedrock")
+    parser.add_argument("--backend", choices=["local", "openai", "bedrock", "gemini"], default="local",
+                        help="'local' = HuggingFace model, 'openai' = OpenAI-compatible API, "
+                             "'bedrock' = AWS Bedrock, 'gemini' = Google AI Studio / Vertex")
     parser.add_argument("--model", default=None,
                         help="Model name (HuggingFace id for local, or e.g. gpt-4o for openai). "
                              "Defaults to Qwen/Qwen2.5-7B-Instruct for local.")
@@ -296,7 +398,7 @@ def main():
                         help="API base URL for openai backend (falls back to OPENAI_BASE_URL)")
     parser.add_argument("--api-key", default=None,
                         help="API key for openai backend (falls back to OPENAI_API_KEY)")
-    parser.add_argument("--max-new-tokens", type=int, default=1024)
+    parser.add_argument("--max-new-tokens", type=int, default=4096)
     parser.add_argument("--temperature", type=float, default=0.1)
     parser.add_argument("-o", "--output", default=None,
                         help="Output JSON path (default: ./results/zero_shot_<timestamp>.json)")
@@ -340,6 +442,16 @@ def main():
             max_new_tokens=args.max_new_tokens,
             temperature=args.temperature,
         )
+    elif args.backend == "gemini":
+        if not args.model:
+            logger.error("--model is required for gemini backend (e.g. gemini-3-pro-preview)")
+            sys.exit(1)
+        from gemini_llm import GeminiLLM
+        llm = GeminiLLM(
+            model_id=args.model,
+            max_new_tokens=args.max_new_tokens,
+            temperature=args.temperature,
+        )
     else:
         model_name = args.model or "Qwen/Qwen2.5-7B-Instruct"
         llm = ZeroShotLLM(
@@ -373,6 +485,7 @@ def main():
         payload = {
             "run_metadata": {
                 "model": args.model,
+                "backend": args.backend,
                 "worlds_source": args.worlds_dir or args.world_json,
                 "timestamp": run_ts,
                 "temperature": args.temperature,
@@ -380,6 +493,7 @@ def main():
                 "question_group": group_name,
                 "n_worlds": len(worlds),
                 "n_questions": len(group_results),
+                "prompt_type": "scientist_sub_prompt",
             },
             "results": group_results,
         }

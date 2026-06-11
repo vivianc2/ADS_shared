@@ -52,28 +52,42 @@ class Turn:
     llm_transcript: Optional[List[Dict[str, Any]]] = None
     # Structured record of each code execution: [{"code": ..., "output": ...}, ...]
     code_rounds: Optional[List[Dict[str, str]]] = None
+    # Per-turn phase summary (populated by modular CoderScientistAgentNew)
+    phase_summary: Optional[Dict[str, Any]] = None
+    sample_usage_after: Optional[Dict[str, Any]] = None
+    limit_event: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
-        d = {
+        # Order keys so the most informative fields (turn summary, action, reasoning)
+        # come first and the bulky transcripts come last.
+        d: Dict[str, Any] = {
             "turn_number": self.turn_number,
             "turn_type": self.turn_type,
-            "scientist_input": self.scientist_input,
-            "world_output": self.world_output,
-            "parsed_query": self.parsed_query,
             "timestamp": self.timestamp,
         }
-        if self.raw_llm_response is not None:
-            d["raw_llm_response"] = self.raw_llm_response
+        if self.phase_summary is not None:
+            d["phase_summary"] = self.phase_summary
+        if self.limit_event is not None:
+            d["limit_event"] = self.limit_event
+        d["scientist_input"] = self.scientist_input
         if self.reasoning is not None:
             d["reasoning"] = self.reasoning
         if self.scientist_memory is not None:
             d["scientist_memory"] = self.scientist_memory
+        if self.parsed_query is not None:
+            d["parsed_query"] = self.parsed_query
         if self.data_summary is not None:
             d["data_summary"] = self.data_summary
-        if self.llm_transcript is not None:
-            d["llm_transcript"] = self.llm_transcript
+        if self.sample_usage_after is not None:
+            d["sample_usage_after"] = self.sample_usage_after
+        if self.world_output is not None:
+            d["world_output"] = self.world_output
         if self.code_rounds is not None:
             d["code_rounds"] = self.code_rounds
+        if self.raw_llm_response is not None:
+            d["raw_llm_response"] = self.raw_llm_response
+        if self.llm_transcript is not None:
+            d["llm_transcript"] = self.llm_transcript
         return d
 
 
@@ -92,6 +106,8 @@ class ExperimentResult:
     scientist_model: Optional[str] = None
     world_model_name: Optional[str] = None
     dataset_file: Optional[str] = None
+    resource_limits: Optional[Dict[str, Any]] = None
+    resource_usage: Optional[Dict[str, Any]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         d: Dict[str, Any] = {}
@@ -102,6 +118,51 @@ class ExperimentResult:
             d["world_model"] = self.world_model_name
         if self.dataset_file is not None:
             d["dataset_file"] = self.dataset_file
+        if self.resource_limits is not None:
+            d["resource_limits"] = self.resource_limits
+        if self.resource_usage is not None:
+            d["resource_usage"] = self.resource_usage
+
+        # ── High-level experiment summary (computed from turns) ───────────────
+        turn_dicts = [t.to_dict() for t in self.turns]
+        phase_summaries = [
+            t.get("phase_summary") for t in turn_dicts if t.get("phase_summary")
+        ]
+        total_code_rounds = sum(p.get("code_rounds_this_turn", 0) for p in phase_summaries)
+        total_code_errors = sum(p.get("code_errors_this_turn", 0) for p in phase_summaries)
+        total_llm_calls = sum(p.get("n_llm_calls", 0) for p in phase_summaries)
+        code_rounds_per_turn = [
+            {
+                "turn": p.get("turn_number"),
+                "phases": p.get("phases_run"),
+                "code_rounds": p.get("code_rounds_this_turn", 0),
+                "code_errors": p.get("code_errors_this_turn", 0),
+                "confidence_after": p.get("confidence_after_turn"),
+                "action": p.get("action_type"),
+            }
+            for p in phase_summaries
+        ]
+        confidence_trajectory = [
+            p.get("confidence_after_turn") for p in phase_summaries
+            if p.get("confidence_after_turn") is not None
+        ]
+        final_confidence = confidence_trajectory[-1] if confidence_trajectory else None
+
+        d["experiment_summary"] = {
+            "outcome": "correct" if self.is_correct else "incorrect",
+            "total_turns": len(self.turns),
+            "total_queries_used": self.total_queries,
+            "max_queries": self.max_queries,
+            "total_llm_calls": total_llm_calls,
+            "total_code_rounds": total_code_rounds,
+            "total_code_errors": total_code_errors,
+            "final_confidence": final_confidence,
+            "confidence_trajectory": confidence_trajectory,
+            "per_turn": code_rounds_per_turn,
+        }
+        if self.resource_usage is not None:
+            d["experiment_summary"]["resource_usage"] = self.resource_usage
+
         d.update({
             "question": self.question.to_dict(),
             "scientist_answer": self.scientist_answer,
@@ -110,7 +171,7 @@ class ExperimentResult:
             "total_queries": self.total_queries,
             "max_queries": self.max_queries,
             "final_scientist_memory": self.final_scientist_memory,
-            "turns": [t.to_dict() for t in self.turns],
+            "turns": turn_dicts,
         })
         return d
     
@@ -140,15 +201,22 @@ class Orchestrator:
     scientist_model: Optional[str] = None
     world_model_name: Optional[str] = None
     dataset_file: Optional[str] = None
+    limit_variant: str = "none"
+    max_turns: Optional[int] = None
+    max_total_samples: Optional[int] = None
+    max_samples_per_query: Optional[int] = None
+    sample_accounting: str = "rows"
 
     # Internal state
     _turns: List[Turn] = field(default_factory=list, init=False)
     _query_count: int = field(default=0, init=False)
     _experiment_id: str = field(default="", init=False)
+    _final_turn_warning_sent: bool = field(default=False, init=False)
+    _limit_stop_reason: Optional[str] = field(default=None, init=False)
     
     def __post_init__(self):
         Path(self.log_dir).mkdir(parents=True, exist_ok=True)
-        self._experiment_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self._experiment_id = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     
     def run(self) -> ExperimentResult:
         """
@@ -160,26 +228,119 @@ class Orchestrator:
         logger.info(f"Starting experiment {self._experiment_id}")
         logger.info(f"Question: {self.question.question_text}")
         logger.info(f"Budget: {self.max_queries} queries")
+        if hasattr(self.world_model, "reset_sample_usage"):
+            self.world_model.reset_sample_usage()
+        self._configure_world_model_limits()
         
         # Step 1: Initialize scientist with world info and question
         world_info = self.world_model.get_world_info()
         self.scientist.initialize(world_info, self.question, self.max_queries)
+        self.scientist.receive_system_message(self._resource_limits_message())
         
         # Step 2: Main interaction loop
+        forced_answer_retries = 0
+        MAX_FORCED_RETRIES = 2  # after this many budget-exhausted prompts, give up
+        failed_query_retries = 0
+        MAX_FAILED_QUERY_RETRIES = 8  # validation/parser failures do not spend budget
         while True:
+            if self._would_exceed_turn_limit():
+                answer = self._force_limit_give_up("max_turns_exhausted")
+                break
+            self._warn_if_final_turn()
+
             # Get scientist's next action
             action = self.scientist.get_next_action()
 
             if action["type"] == "query":
+                if self._is_final_allowed_turn():
+                    self._limit_stop_reason = "final_turn_query_not_executed"
+                    forced_action = dict(action)
+                    forced_action["type"] = "give_up"
+                    forced_action["content"] = (
+                        "Final turn query was not executed. The scientist asked for "
+                        f"data on turn {len(self._turns) + 1}/{self.max_turns}; "
+                        "no later turn would be available to analyze it. "
+                        f"Requested query: {action.get('content', '')}"
+                    )
+                    self._log_answer_turn(
+                        forced_action,
+                        limit_event="final_turn_query_not_executed",
+                    )
+                    answer = "GIVE_UP: " + forced_action["content"]
+                    break
+
                 # Process query
                 if self._query_count >= self.max_queries:
                     # Budget exhausted - force answer
-                    logger.warning("Query budget exhausted, forcing answer")
+                    forced_answer_retries += 1
+                    if forced_answer_retries > MAX_FORCED_RETRIES:
+                        logger.error(
+                            f"Scientist refused to answer after {forced_answer_retries} "
+                            f"budget-exhausted prompts; converting last response into forced answer."
+                        )
+                        forced_action = dict(action)
+                        forced_action["type"] = "answer"
+                        # Prefer reasoning/memory if content is just a query stub
+                        forced_action["content"] = (
+                            action.get("content")
+                            or action.get("reasoning")
+                            or action.get("raw_response", "")[:500]
+                            or "FORCED_ANSWER: scientist failed to comply"
+                        )
+                        self._log_answer_turn(
+                            forced_action,
+                            limit_event="max_queries_exhausted_forced_answer",
+                        )
+                        answer = forced_action["content"]
+                        break
+                    logger.warning(
+                        f"Query budget exhausted, forcing answer "
+                        f"(attempt {forced_answer_retries}/{MAX_FORCED_RETRIES})"
+                    )
                     self._notify_budget_exhausted()
                     continue
 
                 result = self._process_query(action)
                 self.scientist.receive_result(result)
+                if self.limit_variant == "samples":
+                    self.scientist.receive_system_message(self._sample_usage_message())
+                if result.success:
+                    failed_query_retries = 0
+                else:
+                    failed_query_retries += 1
+                    err = result.error_message or "unknown query failure"
+                    logger.warning(
+                        f"Failed query retry {failed_query_retries}/"
+                        f"{MAX_FAILED_QUERY_RETRIES}: {err}"
+                    )
+                    self.scientist.receive_system_message(
+                        "<query_failed>\n"
+                        f"Your last query failed and returned no data: {err}\n"
+                        "Design a different valid query. "
+                        f"{self._sample_retry_instruction()}\n"
+                        "</query_failed>"
+                    )
+                    if failed_query_retries >= MAX_FAILED_QUERY_RETRIES:
+                        give_up_action = {
+                            "type": "give_up",
+                            "content": (
+                                "Too many consecutive failed data queries "
+                                f"({failed_query_retries}). Last error: {err}"
+                            ),
+                            "raw_response": action.get("raw_response"),
+                            "reasoning": action.get("reasoning"),
+                            "scientist_memory": action.get("scientist_memory"),
+                            "llm_transcript": action.get("llm_transcript"),
+                            "code_rounds": action.get("code_rounds"),
+                            "phase_summary": action.get("phase_summary"),
+                        }
+                        self._log_answer_turn(
+                            give_up_action,
+                            limit_event="too_many_failed_queries",
+                        )
+                        answer = "GIVE_UP: " + give_up_action["content"]
+                        logger.error(answer)
+                        break
 
                 # Update the turn's data_summary with the full statistical summary
                 # computed by the scientist during receive_result
@@ -222,6 +383,8 @@ class Orchestrator:
             scientist_model=self.scientist_model,
             world_model_name=self.world_model_name,
             dataset_file=self.dataset_file,
+            resource_limits=self._resource_limits_dict(),
+            resource_usage=self._resource_usage_dict(),
         )
         
         # Save logs
@@ -230,6 +393,143 @@ class Orchestrator:
         logger.info(f"Experiment complete. Correct: {is_correct}. Log: {log_path}")
         
         return result
+
+    def _configure_world_model_limits(self) -> None:
+        """Apply resolved sample limits to the world model if it supports them."""
+        if hasattr(self.world_model, "max_total_samples"):
+            self.world_model.max_total_samples = self.max_total_samples
+        if hasattr(self.world_model, "max_samples_per_query"):
+            self.world_model.max_samples_per_query = self.max_samples_per_query
+        if hasattr(self.world_model, "sample_accounting"):
+            self.world_model.sample_accounting = self.sample_accounting
+
+    def _resource_limits_dict(self) -> Dict[str, Any]:
+        return {
+            "limit_variant": self.limit_variant,
+            "max_turns": self.max_turns,
+            "max_total_samples": self.max_total_samples,
+            "max_samples_per_query": self.max_samples_per_query,
+            "sample_accounting": self.sample_accounting,
+        }
+
+    def _resource_usage_dict(self) -> Dict[str, Any]:
+        sample_usage = {}
+        if hasattr(self.world_model, "get_sample_usage"):
+            sample_usage = self.world_model.get_sample_usage()
+        units = sample_usage.get("sample_units_used", 0)
+        return {
+            "turns_used": len(self._turns),
+            "sample_rows_used": sample_usage.get("sample_rows_used", 0),
+            "sample_cells_used": sample_usage.get("sample_cells_used", 0),
+            "sample_units_used": units,
+            "sample_accounting": sample_usage.get("sample_accounting", self.sample_accounting),
+            "limit_stop_reason": self._limit_stop_reason,
+        }
+
+    def _resource_limits_message(self) -> str:
+        lines = ["<resource_limits>"]
+        if self.limit_variant == "rounds":
+            lines.append(
+                f"Round-limited run: you have at most {self.max_turns} outer "
+                "scientist turns total. Query, failed query, final answer, and "
+                "give_up each count as one turn."
+            )
+            lines.append(
+                "On the final allowed turn you must answer or give up. A query "
+                "on the final turn will not be executed because there is no "
+                "later turn to analyze it."
+            )
+        elif self.limit_variant == "samples":
+            lines.append(
+                "Sample-limited run: query count is still available, but total "
+                "data collection is budgeted separately."
+            )
+            lines.append(
+                f"Total sample budget: {self.max_total_samples} "
+                f"{self.sample_accounting} per question."
+            )
+            if self.max_samples_per_query is not None:
+                lines.append(
+                    f"Per-query sample budget: {self.max_samples_per_query} "
+                    f"{self.sample_accounting}."
+                )
+            lines.append(
+                "For multi-condition intervention requests, each condition consumes "
+                "its own rows. Over-budget queries return no data."
+            )
+        else:
+            lines.append("No extra round or total-sample ablation limit is active.")
+        lines.append("</resource_limits>")
+        return "\n".join(lines)
+
+    def _would_exceed_turn_limit(self) -> bool:
+        return self.max_turns is not None and len(self._turns) >= self.max_turns
+
+    def _is_final_allowed_turn(self) -> bool:
+        return self.max_turns is not None and len(self._turns) + 1 >= self.max_turns
+
+    def _warn_if_final_turn(self) -> None:
+        if (
+            self.max_turns is not None
+            and len(self._turns) + 1 == self.max_turns
+            and not self._final_turn_warning_sent
+        ):
+            self._final_turn_warning_sent = True
+            self.scientist.receive_system_message(
+                "<final_turn>\n"
+                f"This is turn {self.max_turns}/{self.max_turns}, the final "
+                "allowed scientist turn. Do not request more data. Submit your "
+                "final answer now, or give up if the evidence is insufficient.\n"
+                "</final_turn>"
+            )
+
+    def _force_limit_give_up(self, reason: str) -> str:
+        self._limit_stop_reason = reason
+        action = {
+            "type": "give_up",
+            "content": f"Resource limit reached before a final answer: {reason}",
+        }
+        self._log_answer_turn(action, limit_event=reason)
+        logger.warning(action["content"])
+        return "GIVE_UP: " + action["content"]
+
+    def _sample_retry_instruction(self) -> str:
+        if not hasattr(self.world_model, "get_sample_usage"):
+            return "Keep sample size <= 10000."
+        usage = self.world_model.get_sample_usage()
+        remaining = usage.get("sample_units_remaining")
+        if self.max_total_samples is not None and remaining is not None:
+            return (
+                f"Remaining sample budget: {remaining} {self.sample_accounting}. "
+                f"Ask for <= {remaining} {self.sample_accounting}, or answer from "
+                "existing data."
+            )
+        if self.max_samples_per_query is not None:
+            return (
+                f"Keep each query <= {self.max_samples_per_query} "
+                f"{self.sample_accounting}."
+            )
+        max_samples = getattr(self.world_model, "max_samples", 10000)
+        return f"Keep sample size <= {max_samples}."
+
+    def _sample_usage_message(self) -> str:
+        if not hasattr(self.world_model, "get_sample_usage"):
+            return "<sample_budget>Sample usage unavailable.</sample_budget>"
+        usage = self.world_model.get_sample_usage()
+        remaining = usage.get("sample_units_remaining")
+        remaining_text = (
+            "unlimited"
+            if remaining is None
+            else f"{remaining} {usage.get('sample_accounting', self.sample_accounting)}"
+        )
+        return (
+            "<sample_budget>\n"
+            f"Sample usage so far: {usage.get('sample_units_used', 0)} "
+            f"{usage.get('sample_accounting', self.sample_accounting)}. "
+            f"Remaining: {remaining_text}.\n"
+            "Future queries that exceed the remaining sample budget will return no data.\n"
+            "</sample_budget>"
+        )
     
     def _process_query(self, action: Dict[str, Any]) -> QueryResult:
         """Process a query through the world model, logging enhanced metadata."""
@@ -253,6 +553,10 @@ class Orchestrator:
             data_summary = result.preview
 
         # Log the turn with enhanced metadata
+        sample_usage = None
+        if hasattr(self.world_model, "get_sample_usage"):
+            sample_usage = self.world_model.get_sample_usage()
+
         turn = Turn(
             turn_number=len(self._turns) + 1,
             turn_type="query",
@@ -265,13 +569,22 @@ class Orchestrator:
             data_summary=data_summary,
             llm_transcript=action.get("llm_transcript"),
             code_rounds=action.get("code_rounds"),
+            phase_summary=action.get("phase_summary"),
+            sample_usage_after=sample_usage,
         )
         self._turns.append(turn)
 
         return result
 
-    def _log_answer_turn(self, action: Dict[str, Any]) -> None:
+    def _log_answer_turn(
+        self,
+        action: Dict[str, Any],
+        limit_event: Optional[str] = None,
+    ) -> None:
         """Log an answer or give_up turn with enhanced metadata."""
+        sample_usage = None
+        if hasattr(self.world_model, "get_sample_usage"):
+            sample_usage = self.world_model.get_sample_usage()
         turn = Turn(
             turn_number=len(self._turns) + 1,
             turn_type=action["type"],
@@ -283,9 +596,12 @@ class Orchestrator:
             scientist_memory=action.get("scientist_memory"),
             llm_transcript=action.get("llm_transcript"),
             code_rounds=action.get("code_rounds"),
+            phase_summary=action.get("phase_summary"),
+            sample_usage_after=sample_usage,
+            limit_event=limit_event,
         )
         self._turns.append(turn)
-    
+
     def _notify_budget_exhausted(self) -> None:
         """Notify scientist that query budget is exhausted."""
         message = f"""<budget_exhausted>
@@ -297,12 +613,29 @@ You must now provide your final answer based on the data you have collected.
     def _evaluate_answer(self, answer: str, ground_truth: Any) -> bool:
         """
         Evaluate if the scientist's answer matches ground truth.
-        
-        This is a simple implementation - can be extended for different question types.
+
+        For advanced_* question types (dict/list-of-dict ground truths), we
+        delegate to evaluate_zero_shot.evaluate_answer so the per-experiment
+        `is_correct` flag agrees with the batch-level evaluator.
         """
+        qtype = getattr(self.question, "question_type", "") or ""
+        if qtype.startswith("advanced_"):
+            try:
+                from evaluate_zero_shot import evaluate_answer as _adv_eval
+                all_vars = list(self.world_model.simulator.get_nodes())
+                return bool(_adv_eval(
+                    answer, ground_truth,
+                    all_var_names=all_vars,
+                    question_type=qtype,
+                )["correct"])
+            except Exception as e:
+                logger.warning(f"advanced eval failed ({type(e).__name__}: {e}); "
+                               f"marking incorrect")
+                return False
+
         # Normalize answer
         answer_normalized = answer.strip().lower()
-        
+
         # Handle different ground truth types
         if isinstance(ground_truth, bool):
             # Yes/No questions

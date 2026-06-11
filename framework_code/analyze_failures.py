@@ -64,7 +64,7 @@ CORRECTNESS_QUALITY = [
     "unclear",        # Cannot determine from the log
 ]
 
-DEFAULT_BEDROCK_MODEL = "us.anthropic.claude-opus-4-6-v1"
+DEFAULT_BEDROCK_MODEL = "us.anthropic.claude-opus-4-7"
 MAX_LOG_CHARS = 12_000   # truncation limit per log sent to LLM
 MAX_TURNS_DETAIL = 10    # show all turns up to this many; summarise beyond
 

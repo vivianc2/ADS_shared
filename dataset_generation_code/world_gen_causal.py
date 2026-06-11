@@ -495,7 +495,12 @@ def generate_world(
     names = [v["name"] for v in var_specs]
 
     # 2) Edge candidates (chunked)
-    target_edges = int(edge_multiplier * n_nodes)
+    # For very small graphs (<=5 nodes), randomly pick 2 or 3 edges to get structural variety;
+    # otherwise use the standard edge_multiplier formula.
+    if n_nodes <= 5:
+        target_edges = rng.choice([2, 3])
+    else:
+        target_edges = int(edge_multiplier * n_nodes)
     candidates = get_edge_candidates_chunked(
         llm, topic, names,
         target_edges=target_edges,
@@ -578,7 +583,7 @@ def generate_world(
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--topic", type=str, default=None)
-    ap.add_argument("--n_nodes", type=int, default=30, choices=[10, 20, 30])
+    ap.add_argument("--n_nodes", type=int, default=30)
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--outdir", type=str, default="./out_bn_causal")
     ap.add_argument("--model", type=str, default="Qwen/Qwen2.5-7B-Instruct")

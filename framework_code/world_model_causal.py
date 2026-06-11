@@ -182,6 +182,47 @@ class QwenLLM:
         return response
 
 
+# Per-model sampling presets. Matched by case-insensitive substring against
+# model_name; first match wins, so order from most-specific to most-general.
+_MODEL_PRESETS: List[Dict[str, Any]] = [
+    {
+        # Qwen3.6 thinking-mode recommended sampling (qwenlm.github.io)
+        "match": "qwen3.6",
+        "temperature": 1.0,
+        "top_p": 0.95,
+        "extra_body": {"top_k": 20, "min_p": 0.0},
+    },
+    {
+        # gpt-oss recommended sampling
+        "match": "gpt-oss",
+        "temperature": 1.0,
+        "top_p": 1.0,
+        "extra_body": {"top_k": 0, "min_p": 0.0},
+    },
+    {
+        # DeepSeek V4 Pro thinking mode — enables internal reasoning.
+        # reasoning_effort + thinking.type=enabled are passed via extra_body so
+        # they survive any OpenAI-SDK kwarg validation.
+        "match": "deepseek-v4-pro",
+        "temperature": 1.0,
+        "top_p": 0.95,
+        "extra_body": {
+            "reasoning_effort": "high",
+            "thinking": {"type": "enabled"},
+        },
+    },
+]
+
+
+def resolve_preset(model_name: str) -> Optional[Dict[str, Any]]:
+    """Return the first preset whose 'match' is a case-insensitive substring of model_name."""
+    name = (model_name or "").lower()
+    for preset in _MODEL_PRESETS:
+        if preset["match"].lower() in name:
+            return preset
+    return None
+
+
 @dataclass
 class OpenAILLM:
     """
@@ -195,17 +236,27 @@ class OpenAILLM:
         base_url: API base URL.  Falls back to env var ``OPENAI_BASE_URL``.
         api_key: API key.  Falls back to env var ``OPENAI_API_KEY``.
         max_new_tokens: Default max tokens to generate.
-        temperature: Sampling temperature.
-        top_p: Nucleus sampling parameter.
+        temperature: Sampling temperature. None → use model preset (else 0.3).
+        top_p: Nucleus sampling parameter. None → use model preset (else 0.9).
+        extra_body: Extra params forwarded to the API (top_k, min_p, etc.).
+            None → use model preset's extra_body.
+        use_preset: If True (default), auto-apply per-model sampling presets
+            for known models (Qwen3.6, gpt-oss). Explicit kwargs win.
+        capture_reasoning: If True, store response.choices[0].message.reasoning_content
+            on self.last_reasoning so callers can log the chain of thought.
     """
     model_name: str = "gpt-oss-20b"
     base_url: Optional[str] = None
     api_key: Optional[str] = None
-    max_new_tokens: int = 1536
-    temperature: float = 0.3
-    top_p: float = 0.9
+    max_new_tokens: int = 4096
+    temperature: Optional[float] = None
+    top_p: Optional[float] = None
+    extra_body: Optional[Dict[str, Any]] = None
+    use_preset: bool = True
+    capture_reasoning: bool = True
 
     client: Any = field(default=None, init=False, repr=False)
+    last_reasoning: Optional[str] = field(default=None, init=False, repr=False)
 
     def __post_init__(self):
         from openai import OpenAI
@@ -213,13 +264,23 @@ class OpenAILLM:
         resolved_base = self.base_url or os.environ.get("OPENAI_BASE_URL")
         resolved_key = self.api_key or os.environ.get("OPENAI_API_KEY", "EMPTY")
 
+        # Resolve sampling params: explicit kwargs win, else preset, else defaults.
+        preset = resolve_preset(self.model_name) if self.use_preset else None
+        if self.temperature is None:
+            self.temperature = preset["temperature"] if preset else 0.3
+        if self.top_p is None:
+            self.top_p = preset["top_p"] if preset else 0.9
+        if self.extra_body is None and preset and "extra_body" in preset:
+            self.extra_body = dict(preset["extra_body"])
+
         self.client = OpenAI(
             base_url=resolved_base,
             api_key=resolved_key,
         )
         logger.info(
-            f"OpenAILLM ready — model={self.model_name}, "
-            f"base_url={resolved_base}"
+            f"OpenAILLM ready — model={self.model_name}, base_url={resolved_base}, "
+            f"temperature={self.temperature}, top_p={self.top_p}, "
+            f"extra_body={self.extra_body}, preset={'yes' if preset else 'no'}"
         )
 
     def generate(
@@ -243,14 +304,30 @@ class OpenAILLM:
         max_new_tokens: Optional[int] = None,
     ) -> str:
         """Generate a response from a full message list (supports multi-turn)."""
-        response = self.client.chat.completions.create(
-            model=self.model_name,
-            messages=messages,
-            max_tokens=max_new_tokens or self.max_new_tokens,
-            temperature=self.temperature,
-            top_p=self.top_p,
-        )
-        return response.choices[0].message.content.strip()
+        kwargs: Dict[str, Any] = {
+            "model": self.model_name,
+            "messages": messages,
+            "max_tokens": max_new_tokens or self.max_new_tokens,
+            "temperature": self.temperature,
+            "top_p": self.top_p,
+        }
+        if self.extra_body:
+            kwargs["extra_body"] = self.extra_body
+
+        response = self.client.chat.completions.create(**kwargs)
+        msg = response.choices[0].message
+        reasoning = getattr(msg, "reasoning_content", None)
+        if self.capture_reasoning:
+            self.last_reasoning = reasoning
+        content = msg.content or ""
+        if not content.strip() and reasoning:
+            logger.warning(
+                "OpenAILLM: content is empty but reasoning_content is present "
+                "(%d chars) — using reasoning_content as response.",
+                len(reasoning),
+            )
+            content = reasoning
+        return content.strip()
 
 
 # -----------------------------------------------------------------------------
@@ -278,6 +355,9 @@ class WorldModel:
     max_samples: int = 10000
     default_samples: int = 100
     preview_rows: int = 10
+    max_total_samples: Optional[int] = None
+    max_samples_per_query: Optional[int] = None
+    sample_accounting: str = "rows"
 
     # Variable descriptions (semantic meanings)
     variable_descriptions: Dict[str, str] = field(default_factory=dict)
@@ -290,11 +370,15 @@ class WorldModel:
 
     # Internal state
     _query_counter: int = field(default=0, init=False)
+    _sample_rows_used: int = field(default=0, init=False)
+    _sample_cells_used: int = field(default=0, init=False)
 
     def __post_init__(self):
         out = Path(self.output_dir).expanduser().resolve()
         out.mkdir(parents=True, exist_ok=True)
         self.output_dir = str(out)
+        if self.sample_accounting not in ("rows", "cells"):
+            raise ValueError("sample_accounting must be 'rows' or 'cells'")
         logger.info(f"WorldModel initialized. Output dir: {self.output_dir}")
 
     # -------------------------------------------------------------------------
@@ -328,8 +412,10 @@ class WorldModel:
             logger.info(f"Parsed: {parsed.query_type.value}, n={parsed.n_samples}")
 
             self._validate_query(parsed)
+            self._validate_sample_budget(parsed)
 
             df = self._execute_query(parsed, seed=seed)
+            self._record_sample_usage(df)
 
             result = self._create_success_result(parsed, df, query_id)
             return result
@@ -395,6 +481,30 @@ class WorldModel:
     def set_non_intervenable_variables(self, non_intervenable: Dict[str, str]) -> None:
         """Set which variables cannot be intervened upon."""
         self.non_intervenable_variables = non_intervenable
+
+    def reset_sample_usage(self) -> None:
+        """Reset total sample accounting for a new question/experiment."""
+        self._sample_rows_used = 0
+        self._sample_cells_used = 0
+
+    def get_sample_usage(self) -> Dict[str, Any]:
+        """Return current cumulative sample usage."""
+        units = (
+            self._sample_rows_used
+            if self.sample_accounting == "rows"
+            else self._sample_cells_used
+        )
+        remaining = None
+        if self.max_total_samples is not None:
+            remaining = max(0, self.max_total_samples - units)
+        return {
+            "sample_rows_used": self._sample_rows_used,
+            "sample_cells_used": self._sample_cells_used,
+            "sample_units_used": units,
+            "sample_accounting": self.sample_accounting,
+            "max_total_samples": self.max_total_samples,
+            "sample_units_remaining": remaining,
+        }
 
     # -------------------------------------------------------------------------
     # Query Parsing (LLM-powered)
@@ -605,6 +715,59 @@ Parse this query into the JSON format. Output ONLY <json>...</json>."""
                 "Observational query should not have interventions"
             )
 
+    def _estimate_requested_sample_usage(self, parsed: ParsedQuery) -> Dict[str, int]:
+        """Estimate rows/cells before execution for budget validation."""
+        n_conditions = (
+            len(parsed.interventions)
+            if parsed.query_type == QueryType.INTERVENTIONAL
+            else 1
+        )
+        rows = parsed.n_samples * n_conditions
+        n_variables = (
+            len(parsed.variables)
+            if parsed.variables is not None
+            else len(self.simulator.get_nodes())
+        )
+        cells = rows * n_variables
+        units = rows if self.sample_accounting == "rows" else cells
+        return {"rows": rows, "cells": cells, "units": units}
+
+    def _validate_sample_budget(self, parsed: ParsedQuery) -> None:
+        """Reject queries that exceed per-query or remaining total sample budgets."""
+        requested = self._estimate_requested_sample_usage(parsed)
+
+        if self.max_samples_per_query is not None and requested["units"] > self.max_samples_per_query:
+            raise QueryValidationError(
+                "Sample budget exceeded: requested "
+                f"{requested['units']} {self.sample_accounting} in one query, "
+                f"per-query limit is {self.max_samples_per_query}."
+            )
+
+        if self.max_total_samples is None:
+            return
+
+        used = (
+            self._sample_rows_used
+            if self.sample_accounting == "rows"
+            else self._sample_cells_used
+        )
+        remaining = max(0, self.max_total_samples - used)
+        if requested["units"] > remaining:
+            raise QueryValidationError(
+                "Sample budget exceeded: requested "
+                f"{requested['units']} {self.sample_accounting}, only "
+                f"{remaining} {self.sample_accounting} remain. Ask for <= "
+                f"{remaining} {self.sample_accounting} or answer from existing data."
+            )
+
+    def _record_sample_usage(self, df: pd.DataFrame) -> None:
+        """Account by actual returned rows/cells after successful execution."""
+        rows = len(df)
+        data_columns = [c for c in df.columns if c != "__intervention__"]
+        cells = rows * len(data_columns)
+        self._sample_rows_used += rows
+        self._sample_cells_used += cells
+
     # -------------------------------------------------------------------------
     # Query Execution
     # -------------------------------------------------------------------------
@@ -660,7 +823,7 @@ Parse this query into the JSON format. Output ONLY <json>...</json>."""
         query_id: int,
     ) -> QueryResult:
         """Create a successful QueryResult."""
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         filename = f"query_{query_id:04d}_{parsed.query_type.value}_{timestamp}.csv"
         filepath = Path(self.output_dir) / filename
 
@@ -676,6 +839,15 @@ Parse this query into the JSON format. Output ONLY <json>...</json>."""
             n_rows=len(df),
             columns=list(df.columns),
             preview=preview,
+            sample_rows=len(df),
+            sample_cells=len(df) * len([c for c in df.columns if c != "__intervention__"]),
+            sample_units=(
+                len(df)
+                if self.sample_accounting == "rows"
+                else len(df) * len([c for c in df.columns if c != "__intervention__"])
+            ),
+            sample_accounting=self.sample_accounting,
+            sample_usage_after=self.get_sample_usage(),
         )
 
     def _create_error_result(
@@ -697,6 +869,8 @@ Parse this query into the JSON format. Output ONLY <json>...</json>."""
             success=False,
             query=parsed,
             error_message=f"[{error_type}] {error_message}",
+            sample_accounting=self.sample_accounting,
+            sample_usage_after=self.get_sample_usage(),
         )
 
 

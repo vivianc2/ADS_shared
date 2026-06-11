@@ -26,10 +26,12 @@ from typing import Any, Dict, List, Optional
 
 import numpy as np
 import pandas as pd
-import torch
 from scipy.stats import chi2_contingency
 import scipy.stats as scipy_stats
-from transformers import AutoModelForCausalLM, AutoTokenizer
+
+# NOTE: torch / transformers are intentionally deferred (imported inside ScientistLLM)
+# so that spawn-based code execution children re-import this module without paying
+# ~5 s of torch+transformers startup cost each round.
 
 from schemas import Question, QueryResult, WorldInfo
 
@@ -37,7 +39,11 @@ logger = logging.getLogger(__name__)
 
 MAX_CODE_ROUNDS = 8          # max code actions per outer turn
 MAX_CODE_OUTPUT_CHARS = 3000 # truncate long outputs
-CODE_TIMEOUT_SECONDS = 30    # kill runaway code
+CODE_TIMEOUT_SECONDS = 45    # kill runaway code — bumped from 30 s to absorb spawn startup
+# Cross-round state cap: drop DataFrames / large arrays and any var >1 MiB pickled.
+# Small scalars / dicts / summary results still flow across rounds.
+_MAX_VAR_PICKLE_BYTES = 1_000_000
+_MAX_NDARRAY_ELEMS = 10_000
 
 # Match any <action type="X">...</action> tag (strict: requires closing tag)
 _ACTION_RE = re.compile(
@@ -63,6 +69,17 @@ _FENCE_RE  = re.compile(r"^```[a-z]*\n?", re.MULTILINE)
 # Names injected by _build_exec_namespace — skip when propagating state back to parent
 _INJECTED_NAMES = frozenset({"pd", "np", "stats", "chi2_contingency", "query_files"})
 
+
+def _has_python_error(output: str) -> bool:
+    """Detect a failed / timed-out code execution from the captured stdout."""
+    return "[PYTHON ERROR]" in output or output.startswith("[TIMEOUT")
+
+
+def _extract_tag(response: str, tag: str) -> str:
+    """Extract the first <tag>…</tag> block, empty string if missing."""
+    m = re.search(rf"<{tag}>(.*?)</{tag}>", response, re.DOTALL | re.IGNORECASE)
+    return m.group(1).strip() if m else ""
+
 # Forced terminal prompt injected when the code-round limit is reached.
 # Appended to the last env-output message so the model has full context first,
 # then a hard, unambiguous demand for a terminal action.
@@ -79,6 +96,26 @@ Or: <action type="give_up">reason</action>
 
 Do NOT output <action type="code"> — it will NOT be executed.
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"""
+
+
+_FORMAT_REPAIR_PROMPT = """\
+Your previous response could not be parsed because it was empty or did not
+contain a valid <action> block.
+
+Return exactly ONE valid action block now. Put the action first. Do not include
+any prose before it.
+
+Valid formats:
+<action type="query">Give me N observational samples of variables A, B</action>
+<action type="query">Give me N samples of variables A, B where we intervene to set X=value</action>
+<action type="code">python code here</action>
+<action type="answer">final answer here</action>
+<action type="give_up">brief reason</action>
+
+Then optionally include:
+<reasoning>brief reason</reasoning>
+<scientist_memory>Tested: ... Known: ... Uncertain: ... Next: ...</scientist_memory>
+"""
 
 
 class _SafeQueryDict(dict):
@@ -117,6 +154,106 @@ class _SafeQueryDict(dict):
 # Code execution helper
 # -----------------------------------------------------------------------------
 
+def _code_worker(code, query_files_map, extra_vars, result_q):
+    """Top-level (spawn-pickleable) worker. Runs in a fresh Python process.
+
+    Keeps torch/transformers out of the child: re-importing the agent module on spawn
+    triggers module-level imports here, so they must not pull in heavy ML libs.
+    Forks-after-CUDA / BLAS-mutex deadlocks that plagued the fork-based version cannot
+    occur because the child starts from a clean interpreter.
+    """
+    import os
+    os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+    os.environ.setdefault("MKL_NUM_THREADS", "1")
+    os.environ.setdefault("OMP_NUM_THREADS", "1")
+    os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+
+    import contextlib
+    import io
+    import pickle
+    import traceback
+
+    import numpy as _np
+    import pandas as _pd
+    import scipy.stats as _stats
+    from scipy.stats import chi2_contingency as _chi2
+
+    class _ChildSafeQueryDict(dict):
+        def __setitem__(self, key, value):
+            if key in self:
+                raise TypeError(
+                    f"query_files is read-only — do not assign to it. "
+                    f"Use query_{key}_csv (already pre-loaded) to read the file."
+                )
+            raise TypeError(
+                f"query_files is read-only and query {key} has not been received yet. "
+                f"Available query numbers: {sorted(self.keys())}. "
+                f"Request more data first with an <action type=\"query\">."
+            )
+
+        def __missing__(self, key):
+            raise KeyError(
+                f"{key!r} not in query_files. "
+                f"Available query numbers: {sorted(self.keys())}. "
+                f"Only access files listed in AVAILABLE DATA FILES."
+            )
+
+    qf = _ChildSafeQueryDict()
+    ns = {
+        "pd": _pd,
+        "np": _np,
+        "stats": _stats,
+        "chi2_contingency": _chi2,
+        "query_files": qf,
+    }
+    for qn, path in query_files_map.items():
+        ns[f"query_{qn}_csv"] = path
+        dict.__setitem__(qf, qn, path)
+    ns.update(extra_vars)
+
+    buf = io.StringIO()
+    error = None
+    try:
+        with contextlib.redirect_stdout(buf):
+            exec(code, ns)  # noqa: S102
+    except Exception:
+        error = traceback.format_exc()
+
+    output = buf.getvalue()
+    if error:
+        output += f"\n[PYTHON ERROR]\n{error}"
+
+    new_vars: Dict[str, Any] = {}
+    dropped = []
+    for k, v in ns.items():
+        if k in _INJECTED_NAMES or k.startswith("__"):
+            continue
+        if k.startswith("query_") and k.endswith("_csv"):
+            continue
+        if isinstance(v, (_pd.DataFrame, _pd.Series)):
+            dropped.append(k)
+            continue
+        if isinstance(v, _np.ndarray) and v.size > _MAX_NDARRAY_ELEMS:
+            dropped.append(k)
+            continue
+        try:
+            data = pickle.dumps(v)
+        except Exception:
+            continue
+        if len(data) > _MAX_VAR_PICKLE_BYTES:
+            dropped.append(k)
+            continue
+        new_vars[k] = v
+
+    if dropped:
+        output += (
+            f"\n[NOTE: variables not carried to next round (too large — re-read / "
+            f"recompute if needed): {', '.join(sorted(dropped))}]"
+        )
+
+    result_q.put((output, new_vars))
+
+
 def _execute_code(
     code: str,
     namespace: Dict[str, Any],
@@ -124,45 +261,48 @@ def _execute_code(
     max_chars: int = MAX_CODE_OUTPUT_CHARS,
 ) -> str:
     """
-    Execute Python code in a child process with a hard-killable timeout.
+    Execute Python code in a spawned child process with a hard-killable timeout.
     New variables created by the code are propagated back to the namespace.
+
+    Uses "spawn" (not "fork") so the child does not inherit the parent's CUDA context,
+    tokenizers thread pool, or BLAS mutex state — all of which previously caused
+    `pd.read_csv` to deadlock under the fork-based implementation.
     """
+    import pickle
+
     code = _FENCE_RE.sub("", code).replace("```", "").strip()
 
-    # Suppress HuggingFace tokenizers deadlock warning that appears when forking
-    # after the tokenizer's Rust parallelism has been initialised by the LLM.
-    # The child never uses tokenizers, so disabling parallelism there is harmless.
-    os.environ["TOKENIZERS_PARALLELISM"] = "false"
-    ctx = mp.get_context("fork")
-    result_q = ctx.Queue()
-
-    def _run():
-        import contextlib, io, traceback, pickle  # noqa: E401
-        buf = io.StringIO()
-        error = None
-        try:
-            with contextlib.redirect_stdout(buf):
-                exec(code, namespace)  # noqa: S102
-        except Exception:
-            error = traceback.format_exc()
-
-        output = buf.getvalue()
-        if error:
-            output += f"\n[PYTHON ERROR]\n{error}"
-
-        new_vars: Dict[str, Any] = {}
-        for k, v in namespace.items():
-            if k in _INJECTED_NAMES or k.startswith("__"):
-                continue
+    query_files_map: Dict[int, str] = {}
+    extra_vars: Dict[str, Any] = {}
+    for k, v in namespace.items():
+        if k in _INJECTED_NAMES or k.startswith("__"):
+            continue
+        if k.startswith("query_") and k.endswith("_csv") and isinstance(v, str):
             try:
-                pickle.dumps(v)
-                new_vars[k] = v
-            except Exception:
+                qn = int(k[len("query_"):-len("_csv")])
+                query_files_map[qn] = v
+                continue
+            except ValueError:
                 pass
+        if isinstance(v, (pd.DataFrame, pd.Series)):
+            continue
+        if isinstance(v, np.ndarray) and v.size > _MAX_NDARRAY_ELEMS:
+            continue
+        try:
+            data = pickle.dumps(v)
+        except Exception:
+            continue
+        if len(data) > _MAX_VAR_PICKLE_BYTES:
+            continue
+        extra_vars[k] = v
 
-        result_q.put((output, new_vars))
-
-    proc = ctx.Process(target=_run, daemon=True)
+    ctx = mp.get_context("spawn")
+    result_q = ctx.Queue()
+    proc = ctx.Process(
+        target=_code_worker,
+        args=(code, query_files_map, extra_vars, result_q),
+        daemon=True,
+    )
     proc.start()
     proc.join(timeout=timeout)
 
@@ -171,10 +311,11 @@ def _execute_code(
         proc.join()
         return f"[TIMEOUT: execution exceeded {timeout}s — possible infinite loop]"
 
-    if result_q.empty():
+    try:
+        out, new_vars = result_q.get(timeout=1.0)
+    except Exception:
         return "[Process ended without output — possible crash]"
 
-    out, new_vars = result_q.get_nowait()
     namespace.update(new_vars)
 
     if not out.strip():
@@ -195,7 +336,7 @@ class ScientistLLM:
     """HuggingFace LLM wrapper (identical API to scientist_agent.ScientistLLM)."""
     model_name: str = "Qwen/Qwen2.5-7B-Instruct"
     device: Optional[str] = None
-    max_new_tokens: int = 1536
+    max_new_tokens: int = 4096
     temperature: float = 0.3
     top_p: float = 0.9
 
@@ -204,6 +345,8 @@ class ScientistLLM:
     _device: str = field(default="cpu", init=False, repr=False)
 
     def __post_init__(self):
+        import torch
+        from transformers import AutoModelForCausalLM, AutoTokenizer
         self._device = (
             "cuda" if torch.cuda.is_available() else "cpu"
         ) if self.device is None else self.device
@@ -230,6 +373,7 @@ class ScientistLLM:
 
     def generate_messages(self, messages: List[Dict[str, Any]],
                           max_new_tokens: Optional[int] = None) -> str:
+        import torch
         input_ids = self.tokenizer.apply_chat_template(
             messages, add_generation_prompt=True, return_tensors="pt",
         ).to(self._device)
@@ -284,6 +428,13 @@ class CoderScientistAgent:
     _system_messages: List[str] = field(default_factory=list, init=False)
     _scientist_memory: str = field(default="", init=False)
 
+    # Analysis counters — populated into phase_summary each turn and rolled up
+    # into experiment_summary by the orchestrator.
+    _turn_number: int = field(default=0, init=False)
+    _total_code_rounds: int = field(default=0, init=False)
+    _total_code_errors: int = field(default=0, init=False)
+    _total_llm_calls: int = field(default=0, init=False)
+
     def initialize(self, world_info: WorldInfo, question: Question,
                    max_queries: int) -> None:
         self.world_info = world_info
@@ -293,6 +444,10 @@ class CoderScientistAgent:
         self._queries_made = 0
         self._system_messages = []
         self._scientist_memory = ""
+        self._turn_number = 0
+        self._total_code_rounds = 0
+        self._total_code_errors = 0
+        self._total_llm_calls = 0
         logger.info(f"CoderScientistAgent initialized. Question: {question.question_text}")
 
     # -------------------------------------------------------------------------
@@ -305,16 +460,18 @@ class CoderScientistAgent:
 
         Returns dict with:
             type, content, raw_response, reasoning, scientist_memory,
-            code_rounds, llm_transcript
+            code_rounds, llm_transcript, phase_summary
         """
         if self.world_info is None or self.question is None:
             raise RuntimeError("Agent not initialized. Call initialize() first.")
 
+        self._turn_number += 1
         user_prompt = self._get_user_prompt()
         has_data = any(h.get("data_file") for h in self._query_history)
         logger.info(
-            f"get_next_action: queries_made={self._queries_made}, "
-            f"history_entries={len(self._query_history)}, has_data={has_data}"
+            f"── TURN {self._turn_number} START ── queries_made={self._queries_made}/"
+            f"{self.max_queries}, has_data={has_data}, "
+            f"cum_code_rounds={self._total_code_rounds} (errors={self._total_code_errors})"
         )
         logger.debug(f"USER PROMPT:\n{user_prompt}")
 
@@ -327,11 +484,21 @@ class CoderScientistAgent:
         namespace = self._build_exec_namespace()
 
         final_response = ""
-        code_rounds: List[Dict[str, str]] = []  # [{code, output}, ...]
+        code_rounds: List[Dict[str, Any]] = []  # [{round_num, code, output, errored, ...}]
+        phases_run: List[str] = []
+        llm_calls_this_turn = 0
+        format_repair_used = False
+
+        def _call_llm(label: str) -> str:
+            nonlocal llm_calls_this_turn
+            out = self._strip_think_block(self.llm.generate_messages(messages))
+            llm_calls_this_turn += 1
+            self._total_llm_calls += 1
+            phases_run.append(label)
+            return out
 
         for round_idx in range(MAX_CODE_ROUNDS):
-            response = self.llm.generate_messages(messages)
-            response_clean = self._strip_think_block(response)
+            response_clean = _call_llm(f"round_{round_idx + 1}")
             logger.info(f"LLM response (round {round_idx + 1}):\n{response_clean}")
 
             messages.append({"role": "assistant", "content": response_clean})
@@ -351,9 +518,56 @@ class CoderScientistAgent:
                         "using lenient extraction fallback"
                     )
                 else:
-                    # No recognisable action at all — treat as final
-                    final_response = response_clean
-                    break
+                    # No recognisable action at all. Some OpenAI-compatible
+                    # reasoning models occasionally return empty content or
+                    # plain prose ("We need to run code") despite the required
+                    # XML contract. Give them one immediate repair chance inside
+                    # the loop so a repaired code action can still execute.
+                    if not format_repair_used:
+                        logger.warning(
+                            "Round %d: no valid action block; requesting one format repair",
+                            round_idx + 1,
+                        )
+                        messages.append({
+                            "role": "user",
+                            "content": (
+                                _FORMAT_REPAIR_PROMPT
+                                + "\n\nPrevious unparseable response:\n"
+                                + (response_clean if response_clean.strip() else "[empty response]")
+                            ),
+                        })
+                        response_clean = _call_llm(f"round_{round_idx + 1}_format_repair")
+                        logger.info(
+                            "LLM format-repair response (round %d):\n%s",
+                            round_idx + 1,
+                            response_clean,
+                        )
+                        messages.append({"role": "assistant", "content": response_clean})
+                        format_repair_used = True
+
+                        m = _ACTION_RE.search(response_clean)
+                        if m:
+                            action_type = m.group(1).lower()
+                            action_content = m.group(2).strip()
+                        else:
+                            m_code = _CODE_OPEN_RE.search(response_clean)
+                            if m_code:
+                                action_type = "code"
+                                action_content = m_code.group(1).strip()
+                                logger.warning(
+                                    "Round %d repair: <action type='code'> missing </action> — "
+                                    "using lenient extraction fallback",
+                                    round_idx + 1,
+                                )
+                            else:
+                                # Still unparseable — treat as final and let
+                                # the normal parser produce the give_up.
+                                final_response = response_clean
+                                break
+                    else:
+                        # No recognisable action and repair already used — treat as final
+                        final_response = response_clean
+                        break
             else:
                 action_type = m.group(1).lower()
                 action_content = m.group(2).strip()
@@ -370,7 +584,22 @@ class CoderScientistAgent:
                     output = _execute_code(action_content, namespace)
                     logger.info(f"Output:\n{output}")
 
-                code_rounds.append({"code": action_content, "output": output})
+                errored = _has_python_error(output)
+                self._total_code_rounds += 1
+                if errored:
+                    self._total_code_errors += 1
+
+                code_rounds.append({
+                    "round_num": round_idx + 1,
+                    "code": action_content,
+                    "output": output,
+                    "errored": errored,
+                    # Per-round reasoning and memory — useful for post-hoc analysis
+                    # of how the agent's thinking evolved across code rounds.
+                    "reasoning": _extract_tag(response_clean, "reasoning"),
+                    "scientist_memory": _extract_tag(response_clean, "scientist_memory"),
+                    "raw_response": response_clean,
+                })
 
                 obs = f"[env]\n{output}".strip()
                 messages.append({"role": "user", "content": obs})
@@ -385,11 +614,14 @@ class CoderScientistAgent:
         # If the loop exhausted all code rounds, the last message is the env output.
         # Append the strong forcing prompt to that message, then call the LLM once
         # more so it can produce a terminal action with full context available.
+        forced_terminal = False
+        last_resort_used = False
         if messages[-1]["role"] == "user":
             messages[-1]["content"] += "\n\n" + _FORCE_TERMINAL_PROMPT
-            extra = self._strip_think_block(self.llm.generate_messages(messages))
+            extra = _call_llm("force_terminal")
             messages.append({"role": "assistant", "content": extra})
             final_response = extra
+            forced_terminal = True
             logger.info(f"Post-loop forced-terminal LLM call:\n{extra}")
 
             # If the model still responds with a code action, make one last-resort call.
@@ -409,9 +641,10 @@ class CoderScientistAgent:
                         "<reasoning>conclusion</reasoning>"
                     ),
                 })
-                last_resort = self._strip_think_block(self.llm.generate_messages(messages))
+                last_resort = _call_llm("last_resort")
                 messages.append({"role": "assistant", "content": last_resort})
                 final_response = last_resort
+                last_resort_used = True
                 logger.info(f"Last-resort terminal call:\n{last_resort}")
 
         # Parse structured output from final response
@@ -422,15 +655,42 @@ class CoderScientistAgent:
         self._update_memory_from_response(final_response)
         action = self._parse_action(final_response)
 
+        code_errors_this_turn = sum(1 for r in code_rounds if r.get("errored"))
+        phase_summary = {
+            "turn_number": self._turn_number,
+            "phases_run": phases_run,
+            "n_llm_calls": llm_calls_this_turn,
+            "code_rounds_this_turn": len(code_rounds),
+            "code_errors_this_turn": code_errors_this_turn,
+            "cumulative_code_rounds": self._total_code_rounds,
+            "cumulative_code_errors": self._total_code_errors,
+            "cumulative_llm_calls": self._total_llm_calls,
+            "hit_code_round_limit": len(code_rounds) == MAX_CODE_ROUNDS,
+            "forced_terminal": forced_terminal,
+            "last_resort_used": last_resort_used,
+            "format_repair_used": format_repair_used,
+            # This agent doesn't emit explicit numeric confidence — left None
+            # so experiment_summary.confidence_trajectory stays empty.
+            "confidence_after_turn": None,
+            "queries_used_so_far": self._queries_made,
+            "queries_remaining": self.max_queries - self._queries_made,
+            "action_type": action["type"],
+        }
+
         action["raw_response"] = final_response
         action["reasoning"] = reasoning
         action["scientist_memory"] = self._scientist_memory
         action["code_rounds"] = code_rounds
         action["llm_transcript"] = messages
+        action["phase_summary"] = phase_summary
 
         logger.info(
-            f"Action: type={action['type']}, content={str(action['content'])[:100]}... "
-            f"(after {len(code_rounds)} code round(s))"
+            f"── TURN {self._turn_number} END ── action={action['type']} "
+            f"content={str(action['content'])[:80]}... | "
+            f"code_rounds={len(code_rounds)} (errors={code_errors_this_turn}) | "
+            f"llm_calls={llm_calls_this_turn}"
+            + (" | FORCED" if forced_terminal else "")
+            + (" | LAST-RESORT" if last_resort_used else "")
         )
         return action
 
@@ -525,7 +785,7 @@ class CoderScientistAgent:
     # -------------------------------------------------------------------------
 
     def _get_system_prompt(self) -> str:
-        return """You are a scientist investigating causal relationships between variables in an unknown system.
+        return """You are a scientist investigating an unknown system. Read the question carefully and decide for yourself what it is asking and what approach will answer it.
 
 You can collect data AND analyze it using Python.
 
@@ -535,52 +795,64 @@ AVAILABLE ACTIONS
 
 Each response must contain EXACTLY ONE action:
 
-1. <action type="code">  
+1. <action type="code">
    Run Python to analyze data you already have (does NOT cost queries)
 
-2. <action type="query">  
+2. <action type="query">
    Request new data (costs one query)
    - Observational: "Give me N observational samples of variables A, B, C"
    - Interventional: "Give me N samples of variables A, B, C where we intervene to set X=value"
 
-3. <action type="answer">  
-   Submit your final answer
+3. <action type="answer">
+   Submit your final answer in the form the question implies. Variable names must
+   match the VARIABLES catalog exactly.
 
-4. <action type="give_up">  
+4. <action type="give_up">
    If the question cannot be answered
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━
 HOW TO THINK
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Think like a scientist running experiments.
+Think like a scientist running experiments. Different questions call for different
+approaches — choose the data and analysis that actually answer what is being asked,
+rather than defaulting to one recipe.
 
-You have two tools:
-- Observational data → shows associations
-- Interventions do(X=value) → shows causal effects
+You have two kinds of data:
+- Observational: drawn from the system's natural data-generating process; reveals
+  how variables jointly behave (associations, correlations).
+- Interventional do(X=v): X is fixed to v while sampling, severing X's incoming
+  edges; reveals the downstream effect of fixing X.
 
-Key ideas:
-- Correlation alone cannot determine causation
-- To test whether X causes Y:
-    → change X
-    → check whether Y changes
-
-Interpretation:
-- If Y changes when X is changed → X causally affects Y
-- If Y does NOT change → X does NOT cause Y
-- If X and Y are correlated but no effect under intervention → likely common cause
-
-Strategy:
-1. Start with observational data to identify relevant variables
-2. Use interventions to test causal direction
-3. Prefer the smallest experiment that answers the question
-4. Use code to directly compare distributions and check whether variables change
+A few principles to keep in mind:
+- Correlation in observational data is not the same as a causal effect.
+- Pick the data type that matches the question; large samples don't fix using the
+  wrong kind of data.
+- Prefer the smallest experiment that can answer the question; use code to compare
+  distributions or compute whatever the question actually needs.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━
 HOW TO USE CODE
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 Use Python ONLY to analyze data you already have.
+
+LOADING DATA — read this carefully:
+  Each successful query pre-loads two things into your Python namespace:
+    - query_N_csv  — a STRING variable holding the absolute path to query N's CSV
+                     (N is the per-experiment query number shown in AVAILABLE DATA FILES,
+                      e.g. query_1_csv, query_2_csv — NOT the long basename like
+                      "query_0019_observational_….csv" shown after `file=` in the comment)
+    - query_files  — a read-only DICT mapping {N: path}, e.g. query_files[1]
+
+  Correct ways to load query N:
+    df = pd.read_csv(query_1_csv)         # bare variable, no quotes
+    df = pd.read_csv(query_files[1])      # dict lookup
+
+  WRONG — these will all raise FileNotFoundError:
+    df = pd.read_csv("query_1_csv")                                  # quoting the variable name
+    df = pd.read_csv("query_0019_observational_20260501_233850.csv") # using the basename literal
+    df = pd.read_csv("/absolute/path/from/world_output.csv")         # don't paste paths from <data_file>
 
 Typical workflow:
 - Load data: df = pd.read_csv(query_1_csv)
@@ -589,23 +861,24 @@ Typical workflow:
 - Compare distributions across conditions:
     df[df["X"]=="a"]["Y"].value_counts(normalize=True)
 
-Key idea:
-- Focus on whether distributions CHANGE, not on statistical tests
-- You do NOT need p-values or complex statistics
-- Simple comparisons (percentages, differences) are sufficient
+DataFrames, Series, and large arrays do NOT carry across code rounds — re-read the CSV
+each round, or print() any value you need later. Small scalars/dicts persist.
+
+Use whatever analysis genuinely fits the question — simple comparisons, summary
+statistics, or formal tests are all fair game. Pick the simplest tool that gives
+you a clear answer.
 
 Do NOT:
 - Simulate interventions in code
 - Overwrite columns to fake experiments
-- Use complicated statistical tests
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━
 BEFORE ANSWERING
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 Ensure:
-- You tested the claim directly (usually via intervention)
-- Your conclusion is based on observed changes
+- You actually collected the kind of data that can answer this question.
+- Your conclusion is grounded in the data you analyzed, not assumption.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━
 OUTPUT FORMAT (REQUIRED)

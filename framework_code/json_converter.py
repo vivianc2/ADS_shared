@@ -120,17 +120,25 @@ class JSONToBIFConverter:
         # Variable name -> states mapping
         for var in self.variables:
             self._var_to_states[var["name"]] = var["values"]
-        
-        # Build parents map from edges
-        for var in self.variables:
-            self._parents_map[var["name"]] = []
-        
-        for parent, child in self.edges:
-            self._parents_map[child].append(parent)
-        
+
         # CPD lookup by child name
         for cpd in self.cpds:
             self._cpd_map[cpd["child"]] = cpd
+
+        # Build parents map.  IMPORTANT: parent order MUST come from the CPD
+        # spec, not from edge-list order.  pgmpy lays out `cpd.values`
+        # column-by-column using the order it was given as `evidence=`, and
+        # `world_gen*.serialize_cpds` preserves that order in `cpd["parents"]`.
+        # Iterating parents in any other order (e.g. edge-insertion order)
+        # silently transposes the CPD when we enumerate parent combinations
+        # for the BIF probability table — producing samples from a different
+        # distribution than the JSON's gold metadata describes.
+        for var in self.variables:
+            cpd = self._cpd_map.get(var["name"])
+            if cpd is not None:
+                self._parents_map[var["name"]] = list(cpd.get("parents", []))
+            else:
+                self._parents_map[var["name"]] = []
     
     def convert(self, output_path: str) -> str:
         """

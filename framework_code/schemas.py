@@ -84,6 +84,11 @@ class QueryResult:
     columns: List[str] = field(default_factory=list)
     preview: str = ""
     error_message: Optional[str] = None
+    sample_rows: int = 0
+    sample_cells: int = 0
+    sample_units: int = 0
+    sample_accounting: str = "rows"
+    sample_usage_after: Optional[Dict[str, Any]] = None
     
     def to_xml(self) -> str:
         """Format result as XML for LLM consumption."""
@@ -101,6 +106,16 @@ class QueryResult:
         if self.success:
             lines.append(f"  <n_samples>{self.n_rows}</n_samples>")
             lines.append(f"  <columns>{', '.join(self.columns)}</columns>")
+            if self.sample_usage_after:
+                remaining = self.sample_usage_after.get("sample_units_remaining")
+                remaining_text = "unlimited" if remaining is None else str(remaining)
+                lines.append(
+                    "  <sample_budget>"
+                    f"{self.sample_usage_after.get('sample_units_used', 0)} "
+                    f"{self.sample_usage_after.get('sample_accounting', self.sample_accounting)} used; "
+                    f"{remaining_text} remaining"
+                    "</sample_budget>"
+                )
             lines.append(f"  <data_file>{self.data_file}</data_file>")
             lines.append(f"  <preview>\n{self.preview}\n  </preview>")
         else:
@@ -118,6 +133,11 @@ class QueryResult:
             "columns": self.columns,
             "preview": self.preview,
             "error_message": self.error_message,
+            "sample_rows": self.sample_rows,
+            "sample_cells": self.sample_cells,
+            "sample_units": self.sample_units,
+            "sample_accounting": self.sample_accounting,
+            "sample_usage_after": self.sample_usage_after,
         }
 
 

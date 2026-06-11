@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 import boto3
+from botocore.config import Config
 
 logger = logging.getLogger(__name__)
 
@@ -48,9 +49,32 @@ class BedrockLLM:
 
     def __post_init__(self):
         region = self.region_name or os.environ.get("AWS_DEFAULT_REGION", "us-west-2")
-        self.client = boto3.client("bedrock-runtime", region_name=region)
+        # Most local runs authenticate via an AWS profile, env credentials, or
+        # a Bedrock API key. If none are present, botocore otherwise waits on
+        # the EC2 metadata endpoint before failing, which is confusing on a
+        # workstation.
+        if os.environ.get("BEDROCK_ALLOW_EC2_METADATA", "").lower() not in {"1", "true", "yes"}:
+            os.environ.setdefault("AWS_EC2_METADATA_DISABLED", "true")
+        connect_timeout = float(os.environ.get("BEDROCK_CONNECT_TIMEOUT", "10"))
+        read_timeout = float(os.environ.get("BEDROCK_READ_TIMEOUT", "120"))
+        max_attempts = int(os.environ.get("BEDROCK_MAX_ATTEMPTS", "3"))
+        config = Config(
+            connect_timeout=connect_timeout,
+            read_timeout=read_timeout,
+            retries={"max_attempts": max_attempts, "mode": "standard"},
+        )
+        self.client = boto3.client(
+            "bedrock-runtime", region_name=region, config=config,
+        )
+        session = boto3.Session()
+        credentials = session.get_credentials()
+        credential_method = getattr(credentials, "method", None) if credentials is not None else None
         logger.info(
-            f"BedrockLLM ready — model={self.model_id}, region={region}"
+            f"BedrockLLM ready — model={self.model_id}, region={region}, "
+            f"read_timeout={read_timeout}s, credential_method={credential_method}, "
+            f"AWS_PROFILE_set={bool(os.environ.get('AWS_PROFILE'))}, "
+            f"AWS_BEARER_TOKEN_BEDROCK_set={bool(os.environ.get('AWS_BEARER_TOKEN_BEDROCK'))}, "
+            f"AWS_EC2_METADATA_DISABLED={os.environ.get('AWS_EC2_METADATA_DISABLED')}"
         )
 
     def _to_bedrock_messages(
@@ -98,17 +122,24 @@ class BedrockLLM:
     ) -> str:
         """Generate a response from a full message list (supports multi-turn)."""
         system_blocks, converse_msgs = self._to_bedrock_messages(messages)
+        inference_config: Dict[str, Any] = {
+            "maxTokens": max_new_tokens or self.max_new_tokens,
+        }
+        if self._supports_temperature():
+            inference_config["temperature"] = self.temperature
 
         kwargs: Dict[str, Any] = {
             "modelId": self.model_id,
             "messages": converse_msgs,
-            "inferenceConfig": {
-                "maxTokens": max_new_tokens or self.max_new_tokens,
-                "temperature": self.temperature,
-            },
+            "inferenceConfig": inference_config,
         }
         if system_blocks:
             kwargs["system"] = system_blocks
 
         response = self.client.converse(**kwargs)
         return response["output"]["message"]["content"][0]["text"].strip()
+
+    def _supports_temperature(self) -> bool:
+        """Some current Bedrock inference profiles reject temperature."""
+        model_id = self.model_id.lower()
+        return "claude-opus-4-7" not in model_id
