@@ -17,7 +17,7 @@ SCRIPT = SCRIPT_DIR / "world_gen_advanced.py"
 DEFAULT_OUTDIR = SCRIPT_DIR / "all_out_bn" / "out_bn_adv_v3_300"
 SEED_BASE = 3000
 BACKEND = "bedrock"
-MODEL = "us.anthropic.claude-opus-4-7"
+MODEL = "us.anthropic.claude-opus-4-6-v1"
 N_NODES = [10, 15]
 MAX_ATTEMPTS_PER_WORLD = 6
 

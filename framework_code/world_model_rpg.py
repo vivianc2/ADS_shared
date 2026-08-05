@@ -485,7 +485,6 @@ class StaticRPGWorldModel:
         try:
             parsed = self._parse_query(query)
             self._validate_query(parsed)
-            self._check_not_duplicate(parsed)
             self._validate_budget(parsed)
             result = self.simulator.run_query(parsed)
             if not result.success:
@@ -498,66 +497,15 @@ class StaticRPGWorldModel:
             result.sample_accounting = self.sample_accounting
             result.sample_usage_after = self.get_sample_usage()
             return result
-        except RPGQueryParseError as exc:
-            return self._error_result(query, f"parse_error: {exc}", "parse_error")
-        except RPGQueryValidationError as exc:
-            # Covers schema/measurement validation, budget exhaustion, and
-            # duplicate-query rejections. Labelling these as "parse_error" (the
-            # old behaviour) made trace analysis misreport budget overspends as
-            # malformed JSON, so keep the cause distinct.
-            return self._error_result(query, f"invalid_query: {exc}", "validation_error")
         except Exception as exc:
-            logger.exception("static RPG query failed")
-            return self._error_result(query, f"{type(exc).__name__}: {exc}", "execution_error")
-
-    def _error_result(self, query: str, message: str, mode: str) -> StaticRPGQueryResult:
-        parsed = StaticRPGParsedQuery(mode=mode, n_units=0, raw_query=query)
-        return StaticRPGQueryResult(
-            success=False,
-            query=parsed,
-            error_message=message,
-            sample_accounting=self.sample_accounting,
-            sample_usage_after=self.get_sample_usage(),
-        )
-
-    @staticmethod
-    def _query_signature(
-        mode: str,
-        measurements: Optional[List[str]],
-        intervention: Dict[str, Any],
-        case_seed: Optional[int] = None,
-    ):
-        meas = tuple(sorted(measurements or []))
-        intv = tuple(sorted((str(k), str(v)) for k, v in (intervention or {}).items()))
-        # case_seed distinguishes individual inspect_unit lookups, which are not
-        # duplicates of each other even with identical measurements.
-        return (mode, meas, intv, case_seed)
-
-    def _check_not_duplicate(self, parsed: StaticRPGParsedQuery) -> None:
-        """Reject a query identical to one already run successfully.
-
-        Re-issuing the same (mode, measurements, intervention) returns no new
-        information and was a major driver of the degeneration loop (the agent
-        re-querying to "re-see" data it had lost from context). n_units is
-        ignored on purpose: resampling the same shape is the wasteful pattern we
-        want to stop. This raises before budget/execution, so it costs neither a
-        successful query nor cells -- only the turn that issued it.
-        """
-        sig = self._query_signature(
-            parsed.mode, parsed.measurements, parsed.intervention, parsed.case_seed
-        )
-        for i, rec in enumerate(self._successful_query_records, 1):
-            rec_sig = self._query_signature(
-                rec.get("mode", ""), rec.get("measurements"), rec.get("intervention") or {},
-                rec.get("case_seed"),
+            parsed = StaticRPGParsedQuery(mode="parse_error", n_units=0, raw_query=query)
+            return StaticRPGQueryResult(
+                success=False,
+                query=parsed,
+                error_message=str(exc),
+                sample_accounting=self.sample_accounting,
+                sample_usage_after=self.get_sample_usage(),
             )
-            if rec_sig == sig:
-                raise RPGQueryValidationError(
-                    f"duplicate_query: identical to successful query #{i} "
-                    f"(mode={parsed.mode}, same measurements and intervention). You already "
-                    "have this data in RECENT QUERY RESULTS or your memory. Change the "
-                    "measurements or the intervention, or submit your answer now."
-                )
 
     def score_answer(self, answer: Any) -> Dict[str, Any]:
         try:

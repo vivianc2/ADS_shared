@@ -36,12 +36,6 @@ class ScientistAgentRPG:
     question: Optional[StaticRPGQuestion] = field(default=None, init=False)
     max_queries: int = field(default=8, init=False)
 
-    # Number of most-recent queries whose full data summaries are re-shown to the
-    # agent each turn. Older query data is NOT reshown (only a one-line status),
-    # so the agent must record any numbers it still needs into scientist_memory.
-    # Not annotated -> treated as a class constant, not a dataclass field.
-    _RECENT_DATA_WINDOW = 3
-
     _query_history: List[Dict[str, Any]] = field(default_factory=list, init=False)
     _queries_made: int = field(default=0, init=False)
     _scientist_memory: str = field(default="", init=False)
@@ -154,26 +148,6 @@ Good strategy:
 - Cross-check with a second outcome/proxy when budget permits.
 - Keep queries within the measurement and unit budget.
 
-Working memory and evidence discipline (read carefully):
-- Only your most recent 3 query results are shown back to you in full under
-  "RECENT QUERY RESULTS". Older query data is NOT reshown; it is reduced to a
-  one-line status. Therefore, copy every number you may still need later
-  (means, sds, correlations, mean shifts, value counts) into <scientist_memory>
-  under "Known:". Cite real figures from the data, never invent or round from
-  guesswork. If you cannot see a number you need, it is in an earlier query and
-  should already be in your memory — do not re-run the query to "re-see" it.
-- Never repeat a query you have already run. An identical query (same mode, same
-  measurements, same intervention) returns no new information and the system
-  will reject it as a duplicate, wasting a turn. Each new query must measure
-  something new or test a new intervention.
-- For mechanism, latent-cause, and latent-regime questions, run at least one
-  interventional_sample that sets a candidate action and measures the mechanism
-  and outcome before you answer. Observational correlation alone is not proof of
-  a hidden cause.
-- Budget discipline: watch sample_units_remaining and cell_budget. When the cell
-  budget is low, shrink n_units or submit your answer instead of overspending; a
-  query that exceeds the remaining cell budget is rejected and wastes a turn.
-
 Output exactly these three blocks in order:
 <reasoning>Concise analysis and why the next action is appropriate.</reasoning>
 <action type="query|answer|give_up">JSON query, JSON answer, or brief reason.</action>
@@ -188,13 +162,9 @@ Next:
         assert self.world_info is not None and self.question is not None
         remaining = self.max_queries - self._queries_made
         budget = self.world_info.experiment_budget
-        max_cells = budget.get("max_total_samples")
-        cells_used = sum(
-            int(h.get("sample_cells") or 0) for h in self._query_history if h.get("success")
-        )
         budget_lines = [
             f"query_budget: {self._queries_made}/{self.max_queries} successful queries used; {remaining} left",
-            f"cell_budget: max_total_samples={max_cells}, "
+            f"cell_budget: max_total_samples={budget.get('max_total_samples')}, "
             f"max_samples_per_query={budget.get('max_samples_per_query')}",
             f"per_query_caps: max_units_per_query={budget.get('max_units_per_query')}, "
             f"max_measurements_per_query={budget.get('max_measurements_per_query')}",
@@ -202,23 +172,13 @@ Next:
             "(2 id/mode columns + number_of_measurements + number_of_intervention_knobs); "
             "late in the run, reduce n_units or answer instead of overspending.",
         ]
-        if isinstance(max_cells, (int, float)) and max_cells > 0:
-            cells_left = max(0, int(max_cells) - cells_used)
-            budget_lines.insert(
-                1, f"cell_budget_used: {cells_used}/{int(max_cells)} cells used; {cells_left} cells left"
-            )
-            if cells_left <= 0.15 * float(max_cells):
-                budget_lines.append(
-                    "CELL BUDGET LOW: keep n_units small (or submit your answer now); "
-                    "a query that exceeds the remaining cell budget is rejected and wastes a turn."
-                )
         if remaining <= 0:
             budget_lines.append("NO QUERIES LEFT: answer now from existing evidence.")
         if self._system_messages:
             budget_lines.append("SYSTEM MESSAGES:")
             budget_lines.extend(f"- {m}" for m in self._system_messages[-4:])
 
-        recent_section = self._recent_results_section()
+        latest_section = self._latest_result_section()
         history_section = self._history_section()
         memory = self._scientist_memory or "(empty)"
 
@@ -244,63 +204,40 @@ AVAILABLE ACTIONS
 ALLOWED QUERY MODES
 {", ".join(self.world_info.allowed_query_modes)}
 
-RECENT QUERY RESULTS (last {self._RECENT_DATA_WINDOW}, full data; copy numbers you still need into memory)
-{recent_section}
+LATEST RESULT
+{latest_section}
 
 CURRENT MEMORY
 {memory}
 
-EARLIER QUERIES (data not reshown — use your memory for these)
+PAST QUERY SUMMARY
 {history_section}
 
 Now choose the next action. If the current evidence is enough, answer with JSON."""
 
-    def _recent_results_section(self) -> str:
-        """Full data summaries for the last _RECENT_DATA_WINDOW queries.
-
-        Earlier degeneration came from re-showing only the single most recent
-        query, which forced the agent to either transcribe every number into
-        memory or lose it. Showing a small rolling window keeps recent evidence
-        visible across turns without unbounded prompt growth.
-        """
+    def _latest_result_section(self) -> str:
         if not self._query_history:
             return "No data collected yet."
-        window = self._query_history[-self._RECENT_DATA_WINDOW:]
-        start_idx = len(self._query_history) - len(window) + 1
-        blocks: List[str] = []
-        for offset, item in enumerate(window):
-            idx = start_idx + offset
-            is_latest = item is self._query_history[-1]
-            tag = "LATEST" if is_latest else f"query #{idx}"
-            if not item["success"]:
-                blocks.append(
-                    f"[{tag}] FAILED request {item['query']}\n"
-                    + (item.get("result_xml", "") or "")
-                )
-                continue
-            lines = [
-                f"[{tag}] request {item['query']}",
-                f"rows={item['n_rows']} cells={item['sample_cells']}",
-                item.get("data_summary", ""),
-            ]
-            blocks.append("\n".join(line for line in lines if line))
-        return "\n\n".join(blocks)
+        latest = self._query_history[-1]
+        if not latest["success"]:
+            return "Last query failed:\n" + latest.get("result_xml", "")
+        lines = [
+            f"Request: {latest['query']}",
+            f"Rows: {latest['n_rows']}  Cells: {latest['sample_cells']}",
+            latest.get("data_summary", ""),
+        ]
+        return "\n".join(line for line in lines if line)
 
     def _history_section(self) -> str:
-        # Only the queries older than the re-shown window; the recent ones already
-        # appear in full under RECENT QUERY RESULTS.
-        older = self._query_history[:-self._RECENT_DATA_WINDOW]
-        if not older:
+        if len(self._query_history) <= 1:
             return "(none)"
         lines = []
-        for idx, item in enumerate(older, 1):
+        for idx, item in enumerate(self._query_history[:-1], 1):
             status = "OK" if item["success"] else "FAIL"
             mode = item.get("query_dict", {}).get("mode")
             intervention = item.get("intervention") or {}
             intv_text = f" do={json.dumps(intervention, sort_keys=True)}" if intervention else ""
-            measurements = item.get("measurements") or []
-            meas_text = f" meas={','.join(measurements)}" if measurements else ""
-            lines.append(f"{idx}. {status} {mode}{intv_text}{meas_text} rows={item.get('n_rows')}")
+            lines.append(f"{idx}. {status} {mode}{intv_text} rows={item.get('n_rows')}")
         return "\n".join(lines)
 
     def _compute_data_summary(self, data_file: str, intervention: Dict[str, Any]) -> str:

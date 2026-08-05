@@ -1,181 +1,108 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for Claude Code when working in this repository.
 
-## Project Overview
+## Orientation
 
-This is a **causal discovery benchmark** where an LLM "Scientist" agent must infer properties of a hidden causal graph by requesting observational/interventional data samples from a Bayesian Network simulator. The framework compares agent-based causal reasoning vs. zero-shot baselines across multiple LLM backends (local HuggingFace, OpenAI-compatible API / vLLM, AWS Bedrock).
+Read [PROJECT_STATUS.md](PROJECT_STATUS.md) first. Short version:
 
-All framework scripts run from `framework_code/`:
+- **ACED-Bench** (`*_causal.py`, `*_coder_agent*.py`) is finished work, kept as
+  background for the paper in `docs/aced/paper_polished.tex`.
+- **RPG** (`*_rpg.py`) is the active line of work. Default to assuming a request
+  is about RPG unless ACED is named.
+
+## Hard rules
+
+- **Never commit credentials.** All backends read from env vars
+  (`AWS_BEARER_TOKEN_BEDROCK`, `OPENAI_API_KEY`, `GEMINI_API_KEY`). Do not add a
+  key to a file, a default argument, a notebook cell, or a shell script. Do not
+  weaken the `.gitignore` entries for `.env`, `*.pem`, or credential files.
+- **This branch is shared.** Do not add generated datasets, raw agent
+  trajectories, or multi-megabyte result dumps. If output needs to be inspected,
+  summarize it in a doc instead of committing the artifact.
+- **Do not quote ACED result numbers from memory or from old notes.** The
+  unrestricted Decision runs have mixed provenance and different files
+  genuinely disagree. Read `scores.overall.total` from a named JSON and check
+  the row count, or say the number is unverified. See PROJECT_STATUS.md §1.
+
+## Terminology
+
+Current: **ACED-Bench**, **ACED-Struct**, **ACED-Decision**.
+Retired in prose: `PGM-Struct`, `PGM-Decision`, `Basic`, `Advanced`,
+`guess-shot`. These still appear in filenames and variable names — fine as
+paths, not as prose.
+
+## RPG specifics
+
+- Current archetype: `story_hidden_cause_discovery`; current schema:
+  `rpg_static_v3`. `run_agent_batch_rpg.py` silently skips worlds whose
+  `schema_version` is not `rpg_static_v2` / `rpg_static_v3`.
+- v4 hardening exists to kill two shortcuts: **name leakage** (action/proxy names
+  that reveal the latent cause) and **all-binary interventions**. When adding
+  worlds, templates, or variable names, preserve both properties — a
+  descriptive-but-leaky name silently undoes the benchmark.
+- v4 deliberately keeps the role contract stable so `simulator_rpg.py`,
+  `world_model_rpg.py`, `evaluate_rpg.py`, and `audit_rpg.py` need at most a
+  one-line change. Prefer changes that hold that line.
+- `run_agent_batch_rpg.py --scientist-backend mock` runs the full loop with no
+  API access — use it for smoke tests.
+- **`world_gen_rpg_old.py` is not legacy despite its name.** It holds the live
+  static engine (`_static_observe`, `_static_apply`, `_static_sample_hidden`,
+  `_static_utility_from_outcomes`, `rollout`) that `world_gen_rpg.py` imports at
+  module load. Delete it and the entire RPG import chain breaks, including
+  `simulator_rpg.py`. Same trap with `world_gen.py`, which `world_gen_causal.py`,
+  `advanced_utils.py`, `audit_advanced.py`, and `check_faithfulness.py` all
+  import even though old notes call it legacy.
+- `run_many.py` has no `if __name__ == "__main__"` guard and executes on import;
+  it is an edit-the-constants-inside template that references a placeholder
+  `world_gen_xxx.py`. Do not import it.
+
+## Commands
+
 ```bash
-cd /home/vivianchen/ADS/framework_code
-```
-
-## Key Commands
-
-### Dataset Generation
-```bash
+# RPG: generate -> audit -> run -> evaluate
 cd dataset_generation_code
-python run_many.py                        # Generate 60 worlds (edit OUTDIR/SEED_BASE inside)
-python validate_dataset.py all_out_bn/out_bn_3_4  # Validate a generated dataset
+python world_gen_rpg.py --outdir all_out_rpg/<name> \
+  --distribution '{"story_hidden_cause_discovery": 8}' --use-llm-templates
+python audit_rpg.py --outdir all_out_rpg/<name>
+
+cd ../framework_code
+python run_agent_batch_rpg.py --worlds-dir ../dataset_generation_code/all_out_rpg/<name> \
+  --scientist-backend bedrock --scientist-model us.anthropic.claude-opus-4-7 -v -o results/<name>.json
+python evaluate_rpg.py results/<name>.json --details -o evaluations/rpg/eval_<name>.json
 ```
 
-`run_many.py` calls `world_gen_causal.py` to produce 20 worlds at each size (10, 20, 30 nodes), 60 total.
-
-### Running Experiments
-
-**Zero-shot baseline** (no data queries — LLM answers from domain knowledge alone):
 ```bash
-# Local HuggingFace model
-python run_zero_shot.py --worlds-dir ../dataset_generation_code/all_out_bn/out_bn_3_4 -v
-
-# OpenAI API
-python run_zero_shot.py --worlds-dir ../dataset_generation_code/all_out_bn/out_bn_3_4 --backend openai --model gpt-4o-mini -v
-
-# AWS Bedrock
-python run_zero_shot.py --worlds-dir ../dataset_generation_code/all_out_bn/out_bn_3_4 --backend bedrock --model us.anthropic.claude-opus-4-0-20250514-v1:0 -v
+# ACED (background; agent runs need --llm-extract at eval time)
+cd framework_code
+python run_agent_batch.py --worlds-dir <dir> --agent-type coder_new \
+  --scientist-backend bedrock --scientist-model us.anthropic.claude-opus-4-7 -v
+python evaluate_zero_shot.py results/agent_<ts>.json --details --llm-extract -o evaluations/eval_<name>.json
 ```
 
-**Zero-shot with sub-prompt** (uses scientist-like prompt structure, but no data access):
-```bash
-python run_zero_shot_sub_prompt.py --worlds-dir ../dataset_generation_code/all_out_bn/out_bn_3_4 --backend openai --model gpt-4o-mini -v
-```
+## Protocol constants (ACED, fixed across runs)
 
-**Agent batch** (scientist queries data iteratively):
-```bash
-# Local Qwen
-python run_agent_batch.py --worlds-dir ../dataset_generation_code/all_out_bn/out_bn_3_4 --scientist-backend local --scientist-model Qwen/Qwen2.5-7B-Instruct -v
-
-# vLLM server (launch separately: vllm serve meta-llama/Llama-3.1-8B-Instruct --port 8000 --gpu-memory-utilization 0.5)
-python run_agent_batch.py --worlds-dir ../dataset_generation_code/all_out_bn/out_bn_3_4 --scientist-backend openai --scientist-model meta-llama/Llama-3.1-8B-Instruct --scientist-base-url http://localhost:8000/v1 --scientist-api-key EMPTY -v
-
-# OpenAI API
-export OPENAI_API_KEY=sk-...
-python run_agent_batch.py --worlds-dir ../dataset_generation_code/all_out_bn/out_bn_3_4 --scientist-backend openai --scientist-model gpt-4o-mini -v
-
-# AWS Bedrock
-python run_agent_batch.py --worlds-dir ../dataset_generation_code/all_out_bn/out_bn_3_4 --scientist-backend bedrock --scientist-model us.anthropic.claude-opus-4-0-20250514-v1:0 -v
-
-# Coder agent variant (adds Python execution tool — add --agent-type coder to any of the above)
-python run_agent_batch.py --worlds-dir ../dataset_generation_code/all_out_bn/out_bn_3_4 --scientist-backend openai --scientist-model gpt-4o-mini --agent-type coder -v
-```
-
-### Evaluation
-```bash
-# Zero-shot results
-python evaluate_zero_shot.py results/zero_shot_<timestamp>.json --details
-
-# Agent results (use --llm-extract to have an LLM re-extract answers from verbose reasoning)
-python evaluate_zero_shot.py results/agent_<timestamp>.json --details --llm-extract -o evaluations/eval_output.json
-```
-
-### Failure Analysis
-```bash
-# Analyze failures using Bedrock Claude (reads per-experiment logs)
-python analyze_failures.py --results-dir results/opus_agent_3_4 --eval-file evaluations/eval_opus_agent_3_4.json --output-dir analysis_output/opus_agent_3_4
-```
-
-## Key `run_agent_batch.py` Flags
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--world-model` | `Qwen/Qwen2.5-7B-Instruct` | HuggingFace model for world model query parser (always local) |
-| `--scientist-backend` | `local` | `local` (HuggingFace), `openai` (OpenAI-compatible API / vLLM), or `bedrock` (AWS) |
-| `--scientist-model` | same as `--world-model` | Model name for scientist agent |
-| `--agent-type` | `agent` | `agent` (ScientistAgent) or `coder` (CoderScientistAgent with Python execution) |
-| `--max-queries` | `10` | Query budget per question |
-| `--temperature` | `0.3` | Sampling temperature for scientist |
-| `--causal` | always on | Causal variants (`world_model_causal` + `scientist_agent_causal`) are always used |
+- Query budget 10; parser Opus-4.8 @ temp `0.1` / 512 tok; ledger annotator
+  temp `0.0` / 600 tok / ≤3 retries
+- Decision scoring tolerance `0.05` expected-state-index units
+- Structural dependency threshold TV ε = `0.02`
+- Expected-state-index uses the ordered categorical state list, zero-based;
+  lower outcome index is better unless a world says otherwise
 
 ## Architecture
 
 ```
-run_agent_batch.py (primary entry point)
-         │
-    orchestrator.py (manages interaction loop, logs turns, saves JSON results)
-         │
-    ┌────┴─────────────────────────┐
-    ▼                              ▼
-scientist_agent_causal.py    world_model_causal.py
-  (or scientist_coder_agent.py)  (NL query → ParsedQuery → simulator → XML result)
-(LLM reasons about causal            │
- structure, queries or answers)  simulator.py (pgmpy wrapper, observational + do-calculus sampling)
+run_agent_batch_rpg.py                    run_agent_batch.py / run_zero_shot.py
+        |                                          |
+   orchestrator_rpg.py                      orchestrator.py
+        |                                          |
+  scientist_agent_rpg.py               scientist_agent_causal.py
+  world_model_rpg.py                   | scientist_coder_agent.py
+        |                              | scientist_coder_agent_new.py
+  simulator_rpg.py                     world_model_causal.py
+                                             |
+                                       simulator.py  (pgmpy obs + do-calculus)
 ```
 
-**Core modules:**
-- `schemas.py`: Data contracts (`ParsedQuery`, `QueryResult`, `WorldInfo`, `Question`, error types)
-- `simulator.py`: Bayesian Network engine; implements do-operator by mutilating graph (removes incoming edges, fixes CPD to point mass)
-- `world_model_causal.py`: LLM-powered NL→structured query translator + validator; supports `QwenLLM` (local), `OpenAILLM` (API), and `BedrockLLM` (AWS)
-- `scientist_agent_causal.py`: Causal reasoning agent; outputs `<action type="query/answer/give_up">` XML; maintains scientist memory and query history
-- `scientist_coder_agent.py`: Extends agent with `<action type="code">` for Python execution (pandas/scipy analysis); max 8 code rounds per turn, 30s timeout
-- `scientist_agent_confidence.py`: Agent variant that requires explicit confidence level before answering
-- `orchestrator.py`: Loop controller; enforces budget, logs all turns, evaluates answers, writes `results/agent_<timestamp>.json`
-- `json_converter.py`: Converts world JSON files to BIF format for pgmpy
-- `bedrock_llm.py`: AWS Bedrock LLM backend (Converse API)
-
-**Zero-shot scripts** (no orchestrator/scientist/world_model — direct LLM calls):
-- `run_zero_shot.py`: Standard zero-shot baseline
-- `run_zero_shot_sub_prompt.py`: Zero-shot using reduced scientist-like prompt structure
-
-**Analysis tools:**
-- `evaluate_zero_shot.py`: Evaluates both zero-shot and agent results; `--llm-extract` re-extracts answers from verbose output
-- `analyze_failures.py`: LLM-based failure categorization using Bedrock
-- `demo_coder_agent.py`: Standalone demo for debugging agent prompts and responses
-
-**Deprecated (still present but unused by active code paths):**
-- `world_model.py`: Non-causal world model variant
-- `scientist_agent.py`: Non-causal scientist agent variant
-- `run_experiment.py`: Single-world entry point (imports non-causal versions)
-
-## World JSON Format
-
-Each world has `meta`, `story`, `variables`, `edges`, `cpds`, `questions`, and `non_intervenable_variables`. The scientist sees variables + story but NOT edges/CPDs.
-
-```json
-{
-  "meta": {"topic": "Criminal Justice", "n_nodes": 10, "seed": 1010, ...},
-  "story": "In a criminal justice system...",
-  "variables": [{"name": "Arrest", "desc": "...", "values": ["yes", "no"]}, ...],
-  "edges": [["var1", "var2"], ...],
-  "cpds": [...],
-  "questions": [
-    {"id": 0, "question": "Does X cause Y?", "question_type": "causal_effect", "answer": "Yes", "difficulty": "easy"},
-    ...
-  ],
-  "non_intervenable_variables": {"VarName": "reason why not manipulable"}
-}
-```
-
-## Question Types
-
-Each world has 6 questions across 3 difficulty groups (2 per group):
-
-**Group 1 — Causal Structure (easy):**
-- `causal_effect`: "Does A cause B?" (Yes/No — tests if A is ancestor of B)
-- `all_causes_of` or `all_effects_of`: "What are all causes/effects of X?" (list of ancestors/descendants)
-
-**Group 2 — Marginal Independence (medium):**
-- Questions about whether two variables are marginally independent/dependent
-- Post-hoc classified by structural motif: `direct_marginal`, `chain_marginal`, `fork_marginal`, `v_structure_marginal`, `other_marginal`
-
-**Group 3 — Conditional Independence (medium):**
-- Questions about whether two variables are independent/dependent given conditioning set
-- Post-hoc classified: `chain_conditional`, `fork_conditional`, `v_structure_conditional`, `other_conditional`
-
-Yes/No balance is guaranteed by answer-first generation with 50/50 stratification.
-
-## Dataset
-
-Primary benchmark dataset: `dataset_generation_code/all_out_bn/out_bn_3_4/`
-- 60 worlds: 20 × 10-node, 20 × 20-node, 20 × 30-node
-- 8 topics: Criminal Justice, Education, Hospital data, Labor & Policy, Screening & diagnosis, Social Science, Treatment effectiveness, User Behavior
-- 360 total questions (6 per world): 120 easy + 240 medium
-
-## Output Artifacts
-
-- `results/agent_<timestamp>.json`: Full agent interaction history (queries, responses, reasoning)
-- `results/zero_shot_<timestamp>.json`: Zero-shot results (split by difficulty group)
-- `results/agent_logs/`: Per-experiment JSON logs from orchestrator
-- `results/agent_query_data/`: CSV files with sampled data from simulator
-- `evaluations/eval_*.json`: Accuracy summaries with per-question-type breakdowns
-- `analysis_output/`: LLM-based failure analysis reports
+Full ACED detail: `docs/aced/ARCHITECTURE.md`.
+RPG design docs: `docs/rpg/` — start with `worldgen_rpg_plan_v4_complex_neutral_dose.md`.

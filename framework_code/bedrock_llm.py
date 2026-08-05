@@ -142,4 +142,7 @@ class BedrockLLM:
     def _supports_temperature(self) -> bool:
         """Some current Bedrock inference profiles reject temperature."""
         model_id = self.model_id.lower()
-        return "claude-opus-4-7" not in model_id
+        # Opus 4.7+ inference profiles reject an explicit temperature; omit it
+        # for the whole 4.x Opus line to stay safe as new profiles ship.
+        blocked = ("claude-opus-4-7", "claude-opus-4-8", "claude-opus-4-9")
+        return not any(b in model_id for b in blocked)
