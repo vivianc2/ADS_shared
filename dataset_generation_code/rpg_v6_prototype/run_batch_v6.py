@@ -24,23 +24,54 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from sim_v6 import SimV6
-from run_agent_v6 import build_llm, run_world, load_world_file
+from run_agent_v6 import build_llm, build_resolver_llm, run_world, load_world_file
 
 logger = logging.getLogger("run_batch_v6")
+
+
+def summarize_result(res: Dict[str, Any], wid: str, world: Dict[str, Any]) -> Dict[str, Any]:
+    """One summary row from a result dict — whether it was just produced by
+    run_world or reloaded from disk by --resume."""
+    g = res.get("grade") or {}
+    # artifact flag from the answer turn (if any)
+    art = {}
+    for t in res.get("turns", []):
+        if t.get("artifact_check"):
+            art = t["artifact_check"]
+    return {
+        "world_id": wid, "template": world.get("domain"),
+        "accepted": bool(g.get("accepted")),
+        "partA": bool(g.get("part_a_utility_ok")),
+        "partB": round(float(g.get("battery_fraction") or 0), 2),
+        "gap": round(float(g.get("utility_gap") or 0), 1),
+        "interventions": res.get("interventions_run"),
+        "queries": res.get("queries_used"),
+        "hit_cap": bool(res.get("hit_turn_cap")),
+        "artifact_suspect": bool(art.get("suspect")),
+        "artifact_reasons": art.get("reasons", []),
+        "wall_s": res.get("wall_seconds"),
+    }
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--worlds-dir", required=True)
-    ap.add_argument("--backend", choices=["bedrock", "mock"], default="bedrock")
+    ap.add_argument("--backend", choices=["bedrock", "nautilus", "openai", "mock"], default="bedrock")
     ap.add_argument("--model", default="us.anthropic.claude-opus-4-8")
-    ap.add_argument("--temperature", type=float, default=0.3)
-    ap.add_argument("--max-new-tokens", type=int, default=2500)
+    ap.add_argument("--temperature", type=float, default=None,
+                    help="sampling temperature; default None = use the model's preset")
+    ap.add_argument("--max-new-tokens", type=int, default=None,
+                    help="per-turn output token cap; default None = use the model's MAX output "
+                         "(32768 for Qwen/gpt-oss). Set lower only to save cost.")
     ap.add_argument("--budget", type=int, default=15)
-    ap.add_argument("--max-turns", type=int, default=32)
+    ap.add_argument("--max-turns", type=int, default=60,
+                    help="max productive turns; raised 32->60 so the cap does not bind")
     ap.add_argument("--no-resolver-llm", action="store_true",
-                    help="disable the LLM resolver fallback (on by default for bedrock runs)")
+                    help="disable the LLM resolver fallback (on by default)")
     ap.add_argument("--outdir", required=True)
+    ap.add_argument("--resume", action="store_true",
+                    help="skip worlds that already have a result_<world>.json in "
+                         "--outdir; summary.json is still rebuilt over all worlds")
     ap.add_argument("-v", "--verbose", action="store_true")
     args = ap.parse_args()
 
@@ -54,43 +85,44 @@ def main():
     outdir.mkdir(parents=True, exist_ok=True)
 
     llm = build_llm(args.backend, args.model, args.temperature, args.max_new_tokens)
-    # LLM resolver fallback is ON by default (bedrock only); --no-resolver-llm opts out.
-    resolver_llm = llm if (args.backend == "bedrock" and not args.no_resolver_llm) else None
+    # Resolver uses a FIXED strong model, independent of the agent model, so
+    # resolution quality is constant across agent models.
+    resolver_llm = build_resolver_llm(args.backend, llm, args.no_resolver_llm)
 
     rows: List[Dict[str, Any]] = []
+    n_skipped = 0
     t_start = time.time()
     for path in paths:
         world, pre = load_world_file(path)
         wid = world["world_id"]
+        result_path = outdir / f"result_{wid}.json"
+
+        # --resume: a world that already has a readable result JSON is done.
+        # Reuse it verbatim so an interrupted batch can be finished without
+        # re-spending API calls, and summary.json still covers all 20 worlds.
+        if args.resume and result_path.exists():
+            try:
+                with open(result_path, "r", encoding="utf-8") as f:
+                    res = json.load(f)
+            except (json.JSONDecodeError, OSError) as e:
+                logger.warning("=== %s: unreadable result (%s) — re-running ===", wid, e)
+            else:
+                logger.info("=== %s: skipping, result exists ===", wid)
+                rows.append(summarize_result(res, wid, world))
+                n_skipped += 1
+                continue
+
         data_dir = str(outdir / f"{wid}_data")
         sim = SimV6(world, resolver_llm=resolver_llm, data_dir=data_dir, precomputed=pre)
         logger.info("=== %s (gold util %.1f) ===", wid, sim.gold["expected_utility"])
         t0 = time.time()
-        res = run_world(sim, llm, args.max_turns, args.budget, args.verbose)
+        res = run_world(sim, llm, args.max_turns, args.budget, args.verbose, args.max_new_tokens)
         res["wall_seconds"] = round(time.time() - t0, 1)
         res["model"] = args.model
         res["world_file"] = path
-        with open(outdir / f"result_{wid}.json", "w", encoding="utf-8") as f:
+        with open(result_path, "w", encoding="utf-8") as f:
             json.dump(res, f, indent=2, default=str)
-        g = res.get("grade") or {}
-        # artifact flag from the answer turn (if any)
-        art = {}
-        for t in res.get("turns", []):
-            if t.get("artifact_check"):
-                art = t["artifact_check"]
-        rows.append({
-            "world_id": wid, "template": world.get("domain"),
-            "accepted": bool(g.get("accepted")),
-            "partA": bool(g.get("part_a_utility_ok")),
-            "partB": round(float(g.get("battery_fraction") or 0), 2),
-            "gap": round(float(g.get("utility_gap") or 0), 1),
-            "interventions": res.get("interventions_run"),
-            "queries": res.get("queries_used"),
-            "hit_cap": bool(res.get("hit_turn_cap")),
-            "artifact_suspect": bool(art.get("suspect")),
-            "artifact_reasons": art.get("reasons", []),
-            "wall_s": res["wall_seconds"],
-        })
+        rows.append(summarize_result(res, wid, world))
 
     n = len(rows)
     acc = sum(r["accepted"] for r in rows)
@@ -104,6 +136,9 @@ def main():
         "partA_utility_ok": pa, "avg_partB": round(sum(r["partB"] for r in rows) / n, 3) if n else 0,
         "hit_turn_cap": caps, "no_intervention_runs": no_iv,
         "artifact_suspects": len(suspects),
+        "reused_results": n_skipped,
+        # wall_seconds covers THIS invocation only; on a resumed batch the
+        # reused worlds contribute ~0. Per-world timings live in rows[].wall_s.
         "wall_seconds": round(time.time() - t_start, 1), "rows": rows,
     }
     with open(outdir / "summary.json", "w", encoding="utf-8") as f:
@@ -112,7 +147,8 @@ def main():
     print(f"\n=== BATCH SUMMARY ({args.model}) ===")
     print(f"accepted {acc}/{n} (acc={summary['accuracy']}) | partA {pa}/{n} | "
           f"avg partB {summary['avg_partB']} | hit_cap {caps} | no-intervention {no_iv} | "
-          f"{summary['wall_seconds']}s")
+          f"{summary['wall_seconds']}s"
+          + (f" (+{n_skipped} reused)" if n_skipped else ""))
     print(f"{'world':46s} {'acc':4s} {'A':2s} {'B':5s} {'gap':6s} {'iv':3s} {'q':3s} {'cap':4s} {'art'}")
     for r in rows:
         print(f"{r['world_id']:46s} {str(r['accepted'])[:4]:4s} "

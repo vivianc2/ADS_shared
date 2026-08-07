@@ -139,9 +139,31 @@ def counterfactual_battery(world: Dict[str, Any], *, n=15000, seed=777) -> Dict[
         if act.get("op") == "mask":
             act_signs[aid] = "0"  # no true-utility effect
             continue
-        hi = act["range"][1] if act.get("dtype") == "continuous" else act.get("values", ["off", "on"])[-1]
-        u = expected_utility(scm, {aid: hi}, n=n, seed=seed)
-        act_signs[aid] = _sign(u - base, eps)
+        # Sign = effect on the outcome of INCREASING the actuator's setting
+        # (the convention the agent is told, and that _translate_structured flips
+        # for 'reduce/lower' phrasings). This is unambiguous for monotone
+        # actuators: chelator '+', feed-flow '-', inert '0'.
+        #
+        # BUT a non-monotone actuator (interior optimum: helps at a moderate
+        # dose, hurts at the extreme — e.g. a titrated drug) has no single
+        # correct increasing-direction sign. Forcing one unfairly penalizes a
+        # correct answer either way. We DETECT non-monotonicity via a dose sweep
+        # and mark such actuators "skip" so the grader does not score their sign.
+        if act.get("dtype") == "continuous":
+            lo, hi = act["range"]
+            grid = np.linspace(lo, hi, 7)
+            us = [expected_utility(scm, {aid: float(v)}, n=n, seed=seed) for v in grid]
+            best_i = int(np.argmax(us))
+            extreme_gain = us[-1] - base
+            interior_peak = (best_i not in (0, len(us) - 1)) and (max(us) - base > eps) \
+                and (max(us) - us[-1] > eps)
+            if interior_peak:
+                act_signs[aid] = "skip"      # non-monotone -> not scored
+            else:
+                act_signs[aid] = _sign(extreme_gain, eps)
+        else:
+            top = act.get("values", ["off", "on"])[-1]
+            act_signs[aid] = _sign(expected_utility(scm, {aid: top}, n=n, seed=seed) - base, eps)
 
     # Valid mechanism proxies = measurable signals that the TARGETED actuator (which
     # acts on the true cause) actually moves, but the confounder does not. Computed
@@ -186,33 +208,58 @@ def _score_battery(battery, answer):
                   gt_decoys.issubset(agent_decoys) and not (agent_decoys & valid_proxies)))
     pred = st.get("actuator_sign_predictions", {}) or {}
     trap = battery.get("symptom_trap_actuator")
+    all_signs = battery["actuator_sign_predictions"]
     # only score actuators the agent could plausibly have identified; require the
     # targeted one and any the agent volunteered.
     scored = set([battery["targeted_actuator"]]) | set(pred)
     for aid in scored:
-        gold = battery["actuator_sign_predictions"].get(aid, "0")
+        gold = all_signs.get(aid, "0")
+        # Non-monotone actuators (interior optimum) have no single correct
+        # increasing-direction sign -> not scored, either party.
+        if gold == "skip":
+            continue
         if aid == trap:
             ok = pred[aid] in ("0", "+") if aid in pred else True
             items.append((f"sign:{aid}(trap)", ok))
         else:
             items.append((f"sign:{aid}", pred.get(aid) == gold))
     n_ok = sum(1 for _, ok in items if ok)
-    return n_ok / len(items), items
+    return (n_ok / len(items), items) if items else (1.0, items)
 
 
 def grade(world: Dict[str, Any], answer: Dict[str, Any], gold: Dict[str, Any],
-          battery: Dict[str, Any], *, n=30000, seed=999, tolerance=2.0) -> Dict[str, Any]:
+          battery: Dict[str, Any], *, n=30000, seed=999,
+          benefit_frac: float = 0.90, tolerance: float = 2.0) -> Dict[str, Any]:
+    """Grade an answer. Part A (found the fix) is judged by the FRACTION of the
+    achievable benefit recovered, not an absolute utility gap:
+
+        benefit_recovered = (rec_util - baseline) / (gold_util - baseline)
+        part_A = benefit_recovered >= benefit_frac   (default 0.90)
+
+    Rationale: an absolute tolerance is not comparable across worlds whose
+    utility RANGES differ (e.g. a bioreactor spans ~44 utility units, a clinic
+    world only ~6). A fixed ±2.0 was ~5% of the range on wide worlds but ~35% on
+    narrow ones — simultaneously too strict on some and too lenient on others.
+    The fraction-of-benefit rule makes "found the fix" mean the same thing
+    everywhere. A tiny absolute tolerance is still allowed so a numerically-tied
+    optimum is not rejected on Monte-Carlo noise."""
     scm: WorldSCM = world["scm"]
     rec = answer.get("recommended_intervention", {}) or {}
     valid = {k: v for k, v in rec.items() if k in scm.actuators}
     u = expected_utility(scm, valid, n=n, seed=seed)
     gold_u = gold["expected_utility"]
-    part_a = bool(u >= gold_u - tolerance)
+    base_u = gold.get("baseline_utility")
+    if base_u is None:
+        base_u = expected_utility(scm, {}, n=n, seed=seed)
+    rng = gold_u - base_u
+    frac_recovered = (u - base_u) / rng if abs(rng) > 1e-9 else 1.0
+    part_a = bool(frac_recovered >= benefit_frac or u >= gold_u - tolerance)
     frac, items = _score_battery(battery, answer)
     part_b = bool(frac >= 0.8)
     return {"accepted": bool(part_a and part_b), "part_a_utility_ok": part_a, "part_b_battery_ok": part_b,
             "recommended_intervention": valid, "recommended_utility": round(u, 3),
             "gold_intervention": gold["intervention"], "gold_utility": round(gold_u, 3),
+            "baseline_utility": round(base_u, 3), "benefit_recovered": round(frac_recovered, 3),
             "utility_gap": round(gold_u - u, 3), "battery_fraction": round(frac, 3),
             "battery_items": items}
 

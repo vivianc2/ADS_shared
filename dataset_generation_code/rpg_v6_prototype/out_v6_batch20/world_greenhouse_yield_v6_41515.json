@@ -1,0 +1,689 @@
+{
+  "schema_version": "rpg_scm_v6",
+  "world_id": "greenhouse_yield_v6_41515",
+  "domain": "controlled_ag",
+  "template": "greenhouse_yield_v6",
+  "meta": {
+    "seed": 41515
+  },
+  "scenario": "A commercial hydroponic greenhouse growing leafy crops has seen yields fall about 30% over the last month, with new growth looking pale/yellow (interveinal chlorosis) despite a full nutrient program. Agronomists suspect a nitrogen or potassium shortfall, or insufficient light after a cloudy stretch. Substrate was switched to a new supplier batch around when the decline began. EC, CO2, VPD, irrigation volume, and canopy metrics are all logged and look within normal ranges. The fertigation system (individual nutrient dosers and pH control), lighting, and climate controls are all adjustable. You have a limited number of experiments; measure quantities and apply controls, alone or in combination. Find what is really limiting yield and what to do about it.",
+  "scm": {
+    "variables": {
+      "SeasonalLightRecency": {
+        "kind": "latent",
+        "aliases": [
+          "seasonal light",
+          "daylight recency"
+        ],
+        "dist": {
+          "normal": [
+            50,
+            15
+          ]
+        }
+      },
+      "SubstrateBatchVar": {
+        "kind": "latent",
+        "aliases": [
+          "substrate batch",
+          "media batch variation"
+        ],
+        "dist": {
+          "normal": [
+            55,
+            18
+          ]
+        }
+      },
+      "ChelatedIronSupply": {
+        "kind": "latent",
+        "aliases": [
+          "iron supply",
+          "available iron",
+          "fe supply"
+        ],
+        "dist": {
+          "normal": [
+            10,
+            3
+          ]
+        }
+      },
+      "RhizospherePH": {
+        "kind": "latent",
+        "aliases": [
+          "root zone ph",
+          "rhizosphere ph",
+          "substrate ph"
+        ],
+        "dist": {
+          "normal": [
+            15,
+            4
+          ]
+        }
+      },
+      "RootIronUptake": {
+        "kind": "latent",
+        "aliases": [
+          "iron uptake",
+          "root uptake",
+          "fe uptake"
+        ],
+        "parents": [
+          "ChelatedIronSupply",
+          "RhizospherePH"
+        ],
+        "mech": {
+          "form": "gated_and",
+          "a": "ChelatedIronSupply",
+          "b": "RhizospherePH",
+          "ta": 55,
+          "tb": 55,
+          "wa": 9,
+          "wb": 9,
+          "vmax": 95.0,
+          "intercept": 3.0
+        }
+      },
+      "ChlorophyllSynthesis": {
+        "kind": "latent",
+        "aliases": [
+          "chlorophyll",
+          "greening"
+        ],
+        "parents": [
+          "RootIronUptake"
+        ],
+        "mech": {
+          "form": "saturating",
+          "of": "RootIronUptake",
+          "gain": 80.0,
+          "k": 30.0
+        }
+      },
+      "CropYield": {
+        "kind": "outcome",
+        "aliases": [
+          "crop yield",
+          "harvest",
+          "yield",
+          "biomass"
+        ],
+        "parents": [
+          "ChlorophyllSynthesis",
+          "SeasonalLightRecency"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "ChlorophyllSynthesis": 0.9,
+            "SeasonalLightRecency": 0.1
+          },
+          "intercept": 8
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "LeafGreennessIndex": {
+        "kind": "observable",
+        "aliases": [
+          "leaf greenness",
+          "chlorosis index",
+          "leaf color",
+          "spad"
+        ],
+        "parents": [
+          "RootIronUptake"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "RootIronUptake": 0.8
+          },
+          "intercept": 5
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            0.5
+          ]
+        }
+      },
+      "CanopyTemp": {
+        "kind": "observable",
+        "aliases": [
+          "canopy temperature",
+          "leaf temp"
+        ],
+        "parents": [
+          "SeasonalLightRecency"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "SeasonalLightRecency": 0.6
+          },
+          "intercept": 20
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            4
+          ]
+        }
+      },
+      "EC_Salinity": {
+        "kind": "observable",
+        "aliases": [
+          "ec",
+          "salinity",
+          "electrical conductivity"
+        ],
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "CO2ppm": {
+        "kind": "observable",
+        "aliases": [
+          "co2",
+          "carbon dioxide"
+        ],
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "VPD": {
+        "kind": "observable",
+        "aliases": [
+          "vpd",
+          "vapor pressure deficit",
+          "humidity deficit"
+        ],
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "IrrigationVolume": {
+        "kind": "observable",
+        "aliases": [
+          "irrigation volume",
+          "watering"
+        ],
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "NitrogenPPM": {
+        "kind": "observable",
+        "aliases": [
+          "nitrogen",
+          "n ppm"
+        ],
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "PotassiumPPM": {
+        "kind": "observable",
+        "aliases": [
+          "potassium",
+          "k ppm"
+        ],
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "RootZoneTemp": {
+        "kind": "observable",
+        "aliases": [
+          "root zone temperature"
+        ],
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "PARLight": {
+        "kind": "observable",
+        "aliases": [
+          "par",
+          "light intensity"
+        ],
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "DissolvedO2Nutrient": {
+        "kind": "observable",
+        "aliases": [
+          "nutrient oxygen",
+          "do in solution"
+        ],
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "CanopyDensity": {
+        "kind": "observable",
+        "aliases": [
+          "canopy density",
+          "leaf area index"
+        ],
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      }
+    },
+    "actuators": {
+      "co2_injector": {
+        "aliases": [
+          "set co2",
+          "co2 injection"
+        ],
+        "target": "CO2ppm",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50.0,
+        "description": "control handle for CO2ppm"
+      },
+      "irrigation_controller": {
+        "aliases": [
+          "set irrigation",
+          "watering rate"
+        ],
+        "target": "IrrigationVolume",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50.0,
+        "description": "control handle for IrrigationVolume"
+      },
+      "nitrogen_feed": {
+        "aliases": [
+          "nitrogen feed",
+          "set nitrogen"
+        ],
+        "target": "NitrogenPPM",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50.0,
+        "description": "control handle for NitrogenPPM"
+      },
+      "potassium_feed": {
+        "aliases": [
+          "potassium feed",
+          "set potassium"
+        ],
+        "target": "PotassiumPPM",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50.0,
+        "description": "control handle for PotassiumPPM"
+      },
+      "light_controller": {
+        "aliases": [
+          "set light",
+          "supplemental lighting"
+        ],
+        "target": "PARLight",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50.0,
+        "description": "control handle for PARLight"
+      },
+      "vpd_controller": {
+        "aliases": [
+          "set vpd",
+          "humidity control"
+        ],
+        "target": "VPD",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50.0,
+        "description": "control handle for VPD"
+      },
+      "iron_fertigation": {
+        "aliases": [
+          "dose chelated iron",
+          "iron fertigation",
+          "add iron",
+          "fe supplement"
+        ],
+        "target": "ChelatedIronSupply",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 10,
+        "description": "chelated-iron dosing into the fertigation line"
+      },
+      "ph_acidifier": {
+        "aliases": [
+          "acidify the root zone",
+          "lower substrate ph",
+          "add acid",
+          "ph down"
+        ],
+        "target": "RhizospherePH",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 15,
+        "description": "acid injection to correct rhizosphere pH"
+      },
+      "foliar_colorant": {
+        "aliases": [
+          "foliar green spray",
+          "leaf colorant",
+          "cosmetic greening"
+        ],
+        "target": "LeafGreennessIndex",
+        "op": "mask",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 0,
+        "expr": "transient_boost(d)",
+        "description": "a foliar spray marketed to green up leaves"
+      }
+    },
+    "outcome": "CropYield",
+    "higher_is_better": true
+  },
+  "ground_truth": {
+    "true_root": "RootIronUptake",
+    "true_mechanism_proxy": "LeafGreennessIndex",
+    "confounded_decoys": [
+      "CanopyTemp"
+    ],
+    "targeted_actuator": "iron_fertigation",
+    "symptom_trap_actuator": "foliar_colorant",
+    "co_actuators": [
+      "iron_fertigation",
+      "ph_acidifier"
+    ],
+    "latent_plain_name": "iron lockout: the crop is iron-deficient NOT because iron is absent but because high rhizosphere pH (from the new substrate) makes dosed iron unavailable \u2014 iron uptake needs BOTH iron supply AND pH correction together",
+    "naive_interventions": [
+      {
+        "nitrogen_feed": 100
+      },
+      {
+        "potassium_feed": 100
+      },
+      {
+        "light_controller": 100
+      },
+      {
+        "iron_fertigation": 100
+      },
+      {
+        "ph_acidifier": 100
+      }
+    ]
+  },
+  "oracle": {
+    "gold": {
+      "intervention": {
+        "iron_fertigation": 100.0,
+        "ph_acidifier": 100.0
+      },
+      "expected_utility": 67.97198479348862,
+      "baseline_utility": 19.57821216114938,
+      "active_actuators": [
+        "iron_fertigation",
+        "ph_acidifier"
+      ]
+    },
+    "counterfactual_battery": {
+      "true_mechanism_proxy": "LeafGreennessIndex",
+      "valid_mechanism_proxies": [
+        "LeafGreennessIndex"
+      ],
+      "confounded_decoys": [
+        "CanopyTemp"
+      ],
+      "actuator_sign_predictions": {
+        "co2_injector": "0",
+        "irrigation_controller": "0",
+        "nitrogen_feed": "0",
+        "potassium_feed": "0",
+        "light_controller": "0",
+        "vpd_controller": "0",
+        "iron_fertigation": "+",
+        "ph_acidifier": "+",
+        "foliar_colorant": "0"
+      },
+      "targeted_actuator": "iron_fertigation",
+      "symptom_trap_actuator": "foliar_colorant"
+    },
+    "calibration": {
+      "proxy_assay_noise": 0.5,
+      "proxy_corr": 0.006,
+      "decoy_corr": 0.406
+    },
+    "audits": {
+      "decoy": {
+        "passed": true,
+        "decoys": {
+          "CanopyTemp": {
+            "obs_corr": 0.406,
+            "clamp_do_effect": 0.0,
+            "ok": true
+          }
+        }
+      },
+      "proxy_signal": {
+        "passed": true,
+        "proxy_outcome_corr": 0.01,
+        "obs_ok": false,
+        "interventional_shift_sd": 150.87,
+        "interv_ok": true,
+        "band": [
+          0.35,
+          0.75
+        ]
+      },
+      "distractor_inertness": {
+        "passed": true,
+        "n_inert_checked": 7,
+        "violations": []
+      },
+      "gold_selfconsistency": {
+        "passed": true,
+        "gold_utility": 67.97,
+        "beating_perturbations": []
+      },
+      "counterintuitiveness": {
+        "passed": true,
+        "baseline_utility": 19.57,
+        "gold_utility": 67.97,
+        "naive_results": [
+          {
+            "naive": {
+              "nitrogen_feed": 100
+            },
+            "utility": 19.57,
+            "gain_over_baseline": 0.0,
+            "fraction_of_gold_benefit": 0.0,
+            "helps": false
+          },
+          {
+            "naive": {
+              "potassium_feed": 100
+            },
+            "utility": 19.57,
+            "gain_over_baseline": 0.0,
+            "fraction_of_gold_benefit": 0.0,
+            "helps": false
+          },
+          {
+            "naive": {
+              "light_controller": 100
+            },
+            "utility": 19.57,
+            "gain_over_baseline": 0.0,
+            "fraction_of_gold_benefit": 0.0,
+            "helps": false
+          },
+          {
+            "naive": {
+              "iron_fertigation": 100
+            },
+            "utility": 21.84,
+            "gain_over_baseline": 2.27,
+            "fraction_of_gold_benefit": 0.047,
+            "helps": false
+          },
+          {
+            "naive": {
+              "ph_acidifier": 100
+            },
+            "utility": 20.84,
+            "gain_over_baseline": 1.28,
+            "fraction_of_gold_benefit": 0.026,
+            "helps": false
+          }
+        ],
+        "note": "obvious first move must not meaningfully help"
+      }
+    }
+  }
+}

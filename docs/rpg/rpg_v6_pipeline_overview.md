@@ -63,9 +63,8 @@ Generation & world model:
 - **`worlds_v6.py`** — the topology templates as SCM specs + scenario prose +
   hidden ground-truth roles (`true_root`, `true_mechanism_proxy`,
   `confounded_decoys`, `targeted_actuator`, `symptom_trap_actuator`,
-  `naive_interventions`). Four implemented: `bioreactor_titer_loss_v6`,
-  `datacenter_throughput_v6`, `greenhouse_yield_v6`, `clinic_readmission_v6` —
-  though only the first two have been exercised on a live API run (see §7).
+  `naive_interventions`). Two so far: `bioreactor_titer_loss_v6`,
+  `datacenter_throughput_v6`.
 - **`oracle_v6.py`** — computed gold (screen actuators → search combinations →
   golden-section refine continuous doses), counterfactual battery, calibration,
   and the audit suite.
@@ -152,10 +151,8 @@ leak risk.
 
 ## 7. Scale (where we are vs. where we're going)
 
-- **Now (pilot):** 4 topologies implemented, but only 2 (`bioreactor`,
-  `datacenter`) run on real API — those are the `out_v6_batch/` worlds behind
-  `results_v6/batch1` and `batch2`. `out_v6_batch3/` holds 8 generated worlds
-  covering all four and **has not been run yet**; that is the open next step.
+- **Now (pilot):** 2 topologies × seed-jitter. Validates the full pipeline on
+  real API; gives two genuinely different structures.
 - **Design choice:** scale by **distinct topologies first, seeds second** — the
   hard part is *structure*, so jittered clones of one template test the same
   insight repeatedly (measures reliability, not breadth).

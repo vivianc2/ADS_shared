@@ -1,0 +1,667 @@
+{
+  "schema_version": "rpg_scm_v7",
+  "world_id": "v7_clinical_chain_symptom_trap_300024",
+  "domain": "clinical",
+  "meta": {
+    "seed": 300024,
+    "features": [
+      "symptom_trap"
+    ],
+    "skin": "clinical",
+    "depth": 4
+  },
+  "scenario": "On a post-surgical step-down unit, the average functional recovery score for recovering patients has slipped about 25% over the past quarter, and the pattern has held across successive admissions. It emerged after a change to the unit's standing medication and fluid protocol. The care team's leading theories are that patients are dehydrated or under-oxygenated, so they favor more fluids and oxygen. Several patients have shown low-grade temperature readings on and off. Routine labs and vitals read broadly within range. The fluid and oxygen orders, medication list, and supportive care are all adjustable within protocol. You have a limited number of experiments; you may measure quantities and apply available interventions, alone or in combination. Determine what is really driving the decline and what to do about it.",
+  "scm": {
+    "variables": {
+      "OccultInfectionSusceptibility": {
+        "aliases": [
+          "susceptibility",
+          "batch susceptibility"
+        ],
+        "kind": "latent",
+        "dist": {
+          "normal": [
+            55,
+            20
+          ]
+        }
+      },
+      "ComorbidityIndex": {
+        "aliases": [
+          "comorbidity index",
+          "baseline frailty"
+        ],
+        "kind": "latent",
+        "dist": {
+          "normal": [
+            50,
+            16
+          ]
+        }
+      },
+      "SupplementalOxygen": {
+        "aliases": [
+          "supplemental oxygen",
+          "oxygen flow"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            40,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "OccultInfection": {
+        "aliases": [
+          "occult infection",
+          "smoldering infection",
+          "hidden infection"
+        ],
+        "kind": "latent",
+        "parents": [
+          "SupplementalOxygen",
+          "OccultInfectionSusceptibility"
+        ],
+        "mech": {
+          "form": "interaction",
+          "a": "SupplementalOxygen",
+          "b": "OccultInfectionSusceptibility",
+          "gain": 260.0,
+          "scale": 100.0,
+          "intercept": 3.0
+        },
+        "noise": {
+          "normal": [
+            0,
+            1.5
+          ]
+        }
+      },
+      "ImmuneExhaustion": {
+        "aliases": [
+          "immune exhaustion",
+          "immune depletion"
+        ],
+        "kind": "latent",
+        "parents": [
+          "OccultInfection"
+        ],
+        "mech": {
+          "form": "hill",
+          "of": "OccultInfection",
+          "vmax": 70,
+          "k": 35,
+          "n": 2
+        }
+      },
+      "OrganPerfusion": {
+        "aliases": [
+          "organ perfusion",
+          "end-organ perfusion"
+        ],
+        "kind": "latent",
+        "parents": [
+          "ImmuneExhaustion"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "ImmuneExhaustion": 0.9
+          },
+          "intercept": 5
+        }
+      },
+      "TissueOxygenDelivery": {
+        "aliases": [
+          "tissue oxygen delivery",
+          "oxygen delivery"
+        ],
+        "kind": "latent",
+        "parents": [
+          "OrganPerfusion"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "OrganPerfusion": 0.9
+          },
+          "intercept": 5
+        }
+      },
+      "SystemicInflammation": {
+        "aliases": [
+          "systemic inflammation",
+          "inflammatory cascade"
+        ],
+        "kind": "latent",
+        "parents": [
+          "TissueOxygenDelivery"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "TissueOxygenDelivery": 0.9
+          },
+          "intercept": 5
+        }
+      },
+      "RecoveryScore": {
+        "aliases": [
+          "recovery score",
+          "recovery index",
+          "functional recovery"
+        ],
+        "kind": "outcome",
+        "parents": [
+          "SystemicInflammation",
+          "ComorbidityIndex"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "SystemicInflammation": -0.9,
+            "ComorbidityIndex": 0.4
+          },
+          "intercept": 15
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "CReactiveProtein": {
+        "aliases": [
+          "c-reactive protein",
+          "crp",
+          "inflammatory marker"
+        ],
+        "kind": "observable",
+        "parents": [
+          "OrganPerfusion"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "OrganPerfusion": 0.8
+          },
+          "intercept": 5
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            14.52
+          ]
+        }
+      },
+      "HeartRate": {
+        "aliases": [
+          "heart rate",
+          "pulse rate"
+        ],
+        "kind": "observable",
+        "parents": [
+          "ComorbidityIndex"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "ComorbidityIndex": 0.7
+          },
+          "intercept": 40
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            4
+          ]
+        }
+      },
+      "BodyTemperature": {
+        "aliases": [
+          "body temperature",
+          "core temp",
+          "fever reading"
+        ],
+        "kind": "observable",
+        "parents": [
+          "ComorbidityIndex"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "ComorbidityIndex": 0.7
+          },
+          "intercept": 40
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            4
+          ]
+        }
+      },
+      "AmbientNoise": {
+        "aliases": [
+          "ambient noise",
+          "ward noise level"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "RespiratoryRate": {
+        "aliases": [
+          "respiratory rate",
+          "breathing rate"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "BloodGlucose": {
+        "aliases": [
+          "blood glucose",
+          "serum glucose"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "BloodPressure": {
+        "aliases": [
+          "blood pressure",
+          "arterial pressure"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "SleepHours": {
+        "aliases": [
+          "sleep hours",
+          "rest duration"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "PainScore": {
+        "aliases": [
+          "pain score",
+          "reported pain"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "UrineOutput": {
+        "aliases": [
+          "urine output",
+          "diuresis"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "PhysioTherapyDose": {
+        "aliases": [
+          "physiotherapy dose",
+          "rehab intensity"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      }
+    },
+    "actuators": {
+      "SupplementalOxygen": {
+        "aliases": [
+          "supplemental oxygen",
+          "oxygen flow"
+        ],
+        "target": "SupplementalOxygen",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 40,
+        "description": "controller for SupplementalOxygen"
+      },
+      "TargetedAntimicrobial": {
+        "aliases": [
+          "targeted antimicrobial",
+          "culture-directed antibiotic"
+        ],
+        "target": "OccultInfection",
+        "op": "scale",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 0,
+        "expr": "1-sat(d;k=0.66)",
+        "description": "dosing to reduce OccultInfection"
+      },
+      "Antipyretic": {
+        "aliases": [
+          "antipyretic",
+          "fever suppressant",
+          "temperature-lowering drug"
+        ],
+        "target": "RecoveryScore",
+        "op": "mask",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 0,
+        "expr": "transient_boost(d)",
+        "description": "a control that adjusts the RecoveryScore readout"
+      },
+      "set_AmbientNoise": {
+        "aliases": [
+          "set ambient noise",
+          "set ward noise level",
+          "adjust AmbientNoise"
+        ],
+        "target": "AmbientNoise",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for AmbientNoise"
+      },
+      "set_RespiratoryRate": {
+        "aliases": [
+          "set respiratory rate",
+          "set breathing rate",
+          "adjust RespiratoryRate"
+        ],
+        "target": "RespiratoryRate",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for RespiratoryRate"
+      },
+      "set_BloodGlucose": {
+        "aliases": [
+          "set blood glucose",
+          "set serum glucose",
+          "adjust BloodGlucose"
+        ],
+        "target": "BloodGlucose",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for BloodGlucose"
+      },
+      "set_BloodPressure": {
+        "aliases": [
+          "set blood pressure",
+          "set arterial pressure",
+          "adjust BloodPressure"
+        ],
+        "target": "BloodPressure",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for BloodPressure"
+      }
+    },
+    "outcome": "RecoveryScore",
+    "higher_is_better": true
+  },
+  "ground_truth": {
+    "true_root": "OccultInfection",
+    "true_mechanism_proxy": "CReactiveProtein",
+    "confounded_decoys": [
+      "HeartRate",
+      "BodyTemperature"
+    ],
+    "targeted_actuator": "TargetedAntimicrobial",
+    "symptom_trap_actuator": "Antipyretic",
+    "co_actuators": null,
+    "selection_decoy": null,
+    "subtype_policy": null,
+    "latent_plain_name": "a hidden occult infection that propagates through immune exhaustion, organ perfusion, tissue oxygen delivery, systemic inflammation to the outcome",
+    "naive_interventions": [
+      {
+        "set_AmbientNoise": 100
+      },
+      {
+        "set_RespiratoryRate": 100
+      }
+    ],
+    "_features": [
+      "symptom_trap"
+    ],
+    "_skin": "clinical",
+    "_depth": 4,
+    "_archetype": "confounded_chain",
+    "_seed": 300024
+  },
+  "oracle": {
+    "gold": {
+      "intervention": {
+        "TargetedAntimicrobial": 100.0
+      },
+      "expected_utility": 22.795888524270772,
+      "baseline_utility": -8.236375836651906,
+      "active_actuators": [
+        "SupplementalOxygen",
+        "TargetedAntimicrobial"
+      ]
+    },
+    "counterfactual_battery": {
+      "true_mechanism_proxy": "CReactiveProtein",
+      "valid_mechanism_proxies": [
+        "CReactiveProtein"
+      ],
+      "confounded_decoys": [
+        "BodyTemperature",
+        "HeartRate"
+      ],
+      "actuator_sign_predictions": {
+        "SupplementalOxygen": "-",
+        "TargetedAntimicrobial": "+",
+        "Antipyretic": "0",
+        "set_AmbientNoise": "0",
+        "set_RespiratoryRate": "0",
+        "set_BloodGlucose": "0",
+        "set_BloodPressure": "0"
+      },
+      "targeted_actuator": "TargetedAntimicrobial",
+      "symptom_trap_actuator": "Antipyretic"
+    },
+    "calibration": {
+      "proxy_assay_noise": 14.52,
+      "proxy_corr": 0.467,
+      "decoy_corr": 0.512
+    },
+    "audits": {
+      "decoy": {
+        "passed": true,
+        "decoys": {
+          "HeartRate": {
+            "obs_corr": 0.512,
+            "clamp_do_effect": 0.0,
+            "ok": true
+          },
+          "BodyTemperature": {
+            "obs_corr": 0.521,
+            "clamp_do_effect": 0.0,
+            "ok": true
+          }
+        }
+      },
+      "proxy_signal": {
+        "passed": true,
+        "proxy_outcome_corr": -0.468,
+        "obs_ok": true,
+        "interventional_shift_sd": 1.92,
+        "interv_ok": true,
+        "band": [
+          0.35,
+          0.75
+        ]
+      },
+      "distractor_inertness": {
+        "passed": true,
+        "n_inert_checked": 5,
+        "violations": []
+      },
+      "gold_selfconsistency": {
+        "passed": true,
+        "gold_utility": 22.8,
+        "beating_perturbations": []
+      },
+      "counterintuitiveness": {
+        "passed": true,
+        "baseline_utility": -8.22,
+        "gold_utility": 22.8,
+        "naive_results": [
+          {
+            "naive": {
+              "set_AmbientNoise": 100
+            },
+            "utility": -8.22,
+            "gain_over_baseline": 0.0,
+            "fraction_of_gold_benefit": 0.0,
+            "helps": false
+          },
+          {
+            "naive": {
+              "set_RespiratoryRate": 100
+            },
+            "utility": -8.22,
+            "gain_over_baseline": 0.0,
+            "fraction_of_gold_benefit": 0.0,
+            "helps": false
+          }
+        ],
+        "note": "obvious first move must not meaningfully help"
+      }
+    }
+  }
+}

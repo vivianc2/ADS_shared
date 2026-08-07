@@ -1,0 +1,665 @@
+{
+  "schema_version": "rpg_scm_v6",
+  "world_id": "clinic_readmission_v6_40404",
+  "domain": "clinical_ops",
+  "template": "clinic_readmission_v6",
+  "meta": {
+    "seed": 40404
+  },
+  "scenario": "A hospital's 30-day heart-failure readmission rate has climbed and is not responding to the standard care-improvement bundle. Quality leads suspect poor medication adherence, insufficient follow-up scheduling, or blood-pressure control. A pilot that adjusted diuretic dosing 'showed no average effect' and was set aside. HbA1c, creatinine, BP, sodium, hemoglobin, LOS, and follow-up intervals are all tracked and look unremarkable on average. You can order assays on the patient population and can apply care programs and dose adjustments, alone or in combination. Determine what actually drives readmissions and what to do. Note: an intervention with ~zero AVERAGE effect may still matter.",
+  "scm": {
+    "variables": {
+      "LatentVolumeStatus": {
+        "kind": "latent",
+        "aliases": [
+          "volume status",
+          "fluid status",
+          "patient subtype"
+        ],
+        "dist": {
+          "normal": [
+            70,
+            22
+          ]
+        }
+      },
+      "DischargeRecency": {
+        "kind": "latent",
+        "aliases": [
+          "discharge recency",
+          "days since discharge"
+        ],
+        "dist": {
+          "normal": [
+            50,
+            16
+          ]
+        }
+      },
+      "DiureticDose": {
+        "kind": "latent",
+        "aliases": [
+          "diuretic dose applied"
+        ],
+        "dist": {
+          "normal": [
+            0,
+            0.01
+          ]
+        }
+      },
+      "LatentVolumeStatusCentered": {
+        "kind": "latent",
+        "aliases": [
+          "centered volume"
+        ],
+        "parents": [
+          "LatentVolumeStatus"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "LatentVolumeStatus": 1.0
+          },
+          "intercept": -50.0
+        }
+      },
+      "FluidDeviation": {
+        "kind": "latent",
+        "aliases": [
+          "fluid deviation",
+          "fluid balance"
+        ],
+        "parents": [
+          "DiureticDose",
+          "LatentVolumeStatusCentered"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "LatentVolumeStatusCentered": 1.0,
+            "DiureticDose": -0.6
+          },
+          "intercept": 0.0
+        },
+        "noise": {
+          "normal": [
+            0,
+            2
+          ]
+        }
+      },
+      "FluidDeviationAbs": {
+        "kind": "latent",
+        "aliases": [
+          "absolute fluid deviation"
+        ],
+        "parents": [
+          "FluidDeviation"
+        ],
+        "mech": {
+          "form": "abs",
+          "of": "FluidDeviation",
+          "gain": 1.0,
+          "center": 0.0
+        }
+      },
+      "ReadmissionRate": {
+        "kind": "outcome",
+        "aliases": [
+          "readmission rate",
+          "readmissions",
+          "bounce-back rate"
+        ],
+        "parents": [
+          "FluidDeviationAbs",
+          "DischargeRecency"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "FluidDeviationAbs": 0.8,
+            "DischargeRecency": 0.4
+          },
+          "intercept": 10
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "CongestionBiomarker": {
+        "kind": "observable",
+        "aliases": [
+          "congestion biomarker",
+          "bnp",
+          "fluid biomarker",
+          "volume marker"
+        ],
+        "parents": [
+          "FluidDeviationAbs"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "FluidDeviationAbs": 0.9
+          },
+          "intercept": 5
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            22.65
+          ]
+        }
+      },
+      "BaselineVolumeScreen": {
+        "kind": "observable",
+        "aliases": [
+          "baseline volume screen",
+          "admission volume",
+          "subtype screen",
+          "volume assessment"
+        ],
+        "parents": [
+          "LatentVolumeStatus"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "LatentVolumeStatus": 1.0
+          },
+          "intercept": 0
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            6
+          ]
+        }
+      },
+      "LengthOfStay": {
+        "kind": "observable",
+        "aliases": [
+          "length of stay",
+          "los",
+          "hospital days"
+        ],
+        "parents": [
+          "DischargeRecency"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "DischargeRecency": 0.6
+          },
+          "intercept": 10
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            4
+          ]
+        }
+      },
+      "HbA1c": {
+        "kind": "observable",
+        "aliases": [
+          "hba1c",
+          "glycemic control"
+        ],
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "Creatinine": {
+        "kind": "observable",
+        "aliases": [
+          "creatinine",
+          "renal function"
+        ],
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "BloodPressure": {
+        "kind": "observable",
+        "aliases": [
+          "blood pressure",
+          "bp"
+        ],
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "MedAdherence": {
+        "kind": "observable",
+        "aliases": [
+          "medication adherence",
+          "adherence"
+        ],
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "FollowupDays": {
+        "kind": "observable",
+        "aliases": [
+          "followup interval",
+          "days to followup"
+        ],
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "BMI": {
+        "kind": "observable",
+        "aliases": [
+          "bmi",
+          "body mass index"
+        ],
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "HeartRate": {
+        "kind": "observable",
+        "aliases": [
+          "heart rate",
+          "pulse"
+        ],
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "Sodium": {
+        "kind": "observable",
+        "aliases": [
+          "serum sodium",
+          "na"
+        ],
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "Hemoglobin": {
+        "kind": "observable",
+        "aliases": [
+          "hemoglobin",
+          "hb"
+        ],
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "AgeIndex": {
+        "kind": "observable",
+        "aliases": [
+          "age index",
+          "patient age"
+        ],
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      }
+    },
+    "actuators": {
+      "statin_program": {
+        "aliases": [
+          "start statin",
+          "lipid program"
+        ],
+        "target": "HbA1c",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50.0,
+        "description": "control handle for HbA1c"
+      },
+      "bp_control": {
+        "aliases": [
+          "tighten bp control",
+          "antihypertensive"
+        ],
+        "target": "BloodPressure",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50.0,
+        "description": "control handle for BloodPressure"
+      },
+      "adherence_program": {
+        "aliases": [
+          "adherence program",
+          "med reminders"
+        ],
+        "target": "MedAdherence",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50.0,
+        "description": "control handle for MedAdherence"
+      },
+      "followup_scheduling": {
+        "aliases": [
+          "earlier followup",
+          "schedule followup"
+        ],
+        "target": "FollowupDays",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50.0,
+        "description": "control handle for FollowupDays"
+      },
+      "sodium_restriction": {
+        "aliases": [
+          "sodium restriction",
+          "low-salt diet"
+        ],
+        "target": "Sodium",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50.0,
+        "description": "control handle for Sodium"
+      },
+      "diuretic_titration": {
+        "aliases": [
+          "titrate diuretic",
+          "diuretic dose",
+          "adjust diuretic",
+          "furosemide"
+        ],
+        "target": "DiureticDose",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 0,
+        "description": "loop-diuretic dosing"
+      },
+      "telehealth_coding": {
+        "aliases": [
+          "telehealth followup coding",
+          "observation-status coding",
+          "reclassify readmissions"
+        ],
+        "target": "ReadmissionRate",
+        "op": "mask",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 0,
+        "expr": "-transient_boost(d)",
+        "description": "a telehealth/observation-status coding change"
+      }
+    },
+    "outcome": "ReadmissionRate",
+    "higher_is_better": false
+  },
+  "ground_truth": {
+    "true_root": "FluidDeviationAbs",
+    "true_mechanism_proxy": "CongestionBiomarker",
+    "confounded_decoys": [
+      "LengthOfStay"
+    ],
+    "targeted_actuator": "diuretic_titration",
+    "symptom_trap_actuator": "telehealth_coding",
+    "subtype_screen": "BaselineVolumeScreen",
+    "latent_plain_name": "effect heterogeneity by fluid subtype: patients split into fluid-overloaded (diuretic helps) and fluid-depleted (diuretic harms); the population-average diuretic effect is ~zero, hiding strong opposite effects \u2014 the fix is a SUBTYPE-TARGETED dose",
+    "naive_interventions": [
+      {
+        "adherence_program": 100
+      },
+      {
+        "bp_control": 100
+      },
+      {
+        "followup_scheduling": 100
+      },
+      {
+        "sodium_restriction": 100
+      }
+    ]
+  },
+  "oracle": {
+    "gold": {
+      "intervention": {
+        "diuretic_titration": 34.19
+      },
+      "expected_utility": -44.01692070954623,
+      "baseline_utility": -49.73559807716397,
+      "active_actuators": [
+        "diuretic_titration"
+      ]
+    },
+    "counterfactual_battery": {
+      "true_mechanism_proxy": "CongestionBiomarker",
+      "valid_mechanism_proxies": [
+        "CongestionBiomarker"
+      ],
+      "confounded_decoys": [
+        "LengthOfStay"
+      ],
+      "actuator_sign_predictions": {
+        "statin_program": "0",
+        "bp_control": "0",
+        "adherence_program": "0",
+        "followup_scheduling": "0",
+        "sodium_restriction": "0",
+        "diuretic_titration": "-",
+        "telehealth_coding": "0"
+      },
+      "targeted_actuator": "diuretic_titration",
+      "symptom_trap_actuator": "telehealth_coding"
+    },
+    "calibration": {
+      "proxy_assay_noise": 22.65,
+      "proxy_corr": 0.502,
+      "decoy_corr": 0.39
+    },
+    "audits": {
+      "decoy": {
+        "passed": true,
+        "decoys": {
+          "LengthOfStay": {
+            "obs_corr": 0.39,
+            "clamp_do_effect": 0.0,
+            "ok": true
+          }
+        }
+      },
+      "proxy_signal": {
+        "passed": true,
+        "proxy_outcome_corr": 0.503,
+        "obs_ok": true,
+        "interventional_shift_sd": 0.53,
+        "interv_ok": false,
+        "band": [
+          0.35,
+          0.75
+        ]
+      },
+      "distractor_inertness": {
+        "passed": true,
+        "n_inert_checked": 6,
+        "violations": []
+      },
+      "gold_selfconsistency": {
+        "passed": true,
+        "gold_utility": -44.02,
+        "beating_perturbations": []
+      },
+      "counterintuitiveness": {
+        "passed": true,
+        "baseline_utility": -49.53,
+        "gold_utility": -44.02,
+        "naive_results": [
+          {
+            "naive": {
+              "adherence_program": 100
+            },
+            "utility": -49.53,
+            "gain_over_baseline": 0.0,
+            "fraction_of_gold_benefit": 0.0,
+            "helps": false
+          },
+          {
+            "naive": {
+              "bp_control": 100
+            },
+            "utility": -49.53,
+            "gain_over_baseline": 0.0,
+            "fraction_of_gold_benefit": 0.0,
+            "helps": false
+          },
+          {
+            "naive": {
+              "followup_scheduling": 100
+            },
+            "utility": -49.53,
+            "gain_over_baseline": 0.0,
+            "fraction_of_gold_benefit": 0.0,
+            "helps": false
+          },
+          {
+            "naive": {
+              "sodium_restriction": 100
+            },
+            "utility": -49.53,
+            "gain_over_baseline": 0.0,
+            "fraction_of_gold_benefit": 0.0,
+            "helps": false
+          }
+        ],
+        "note": "obvious first move must not meaningfully help"
+      }
+    }
+  }
+}

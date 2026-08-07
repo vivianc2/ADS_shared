@@ -1,0 +1,782 @@
+{
+  "schema_version": "rpg_scm_v7",
+  "world_id": "v7_aquaculture_collider_interior_dose_sign_f_310006",
+  "domain": "aquaculture",
+  "meta": {
+    "seed": 310006,
+    "features": [
+      "interior_dose",
+      "sign_flip",
+      "symptom_trap"
+    ],
+    "skin": "aquaculture",
+    "depth": 4
+  },
+  "scenario": "A recirculating aquaculture facility raising Atlantic salmon has seen harvest biomass at harvest fall about 30% over the last two cohorts, repeating across grow-out cohorts. The shortfall began after a change in intake water after a neighboring discharge permit was revised. The farm team's leading theories are underfeeding or overcrowding, so they favor more feed and lower density. Fish have been seen flaring their gills and crowding the inflow. Routine water-quality panels read broadly within range. The feeding, stocking, filtration, and aeration systems are all adjustable, and treatment equipment is available. You have a limited number of experiments; you may measure quantities and apply available controls or treatments, alone or in combination. Determine what is really driving the loss and what to do about it.",
+  "scm": {
+    "variables": {
+      "DissolvedToxicantSusceptibility": {
+        "aliases": [
+          "susceptibility",
+          "batch susceptibility"
+        ],
+        "kind": "latent",
+        "dist": {
+          "normal": [
+            55,
+            20
+          ]
+        }
+      },
+      "StockGenetics": {
+        "aliases": [
+          "stock genetics",
+          "broodstock line"
+        ],
+        "kind": "latent",
+        "dist": {
+          "normal": [
+            50,
+            16
+          ]
+        }
+      },
+      "StockingDensity": {
+        "aliases": [
+          "stocking density",
+          "fish density"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            40,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "StockingDensityHarmAxis": {
+        "aliases": [
+          "harm axis"
+        ],
+        "kind": "latent",
+        "parents": [
+          "StockingDensity"
+        ],
+        "mech": {
+          "form": "sign_flip",
+          "of": "StockingDensity",
+          "knee": 45,
+          "lo_gain": 0.05,
+          "hi_gain": 0.9,
+          "intercept": 2.0
+        }
+      },
+      "DissolvedToxicant": {
+        "aliases": [
+          "dissolved toxicant",
+          "waterborne toxin",
+          "trace toxicant"
+        ],
+        "kind": "latent",
+        "parents": [
+          "StockingDensityHarmAxis",
+          "DissolvedToxicantSusceptibility"
+        ],
+        "mech": {
+          "form": "interaction",
+          "a": "StockingDensityHarmAxis",
+          "b": "DissolvedToxicantSusceptibility",
+          "gain": 260.0,
+          "scale": 100.0,
+          "intercept": 3.0
+        },
+        "noise": {
+          "normal": [
+            0,
+            1.5
+          ]
+        }
+      },
+      "FeedConversion": {
+        "aliases": [
+          "feed conversion",
+          "feed efficiency"
+        ],
+        "kind": "latent",
+        "parents": [
+          "DissolvedToxicant"
+        ],
+        "mech": {
+          "form": "hill",
+          "of": "DissolvedToxicant",
+          "vmax": 70,
+          "k": 35,
+          "n": 2
+        }
+      },
+      "StressResponse": {
+        "aliases": [
+          "stress response",
+          "cortisol axis activation"
+        ],
+        "kind": "latent",
+        "parents": [
+          "FeedConversion"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "FeedConversion": 0.9
+          },
+          "intercept": 5
+        }
+      },
+      "ImmuneCompetence": {
+        "aliases": [
+          "immune competence",
+          "disease resistance"
+        ],
+        "kind": "latent",
+        "parents": [
+          "StressResponse"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "StressResponse": 0.9
+          },
+          "intercept": 5
+        }
+      },
+      "GillFunction": {
+        "aliases": [
+          "gill function",
+          "respiratory surface health"
+        ],
+        "kind": "latent",
+        "parents": [
+          "ImmuneCompetence"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "ImmuneCompetence": 0.9
+          },
+          "intercept": 5
+        }
+      },
+      "HarvestBiomass": {
+        "aliases": [
+          "harvest biomass",
+          "grow-out biomass",
+          "final biomass",
+          "biomass"
+        ],
+        "kind": "outcome",
+        "parents": [
+          "GillFunction",
+          "StockGenetics"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "GillFunction": -0.9,
+            "StockGenetics": 0.2
+          },
+          "intercept": 15
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "GillHistologyScore": {
+        "aliases": [
+          "gill histology score",
+          "gill damage index"
+        ],
+        "kind": "observable",
+        "parents": [
+          "StressResponse"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "StressResponse": 0.8
+          },
+          "intercept": 5
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            11.64
+          ]
+        }
+      },
+      "TankTurbidity": {
+        "aliases": [
+          "tank turbidity",
+          "water cloudiness"
+        ],
+        "kind": "observable",
+        "parents": [
+          "StockGenetics"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "StockGenetics": 0.7
+          },
+          "intercept": 40
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            4
+          ]
+        }
+      },
+      "BiofilterLoad": {
+        "aliases": [
+          "biofilter load",
+          "filter biomass"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "NitriteLevel": {
+        "aliases": [
+          "nitrite level",
+          "nitrite concentration"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "WaterTempAqua": {
+        "aliases": [
+          "water temperature",
+          "tank temperature"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "WaterpH": {
+        "aliases": [
+          "water ph",
+          "tank ph"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "TankDepth": {
+        "aliases": [
+          "tank depth",
+          "water column depth"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "PelletSize": {
+        "aliases": [
+          "pellet size",
+          "feed particle size"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "CalciumHardness": {
+        "aliases": [
+          "calcium hardness",
+          "water hardness"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "UVSterilizer": {
+        "aliases": [
+          "uv sterilizer",
+          "uv treatment"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "SalinityDriver": {
+        "aliases": [
+          "latent driver"
+        ],
+        "kind": "latent",
+        "dist": {
+          "normal": [
+            50,
+            16
+          ]
+        }
+      },
+      "Salinity": {
+        "aliases": [
+          "salinity",
+          "salt concentration"
+        ],
+        "kind": "observable",
+        "parents": [
+          "SalinityDriver"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "SalinityDriver": 0.9
+          },
+          "intercept": 5
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            4
+          ]
+        }
+      },
+      "FlowThroughRate": {
+        "aliases": [
+          "flow-through rate",
+          "water exchange"
+        ],
+        "kind": "observable",
+        "parents": [
+          "GillFunction",
+          "SalinityDriver"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "GillFunction": 0.1474687715506792,
+            "SalinityDriver": 0.06274140611674402
+          },
+          "intercept": 0
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            0.1
+          ]
+        }
+      }
+    },
+    "actuators": {
+      "StockingDensity": {
+        "aliases": [
+          "stocking density",
+          "fish density"
+        ],
+        "target": "StockingDensity",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 40,
+        "description": "controller for StockingDensity"
+      },
+      "Aeration": {
+        "aliases": [
+          "aeration upgrade",
+          "oxygen injection"
+        ],
+        "target": "DissolvedToxicant",
+        "op": "scale",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 0,
+        "expr": "1-sat(d;k=0.66)",
+        "description": "dosing to reduce DissolvedToxicant",
+        "side_effect": {
+          "target": "HarvestBiomass",
+          "expr": "-overstrip(d;thr=0.66,gain=30)"
+        }
+      },
+      "GradingReclassify": {
+        "aliases": [
+          "grading reclassification",
+          "size-grading shift"
+        ],
+        "target": "HarvestBiomass",
+        "op": "mask",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 0,
+        "expr": "transient_boost(d)",
+        "description": "a control that adjusts the HarvestBiomass readout"
+      },
+      "set_BiofilterLoad": {
+        "aliases": [
+          "set biofilter load",
+          "set filter biomass",
+          "adjust BiofilterLoad"
+        ],
+        "target": "BiofilterLoad",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for BiofilterLoad"
+      },
+      "set_NitriteLevel": {
+        "aliases": [
+          "set nitrite level",
+          "set nitrite concentration",
+          "adjust NitriteLevel"
+        ],
+        "target": "NitriteLevel",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for NitriteLevel"
+      },
+      "set_WaterTempAqua": {
+        "aliases": [
+          "set water temperature",
+          "set tank temperature",
+          "adjust WaterTempAqua"
+        ],
+        "target": "WaterTempAqua",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for WaterTempAqua"
+      },
+      "set_WaterpH": {
+        "aliases": [
+          "set water ph",
+          "set tank ph",
+          "adjust WaterpH"
+        ],
+        "target": "WaterpH",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for WaterpH"
+      },
+      "set_TankDepth": {
+        "aliases": [
+          "set tank depth",
+          "set water column depth",
+          "adjust TankDepth"
+        ],
+        "target": "TankDepth",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for TankDepth"
+      },
+      "set_PelletSize": {
+        "aliases": [
+          "set pellet size",
+          "set feed particle size",
+          "adjust PelletSize"
+        ],
+        "target": "PelletSize",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for PelletSize"
+      }
+    },
+    "outcome": "HarvestBiomass",
+    "higher_is_better": true,
+    "selection": {
+      "node": "FlowThroughRate",
+      "op": ">=",
+      "thresh": 6.168378023066182,
+      "soft": 0.1392673332756085
+    }
+  },
+  "ground_truth": {
+    "true_root": "DissolvedToxicant",
+    "true_mechanism_proxy": "GillHistologyScore",
+    "confounded_decoys": [
+      "TankTurbidity",
+      "Salinity"
+    ],
+    "targeted_actuator": "Aeration",
+    "symptom_trap_actuator": "GradingReclassify",
+    "co_actuators": null,
+    "selection_decoy": "Salinity",
+    "subtype_policy": null,
+    "latent_plain_name": "a hidden dissolved toxicant that propagates through feed conversion, stress response, immune competence, gill function to the outcome",
+    "naive_interventions": [
+      {
+        "StockingDensity": 100
+      },
+      {
+        "set_BiofilterLoad": 100
+      },
+      {
+        "set_NitriteLevel": 100
+      }
+    ],
+    "_features": [
+      "interior_dose",
+      "sign_flip",
+      "symptom_trap"
+    ],
+    "_skin": "aquaculture",
+    "_depth": 4,
+    "_archetype": "collider_selection",
+    "_seed": 310006
+  },
+  "oracle": {
+    "gold": {
+      "intervention": {
+        "StockingDensity": 0.0,
+        "Aeration": 66.0
+      },
+      "expected_utility": 12.800444262135386,
+      "baseline_utility": 7.494200254584521,
+      "active_actuators": [
+        "StockingDensity",
+        "Aeration"
+      ]
+    },
+    "counterfactual_battery": {
+      "true_mechanism_proxy": "GillHistologyScore",
+      "valid_mechanism_proxies": [
+        "FlowThroughRate",
+        "GillHistologyScore"
+      ],
+      "confounded_decoys": [
+        "Salinity",
+        "TankTurbidity"
+      ],
+      "actuator_sign_predictions": {
+        "StockingDensity": "-",
+        "Aeration": "-",
+        "GradingReclassify": "0",
+        "set_BiofilterLoad": "0",
+        "set_NitriteLevel": "0",
+        "set_WaterTempAqua": "0",
+        "set_WaterpH": "0",
+        "set_TankDepth": "0",
+        "set_PelletSize": "0"
+      },
+      "targeted_actuator": "Aeration",
+      "symptom_trap_actuator": "GradingReclassify"
+    },
+    "calibration": {
+      "proxy_assay_noise": 11.64,
+      "proxy_corr": 0.524,
+      "decoy_corr": 0.341
+    },
+    "audits": {
+      "decoy": {
+        "passed": true,
+        "decoys": {
+          "TankTurbidity": {
+            "obs_corr": 0.341,
+            "clamp_do_effect": 0.0,
+            "ok": true
+          },
+          "Salinity": {
+            "obs_corr": 0.428,
+            "clamp_do_effect": 0.0,
+            "ok": true
+          }
+        }
+      },
+      "proxy_signal": {
+        "passed": true,
+        "proxy_outcome_corr": -0.515,
+        "obs_ok": true,
+        "interventional_shift_sd": 0.67,
+        "interv_ok": false,
+        "band": [
+          0.35,
+          0.75
+        ]
+      },
+      "distractor_inertness": {
+        "passed": true,
+        "n_inert_checked": 7,
+        "violations": []
+      },
+      "gold_selfconsistency": {
+        "passed": true,
+        "gold_utility": 12.8,
+        "beating_perturbations": []
+      },
+      "counterintuitiveness": {
+        "passed": true,
+        "baseline_utility": 7.48,
+        "gold_utility": 12.8,
+        "naive_results": [
+          {
+            "naive": {
+              "StockingDensity": 100
+            },
+            "utility": -23.6,
+            "gain_over_baseline": -31.08,
+            "fraction_of_gold_benefit": -5.843,
+            "helps": false
+          },
+          {
+            "naive": {
+              "set_BiofilterLoad": 100
+            },
+            "utility": 7.48,
+            "gain_over_baseline": 0.0,
+            "fraction_of_gold_benefit": 0.0,
+            "helps": false
+          },
+          {
+            "naive": {
+              "set_NitriteLevel": 100
+            },
+            "utility": 7.48,
+            "gain_over_baseline": 0.0,
+            "fraction_of_gold_benefit": 0.0,
+            "helps": false
+          }
+        ],
+        "note": "obvious first move must not meaningfully help"
+      }
+    }
+  }
+}

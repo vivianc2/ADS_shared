@@ -32,9 +32,13 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-FRAMEWORK = Path(__file__).resolve().parents[2] / "framework_code"
-if str(FRAMEWORK) not in sys.path:
-    sys.path.insert(0, str(FRAMEWORK))
+# bedrock_llm.py may live either in the sibling framework_code/ (in-repo layout)
+# or alongside this file (packaged/standalone layout). Add both to the path so
+# `from bedrock_llm import BedrockLLM` works in either case.
+_HERE = Path(__file__).resolve().parent
+for _cand in (_HERE, _HERE.parents[1] / "framework_code"):
+    if str(_cand) not in sys.path:
+        sys.path.insert(0, str(_cand))
 
 from worlds_v6 import ALL_WORLDS_V6      # noqa: E402
 from sim_v6 import SimV6                 # noqa: E402
@@ -191,13 +195,58 @@ class MockScientistV6:
         return f'<reasoning>done</reasoning>\n<action type="answer">{json.dumps(ans)}</action>\n<memory>done</memory>'
 
 
+# Nautilus (NRP) is an OpenAI-compatible gateway; override with NAUTILUS_BASE_URL.
+NAUTILUS_DEFAULT_BASE_URL = "https://ellm.nrp-nautilus.io/v1"
+
+
 def build_llm(backend, model, temperature, max_new_tokens):
     if backend == "mock":
         return MockScientistV6()
     if backend == "bedrock":
         from bedrock_llm import BedrockLLM
-        return BedrockLLM(model_id=model, temperature=temperature, max_new_tokens=max_new_tokens)
+        # None -> a generous default so Opus's reasoning+action is never truncated
+        # (Bedrock's own default is only 1536). Claude output cap is high; 8192 is
+        # ample for one turn and costs nothing unless actually generated.
+        bedrock_tokens = max_new_tokens if max_new_tokens is not None else 8192
+        return BedrockLLM(model_id=model, temperature=temperature or 0.3,
+                          max_new_tokens=bedrock_tokens)
+    if backend in ("openai", "nautilus"):
+        # Self-contained OpenAI-compatible client (Qwen/gpt-oss presets +
+        # reasoning_content capture); avoids world_model_causal's torch import.
+        from openai_llm import OpenAILLM
+        if backend == "nautilus":
+            base_url = os.environ.get("NAUTILUS_BASE_URL", NAUTILUS_DEFAULT_BASE_URL)
+            api_key = os.environ.get("NAUTILUS_API_KEY")
+            if not api_key:
+                raise RuntimeError("NAUTILUS_API_KEY not set in environment")
+        else:
+            base_url = os.environ.get("OPENAI_BASE_URL")
+            api_key = os.environ.get("OPENAI_API_KEY")
+        # temperature=None lets the per-model preset choose (recommended for Qwen3.6);
+        # pass through an explicit value only if the caller overrode the default.
+        return OpenAILLM(model_name=model, base_url=base_url, api_key=api_key,
+                         max_new_tokens=max_new_tokens,
+                         temperature=None if temperature is None else temperature)
     raise ValueError(backend)
+
+
+def build_resolver_llm(agent_backend, agent_llm, no_resolver_llm):
+    """The resolver's disambiguation LLM should be a FIXED strong model,
+    independent of which model is the agent — so resolution quality is held
+    constant across agent models and never conflates 'weak resolver' with 'weak
+    agent'. Preference: Bedrock Opus if credentials exist; else reuse the agent's
+    LLM (fine for a strong agent, e.g. Opus itself); else None (mock)."""
+    if no_resolver_llm or agent_backend == "mock":
+        return None
+    # prefer a fixed strong model for the resolver
+    if os.environ.get("AWS_BEARER_TOKEN_BEDROCK"):
+        try:
+            from bedrock_llm import BedrockLLM
+            return BedrockLLM(model_id="us.anthropic.claude-opus-4-8", max_new_tokens=200)
+        except Exception:
+            pass
+    # fallback: reuse the agent's own LLM as the resolver
+    return agent_llm
 
 
 def _resolve_answer_intervention(sim: SimV6, rec_text: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -212,7 +261,8 @@ def _resolve_answer_intervention(sim: SimV6, rec_text: List[Dict[str, Any]]) -> 
     return iv, echoes
 
 
-def run_world(sim: SimV6, llm, max_turns: int, budget: int, verbose: bool) -> Dict[str, Any]:
+def run_world(sim: SimV6, llm, max_turns: int, budget: int, verbose: bool,
+              max_new_tokens: Optional[int] = None) -> Dict[str, Any]:
     pub = sim.public()
     if isinstance(llm, MockScientistV6):
         llm.prime(sim)
@@ -228,9 +278,19 @@ def run_world(sim: SimV6, llm, max_turns: int, budget: int, verbose: bool) -> Di
     rejected_counts: Dict[str, int] = {}  # normalized rejected request -> times rejected
     forced_answer = False
 
-    for turn in range(max_turns):
+    # Productive-turn loop: a turn that yields no parsable action (empty or
+    # truncated model output) does NOT consume the turn budget — otherwise a
+    # verbose/thinking model is unfairly starved by format trips rather than
+    # measured on reasoning. A separate hard iteration cap prevents an infinite
+    # loop if the model never emits a valid action.
+    productive = 0
+    hard_cap = max_turns * 2 + 10
+    iteration = 0
+    while productive < max_turns and iteration < hard_cap:
+        iteration += 1
+        turn = productive
         remaining = budget - used
-        turns_left = max_turns - turn
+        turns_left = max_turns - productive
         latest = history[-1] if history else "(none yet)"
         files_line = ("available data files for code: " + ", ".join(sorted(csv_map))) if csv_map else \
                      "available data files for code: (none yet — run a measure/intervene first)"
@@ -278,16 +338,23 @@ YOUR MEMORY
 {memory}
 """
         t0 = time.time()
-        raw = llm.generate(SYSTEM_PROMPT, user, max_new_tokens=2500)
+        raw = llm.generate(SYSTEM_PROMPT, user, max_new_tokens=max_new_tokens)
         dt = round(time.time() - t0, 2)
         memory = _tag(raw, "memory") or memory
         reasoning = _tag(raw, "reasoning")
         m = _ACTION_RE.search(raw)
         rec: Dict[str, Any] = {"turn": turn, "latency_s": dt, "reasoning": reasoning, "memory": memory, "raw": raw}
         if not m:
+            # No parsable action (empty or truncated output). Log it, tell the
+            # model, but do NOT count it against the turn budget.
             rec["error"] = "no action parsed"
+            rec["unproductive"] = True
             turns.append(rec)
+            history.append("(your previous reply had no valid <action> block — "
+                           "reply with exactly one <action type=...> block; if your "
+                           "reasoning is long, keep it brief so the action fits)")
             continue
+        productive += 1
         atype, payload = m.group(1).lower(), m.group(2).strip()
         rec["action_type"] = atype
         try:
@@ -420,13 +487,36 @@ def _translate_structured(sim: SimV6, st: Dict[str, Any]) -> Dict[str, Any]:
     signs keyed by its own action phrasings. Map both to canonical ids so the
     grader (which knows canonical ids) can score them."""
     out = {}
-    # proxy + decoys: resolve as measurements
-    pm = sim.resolver.resolve_measure(st.get("true_mechanism_proxy", "")) if st.get("true_mechanism_proxy") else None
-    out["true_mechanism_proxy"] = pm.target_id if (pm and pm.ok) else st.get("true_mechanism_proxy")
+
+    def _resolve_named(text: str) -> str:
+        """Resolve a proxy/decoy name the agent wrote in free text. Agents often
+        append a parenthetical explanation ('LeafGreenness (chlorosis reversal…)')
+        or a clause after a dash/colon; the head phrase is the actual name. Try
+        the full string, then progressively stripped variants, so a correct name
+        buried in a long description still resolves. Returns the canonical id or
+        the original text if nothing resolves."""
+        if not text:
+            return text
+        cands = [text]
+        # strip a trailing "(...)" explanation
+        cands.append(re.sub(r"\s*\(.*", "", text))
+        # take the head before a dash/colon/semicolon clause
+        cands.append(re.split(r"[—\-:;]", text)[0])
+        seen = set()
+        for c in cands:
+            c = c.strip()
+            if not c or c in seen:
+                continue
+            seen.add(c)
+            r = sim.resolver.resolve_measure(c)
+            if r.ok and r.target_id:
+                return r.target_id
+        return text
+
+    out["true_mechanism_proxy"] = _resolve_named(st.get("true_mechanism_proxy", ""))
     decoys = []
     for d in st.get("confounded_decoys", []) or []:
-        dm = sim.resolver.resolve_measure(d)
-        decoys.append(dm.target_id if dm.ok else d)
+        decoys.append(_resolve_named(d))
     out["confounded_decoys"] = decoys
     # actuator signs: keys are free-text requests -> map to actuator ids.
     # The battery defines a sign as the effect of INCREASING the actuator's
@@ -469,15 +559,20 @@ def main():
                     help="built-in template name (ignored if --world-file given)")
     ap.add_argument("--world-file", default=None,
                     help="path to a generated world JSON (schema rpg_scm_v6)")
-    ap.add_argument("--backend", choices=["bedrock", "mock"], default="bedrock")
+    ap.add_argument("--backend", choices=["bedrock", "nautilus", "openai", "mock"], default="bedrock")
     ap.add_argument("--model", default="us.anthropic.claude-opus-4-8")
-    ap.add_argument("--temperature", type=float, default=0.3)
-    ap.add_argument("--max-new-tokens", type=int, default=2500)
+    ap.add_argument("--temperature", type=float, default=None,
+                    help="sampling temperature; default None = use the model's preset")
+    ap.add_argument("--max-new-tokens", type=int, default=None,
+                    help="per-turn output token cap; default None = use the model's MAX output "
+                         "(32768 for Qwen/gpt-oss). Set lower only to save cost.")
     ap.add_argument("--budget", type=int, default=15)
-    ap.add_argument("--max-turns", type=int, default=32,
-                    help="total turns; code turns count here but not against --budget")
+    ap.add_argument("--max-turns", type=int, default=60,
+                    help="max PRODUCTIVE turns (unproductive/empty turns retried free); "
+                         "experiment budget still bounds data collection. Raised 32->60 so "
+                         "the turn cap does not bind (both models answered ~near the old cap)")
     ap.add_argument("--no-resolver-llm", action="store_true",
-                    help="disable the LLM resolver fallback (on by default for bedrock runs)")
+                    help="disable the LLM resolver fallback (on by default)")
     ap.add_argument("--out", required=True)
     ap.add_argument("-v", "--verbose", action="store_true")
     args = ap.parse_args()
@@ -486,8 +581,8 @@ def main():
                         format="%(levelname)s %(message)s")
 
     llm = build_llm(args.backend, args.model, args.temperature, args.max_new_tokens)
-    # LLM resolver fallback is ON by default (bedrock only); --no-resolver-llm opts out.
-    resolver_llm = llm if (args.backend == "bedrock" and not args.no_resolver_llm) else None
+    # Resolver uses a FIXED strong model (Slide: held constant across agent models).
+    resolver_llm = build_resolver_llm(args.backend, llm, args.no_resolver_llm)
 
     # per-run data dir for raw experiment CSVs (the code tool reads these)
     data_dir = str(Path(args.out).parent / (Path(args.out).stem + "_data"))
@@ -503,7 +598,7 @@ def main():
                 sim.gold["expected_utility"], data_dir)
 
     t0 = time.time()
-    res = run_world(sim, llm, args.max_turns, args.budget, args.verbose)
+    res = run_world(sim, llm, args.max_turns, args.budget, args.verbose, args.max_new_tokens)
     res["wall_seconds"] = round(time.time() - t0, 1)
     res["model"] = args.model
 

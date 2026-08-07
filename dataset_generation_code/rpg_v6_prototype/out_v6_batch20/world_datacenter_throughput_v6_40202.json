@@ -1,0 +1,797 @@
+{
+  "schema_version": "rpg_scm_v6",
+  "world_id": "datacenter_throughput_v6_40202",
+  "domain": "datacenter_ops",
+  "template": "datacenter_throughput_v6",
+  "meta": {
+    "seed": 40202
+  },
+  "scenario": "A production compute cluster's job throughput has dropped roughly 30% over the past two weeks and has not recovered. The decline followed a scheduled data-hall maintenance window in which cooling was serviced, a network line card was reseated, and a rack fan assembly was replaced. A rack inlet temperature sensor has been reading warmer than its historical band, and the operations team's leading theory is that the room is running hot, so they are considering increasing cooling. CPU clocks, PDU load, memory utilization, disk I/O wait, job-queue depth, and GPU temperatures are all logged and look broadly normal. The cooling plant (setpoint and fans), the power distribution, storage QoS, and environmental controls are all adjustable, and portable environmental equipment is available. You have a limited number of experiments; you may measure quantities and apply available controls, alone or in combination. Determine what is really driving the throughput loss and what to do about it.",
+  "scm": {
+    "variables": {
+      "MaintenanceWindowRecency": {
+        "kind": "latent",
+        "aliases": [
+          "recent maintenance",
+          "maintenance recency"
+        ],
+        "dist": {
+          "normal": [
+            50,
+            15
+          ]
+        }
+      },
+      "LineCardHumiditySensitivity": {
+        "kind": "latent",
+        "aliases": [
+          "line card sensitivity",
+          "card humidity tolerance"
+        ],
+        "dist": {
+          "normal": [
+            55,
+            20
+          ]
+        }
+      },
+      "CoolingAggressiveness": {
+        "kind": "latent",
+        "aliases": [
+          "cooling aggressiveness"
+        ],
+        "parents": [
+          "CoolingSetpoint"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "CoolingSetpoint": -1.0
+          },
+          "intercept": 100
+        }
+      },
+      "CoilCondensation": {
+        "kind": "latent",
+        "aliases": [
+          "coil condensation",
+          "condensation",
+          "dew point breach",
+          "moisture on coil"
+        ],
+        "parents": [
+          "CoolingAggressiveness",
+          "LineCardHumiditySensitivity"
+        ],
+        "mech": {
+          "form": "interaction",
+          "a": "CoolingAggressiveness",
+          "b": "LineCardHumiditySensitivity",
+          "gain": 275.57,
+          "scale": 100.0,
+          "intercept": 3.0
+        },
+        "noise": {
+          "normal": [
+            0,
+            1.5
+          ]
+        }
+      },
+      "PacketRetransmitRate": {
+        "kind": "latent",
+        "aliases": [
+          "packet retransmits",
+          "retransmission rate",
+          "network errors",
+          "tcp retransmits"
+        ],
+        "parents": [
+          "CoilCondensation"
+        ],
+        "mech": {
+          "form": "hill",
+          "of": "CoilCondensation",
+          "vmax": 68.2,
+          "k": 36.58,
+          "n": 2
+        }
+      },
+      "EffectiveNetworkBandwidth": {
+        "kind": "latent",
+        "aliases": [
+          "effective bandwidth",
+          "usable bandwidth"
+        ],
+        "parents": [
+          "PacketRetransmitRate"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "PacketRetransmitRate": -0.9
+          },
+          "intercept": 70
+        }
+      },
+      "JobThroughput": {
+        "kind": "outcome",
+        "aliases": [
+          "job throughput",
+          "throughput",
+          "jobs per hour",
+          "completion rate"
+        ],
+        "parents": [
+          "EffectiveNetworkBandwidth",
+          "MaintenanceWindowRecency"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "EffectiveNetworkBandwidth": 1.0,
+            "MaintenanceWindowRecency": -0.4
+          },
+          "intercept": 15
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "InterfaceErrorCounter": {
+        "kind": "observable",
+        "aliases": [
+          "interface error counter",
+          "nic errors",
+          "crc errors",
+          "link errors"
+        ],
+        "parents": [
+          "PacketRetransmitRate"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "PacketRetransmitRate": 0.8
+          },
+          "intercept": 5
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            13.63
+          ]
+        }
+      },
+      "RackInletTemp": {
+        "kind": "observable",
+        "aliases": [
+          "rack inlet temperature",
+          "rack temp",
+          "hot rack sensor",
+          "inlet temperature"
+        ],
+        "parents": [
+          "MaintenanceWindowRecency"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "MaintenanceWindowRecency": 0.7
+          },
+          "intercept": 20
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            4
+          ]
+        }
+      },
+      "CoilDewPointMargin": {
+        "kind": "observable",
+        "aliases": [
+          "dew point margin",
+          "coil moisture",
+          "condensation sensor",
+          "cold aisle humidity",
+          "coil dew point",
+          "moisture on the coil"
+        ],
+        "parents": [
+          "CoilCondensation"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "CoilCondensation": 0.9
+          },
+          "intercept": 5
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            6
+          ]
+        }
+      },
+      "CoolingSetpoint": {
+        "kind": "observable",
+        "aliases": [
+          "cooling setpoint",
+          "chiller setpoint",
+          "crac setpoint",
+          "supply air temperature"
+        ],
+        "dist": {
+          "normal": [
+            55,
+            9.25
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            1.1
+          ]
+        }
+      },
+      "FanSpeed": {
+        "kind": "observable",
+        "aliases": [
+          "fan speed",
+          "cooling fan rpm"
+        ],
+        "dist": {
+          "normal": [
+            60,
+            10.0
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            1.2
+          ]
+        }
+      },
+      "CpuClock": {
+        "kind": "observable",
+        "aliases": [
+          "cpu clock",
+          "processor frequency",
+          "clock speed"
+        ],
+        "dist": {
+          "normal": [
+            50,
+            8.5
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            1.0
+          ]
+        }
+      },
+      "PduLoad": {
+        "kind": "observable",
+        "aliases": [
+          "pdu load",
+          "power draw",
+          "rack power"
+        ],
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "DiskIoWait": {
+        "kind": "observable",
+        "aliases": [
+          "disk io wait",
+          "storage latency",
+          "iowait"
+        ],
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "MemoryUtilization": {
+        "kind": "observable",
+        "aliases": [
+          "memory utilization",
+          "ram usage"
+        ],
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "JobQueueDepth": {
+        "kind": "observable",
+        "aliases": [
+          "job queue depth",
+          "scheduler backlog"
+        ],
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "AmbientRoomHumidity": {
+        "kind": "observable",
+        "aliases": [
+          "room humidity",
+          "ambient humidity"
+        ],
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "UpsBatteryLevel": {
+        "kind": "observable",
+        "aliases": [
+          "ups battery",
+          "battery charge"
+        ],
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "NetworkTopologyHops": {
+        "kind": "observable",
+        "aliases": [
+          "hop count",
+          "topology hops"
+        ],
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "ContainerCount": {
+        "kind": "observable",
+        "aliases": [
+          "container count",
+          "pod count"
+        ],
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "GpuTemp": {
+        "kind": "observable",
+        "aliases": [
+          "gpu temperature",
+          "accelerator temp"
+        ],
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "CacheHitRate": {
+        "kind": "observable",
+        "aliases": [
+          "cache hit rate",
+          "cache efficiency"
+        ],
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      }
+    },
+    "actuators": {
+      "cooling_setpoint_controller": {
+        "aliases": [
+          "set cooling setpoint",
+          "adjust chiller setpoint",
+          "change supply air temperature",
+          "crac setpoint",
+          "raise cooling",
+          "lower cooling"
+        ],
+        "target": "CoolingSetpoint",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          40,
+          75
+        ],
+        "default": 55,
+        "description": "cooling supply-air temperature setpoint (higher = warmer supply air)"
+      },
+      "fan_controller": {
+        "aliases": [
+          "set fan speed",
+          "cooling fan rpm"
+        ],
+        "target": "FanSpeed",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 60,
+        "description": "cooling fan speed"
+      },
+      "cpu_clock_governor": {
+        "aliases": [
+          "set cpu clock",
+          "processor frequency governor",
+          "throttle cpu"
+        ],
+        "target": "CpuClock",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "cpu frequency governor"
+      },
+      "dehumidifier": {
+        "aliases": [
+          "run dehumidifier",
+          "dehumidify",
+          "reduce humidity",
+          "desiccant",
+          "dry the air"
+        ],
+        "target": "CoilCondensation",
+        "op": "scale",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 0,
+        "expr": "1-sat(d;k=0.66)",
+        "side_effect": {
+          "target": "JobThroughput",
+          "expr": "-overstrip(d;thr=0.66,gain=30)"
+        },
+        "description": "portable dehumidifier for the cold aisle"
+      },
+      "telemetry_smoothing": {
+        "aliases": [
+          "enable telemetry smoothing",
+          "smoothing filter",
+          "rolling average reporting"
+        ],
+        "target": "JobThroughput",
+        "op": "mask",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 0,
+        "expr": "transient_boost(d)",
+        "description": "a reporting filter on the throughput dashboard"
+      },
+      "pdu_balancer": {
+        "aliases": [
+          "rebalance pdu load",
+          "power balancing"
+        ],
+        "target": "PduLoad",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50.0,
+        "description": "control handle for PduLoad"
+      },
+      "io_scheduler": {
+        "aliases": [
+          "change io scheduler",
+          "storage qos"
+        ],
+        "target": "DiskIoWait",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50.0,
+        "description": "control handle for DiskIoWait"
+      },
+      "memory_limit": {
+        "aliases": [
+          "set memory limit",
+          "cgroup memory"
+        ],
+        "target": "MemoryUtilization",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50.0,
+        "description": "control handle for MemoryUtilization"
+      },
+      "scheduler_tuning": {
+        "aliases": [
+          "tune scheduler",
+          "queue policy"
+        ],
+        "target": "JobQueueDepth",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50.0,
+        "description": "control handle for JobQueueDepth"
+      },
+      "room_humidifier": {
+        "aliases": [
+          "set room humidity",
+          "humidifier"
+        ],
+        "target": "AmbientRoomHumidity",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50.0,
+        "description": "control handle for AmbientRoomHumidity"
+      },
+      "gpu_power_cap": {
+        "aliases": [
+          "set gpu power cap",
+          "accelerator power limit"
+        ],
+        "target": "GpuTemp",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50.0,
+        "description": "control handle for GpuTemp"
+      }
+    },
+    "outcome": "JobThroughput",
+    "higher_is_better": true
+  },
+  "ground_truth": {
+    "true_root": "CoilCondensation",
+    "true_mechanism_proxy": "InterfaceErrorCounter",
+    "confounded_decoys": [
+      "RackInletTemp"
+    ],
+    "targeted_actuator": "dehumidifier",
+    "symptom_trap_actuator": "telemetry_smoothing",
+    "source_actuator": "cooling_setpoint_controller",
+    "latent_plain_name": "condensation on a network line card caused by an over-aggressive cooling setpoint driving the coil below the dew point; the hot-rack reading is an unrelated confound from the fan work",
+    "naive_interventions": [
+      {
+        "cooling_setpoint_controller": 40
+      },
+      {
+        "fan_controller": 100
+      }
+    ]
+  },
+  "oracle": {
+    "gold": {
+      "intervention": {
+        "dehumidifier": 66.0
+      },
+      "expected_utility": 64.93702882265936,
+      "baseline_utility": 20.009987171127616,
+      "active_actuators": [
+        "cooling_setpoint_controller",
+        "dehumidifier"
+      ]
+    },
+    "counterfactual_battery": {
+      "true_mechanism_proxy": "InterfaceErrorCounter",
+      "valid_mechanism_proxies": [
+        "CoilDewPointMargin",
+        "InterfaceErrorCounter"
+      ],
+      "confounded_decoys": [
+        "RackInletTemp"
+      ],
+      "actuator_sign_predictions": {
+        "cooling_setpoint_controller": "+",
+        "fan_controller": "0",
+        "cpu_clock_governor": "0",
+        "dehumidifier": "+",
+        "telemetry_smoothing": "0",
+        "pdu_balancer": "0",
+        "io_scheduler": "0",
+        "memory_limit": "0",
+        "scheduler_tuning": "0",
+        "room_humidifier": "0",
+        "gpu_power_cap": "0"
+      },
+      "targeted_actuator": "dehumidifier",
+      "symptom_trap_actuator": "telemetry_smoothing"
+    },
+    "calibration": {
+      "proxy_assay_noise": 13.63,
+      "proxy_corr": 0.494,
+      "decoy_corr": 0.442
+    },
+    "audits": {
+      "decoy": {
+        "passed": true,
+        "decoys": {
+          "RackInletTemp": {
+            "obs_corr": -0.442,
+            "clamp_do_effect": 0.0,
+            "ok": true
+          }
+        }
+      },
+      "proxy_signal": {
+        "passed": true,
+        "proxy_outcome_corr": -0.493,
+        "obs_ok": true,
+        "interventional_shift_sd": 2.43,
+        "interv_ok": true,
+        "band": [
+          0.35,
+          0.75
+        ]
+      },
+      "distractor_inertness": {
+        "passed": true,
+        "n_inert_checked": 9,
+        "violations": []
+      },
+      "gold_selfconsistency": {
+        "passed": true,
+        "gold_utility": 64.94,
+        "beating_perturbations": []
+      },
+      "counterintuitiveness": {
+        "passed": true,
+        "baseline_utility": 20.06,
+        "gold_utility": 64.94,
+        "naive_results": [
+          {
+            "naive": {
+              "cooling_setpoint_controller": 40
+            },
+            "utility": 14.43,
+            "gain_over_baseline": -5.63,
+            "fraction_of_gold_benefit": -0.125,
+            "helps": false
+          },
+          {
+            "naive": {
+              "fan_controller": 100
+            },
+            "utility": 20.06,
+            "gain_over_baseline": 0.0,
+            "fraction_of_gold_benefit": 0.0,
+            "helps": false
+          }
+        ],
+        "note": "obvious first move must not meaningfully help"
+      }
+    }
+  }
+}
