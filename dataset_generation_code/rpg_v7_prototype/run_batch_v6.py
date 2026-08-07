@@ -65,6 +65,11 @@ def main():
     ap.add_argument("--max-new-tokens", type=int, default=2500)
     ap.add_argument("--budget", type=int, default=15)
     ap.add_argument("--max-turns", type=int, default=32)
+    ap.add_argument("--concurrency", type=int, default=1,
+                    help="number of worlds to run in parallel (threads). For a self-hosted "
+                         "vLLM server, set 4-16 to exploit continuous batching — a single "
+                         "GPU decoding one request at a time is why serial is slow. Ignored "
+                         "for --backend mock. Match to your server's --max-num-seqs.")
     ap.add_argument("--no-resolver-llm", action="store_true",
                     help="disable the LLM resolver fallback (on by default)")
     ap.add_argument("--outdir", required=True)
@@ -113,19 +118,18 @@ def main():
         # resolution quality is constant across agent models.
         resolver_llm = build_resolver_llm(args.backend, llm, args.no_resolver_llm)
 
-    rows: List[Dict[str, Any]] = []
-    t_start = time.time()
-    for path in paths:
+    def _run_one(path: str) -> Dict[str, Any]:
+        """Run (or resume-load) a single world and return its summary row. Safe to
+        call from worker threads: run_world keeps all state local, the LLM/resolver
+        HTTP clients are shared read-only, and each world writes its own files."""
         world, pre = load_world_file(path)
         wid = world["world_id"]
         result_file = outdir / f"result_{wid}.json"
-        # resume path: load the existing result rather than re-running
         if path in done_paths:
             try:
                 with open(result_file, encoding="utf-8") as f:
                     res = json.load(f)
-                rows.append(summarize_result(res, world))
-                continue
+                return summarize_result(res, world)
             except Exception as e:
                 logger.warning("resume: could not read %s (%s); re-running", result_file, e)
         data_dir = str(outdir / f"{wid}_data")
@@ -138,7 +142,32 @@ def main():
         res["world_file"] = path
         with open(result_file, "w", encoding="utf-8") as f:
             json.dump(res, f, indent=2, default=str)
-        rows.append(summarize_result(res, world))
+        return summarize_result(res, world)
+
+    rows: List[Dict[str, Any]] = []
+    t_start = time.time()
+    # Concurrency: run up to --concurrency worlds at once. This is the lever for a
+    # self-hosted vLLM server, whose continuous batching serves N concurrent
+    # requests in ~the wall-clock of one — a single L40S decoding one request at a
+    # time is why serial runs feel slow. Threads (not processes) because the work
+    # is I/O-bound on the model HTTP calls. Forced serial for the mock backend
+    # (MockScientistV6 holds per-run state via .prime() and is not concurrency-safe).
+    conc = 1 if args.backend == "mock" else max(1, args.concurrency)
+    if conc > 1:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        print(f"running {len(paths)} world(s) with concurrency={conc}", flush=True)
+        with ThreadPoolExecutor(max_workers=conc) as ex:
+            futs = {ex.submit(_run_one, p): p for p in paths}
+            done_n = 0
+            for fut in as_completed(futs):
+                row = fut.result()
+                rows.append(row)
+                done_n += 1
+                print(f"  [{done_n}/{len(paths)}] {row['world_id']} "
+                      f"acc={row['accepted']} A={row['partA']} B={row['partB']:.2f}", flush=True)
+    else:
+        for path in paths:
+            rows.append(_run_one(path))
 
     n = len(rows)
     acc = sum(r["accepted"] for r in rows)

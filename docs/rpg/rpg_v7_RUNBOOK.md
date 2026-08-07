@@ -67,7 +67,10 @@ python -m vllm.entrypoints.openai.api_server \
     --model Qwen/Qwen3-8B \
     --port 8000 \
     --max-model-len 32768 \
+    --max-num-seqs 16 \              # <- serve up to 16 concurrent rollouts (continuous batching)
     --gpu-memory-utilization 0.90
+# On an L40S, add  --quantization fp8  for ~1.5-2x decode speedup (L40S has FP8
+# tensor cores; negligible quality loss for an 8B).
 # (add --enable-reasoning --reasoning-parser qwen3  if your vLLM build separates
 #  <think> into reasoning_content; the client captures it either way.)
 ```
@@ -76,6 +79,18 @@ Leave it running (or use `screen`/`tmux`). Sanity check:
 curl http://localhost:8000/v1/models        # should list Qwen/Qwen3-8B
 ```
 
+### ⚡ 2a.1 Why serial is slow, and the fix: `--concurrency`
+A single L40S decodes **one request at a time** at ~40-90 tok/s for an 8B; a
+thinking model emits ~2500 tokens/turn × ~15 turns × 9 worlds, all **sequential** →
+1-2.5 h for mixed9. That is expected, not a bug. vLLM's strength is **continuous
+batching**: it serves many concurrent requests in ~the wall-clock of one. The batch
+runner now exposes `--concurrency N` (thread pool; verified thread-safe and
+resume-compatible). Set it to match the server's `--max-num-seqs`:
+- **mixed9 (9 worlds):** `--concurrency 9` → ~9× fewer wall-clock rounds.
+- **larger sets:** `--concurrency 16` (and `--max-num-seqs 16`).
+- Bedrock/Opus runs can use `--concurrency 4-8` too (Bedrock handles parallel calls);
+  mock is forced serial (it holds per-run state).
+
 ### 2b. Point the runner at it and run the SAME worlds
 ```bash
 export VLLM_BASE_URL=http://localhost:8000/v1     # default; set if server is elsewhere
@@ -83,8 +98,10 @@ export VLLM_BASE_URL=http://localhost:8000/v1     # default; set if server is el
 
 python run_batch_v6.py --worlds-dir out_v7/mixed9 \
     --backend vllm --model Qwen/Qwen3-8B \
-    --outdir results_v7/mixed9_qwen8b -v --resume
+    --outdir results_v7/mixed9_qwen8b --concurrency 9 -v --resume
 ```
+- `--concurrency 9` runs all 9 worlds at once against vLLM's continuous batching
+  (see 2a.1). This is the fix for the slow serial run.
 - `--model` must match the string vLLM served (`Qwen/Qwen3-8B`). The Qwen3 sampling preset
   (temp 1.0 / top_p 0.95 / top_k 20) applies automatically.
 - **Resolver note:** with no Bedrock creds, the resolver falls back to **reusing the agent
