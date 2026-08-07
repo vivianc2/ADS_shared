@@ -58,7 +58,7 @@ def summarize_result(res: Dict[str, Any], world: Dict[str, Any]) -> Dict[str, An
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--worlds-dir", required=True)
-    ap.add_argument("--backend", choices=["bedrock", "nautilus", "openai", "mock"], default="bedrock")
+    ap.add_argument("--backend", choices=["bedrock", "nautilus", "openai", "vllm", "mock"], default="bedrock")
     ap.add_argument("--model", default="us.anthropic.claude-opus-4-8")
     ap.add_argument("--temperature", type=float, default=None,
                     help="sampling temperature; default None = use the model's preset")

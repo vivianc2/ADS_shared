@@ -20,8 +20,10 @@ logger = logging.getLogger("openai_llm")
 # Per-model recommended sampling. 'match' is a case-insensitive substring of the
 # model name. Explicit kwargs to OpenAILLM override these.
 # Qwen3.6 is served on NRP Nautilus as "qwen3-small"; match both strings.
+# Qwen3-8B (self-hosted via vLLM) uses the same Qwen3 recommended sampling; the
+# "qwen3" substring already covers "Qwen/Qwen3-8B", listed explicitly for clarity.
 _MODEL_PRESETS: List[Dict[str, Any]] = [
-    {"matches": ["qwen3.6", "qwen3-small", "qwen3"], "temperature": 1.0, "top_p": 0.95,
+    {"matches": ["qwen3.6", "qwen3-small", "qwen3-8b", "qwen3"], "temperature": 1.0, "top_p": 0.95,
      "extra_body": {"top_k": 20, "min_p": 0.0}},
     {"matches": ["gpt-oss"], "temperature": 1.0, "top_p": 1.0,
      "extra_body": {"top_k": 0, "min_p": 0.0}},

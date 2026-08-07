@@ -219,3 +219,51 @@ All grader/resolver fixes from §5 are implemented and verified locally (no API 
 `python regrade_v7.py --results-dir results_v7/mixed9_opus --resolver-llm --write`
 to resolve the semantic proxy strings and read the true, fair accept rate on mixed9
 (expected to rise from 0 toward the ~4–5/9 the part-A passers suggest).
+
+---
+
+## 9. LLM re-grade result (2026-08-07) — I was wrong about ~4–5/9; the 0/9 is largely REAL
+
+Ran the LLM-resolver re-grade (`--resolver-llm`, Bedrock Opus). Result: **still 0/9, no
+flips.** My "~4–5/9" prediction did **not** hold. Inspected all five part-A passers to see
+why part B stays < 0.8 — and the honest finding is that **most of the remaining part-B
+misses are genuine, not resolution artifacts.** The grader fixes were still correct and
+necessary (bioprocess_chain rose to B=0.75, proxy+decoy now credited), but they revealed
+that the underlying answers are mechanistically wrong more often than the raw flag implied.
+
+**Per part-A passer, why B fails (after LLM resolution):**
+| world | B | why (verified) |
+|---|---|---|
+| bioprocess_chain | 0.75 | **Closest to a pass.** Proxy ✓, decoys ✓, alt-fix sign ✓; the ONE miss is genuine — agent said the antioxidant (the gold lever) has sign "0" when it's "+". Real error. |
+| battery_collider | 0.60 | Agent named proxy **"coulombic efficiency"** — which **is not a variable in this world** (world's proxy is `ImpedanceSpectrum`). It guessed a plausible battery marker from priors, not the world's actual proxy. Also failed to flag the selection decoy `CalendarAge`. Genuine. |
+| bioprocess_collider | 0.40 | Named 2/3 true decoys but missed `ViableCellDensity`; proxy string didn't match. Partly genuine (incomplete decoy set), partly a naming gap. |
+| agronomy_chain | 0.20 | **Proxy/decoy inversion:** called the true proxy `TissueNutrientAssay` a decoy; named the proxy as a symptom phrase ("interveinal chlorosis…"). Genuine inversion. |
+| catalysis_chain | 0.20 | Named an **actuator** (`do_RegenerationCycle`) as the proxy; called the true proxy `EffluentByproduct` a decoy. Genuine inversion. |
+
+**Revised verdict on mixed9:** part A (find a utility-optimal fix) is genuinely solved on
+5/9 — that part is real and strong. But part B (correctly name the mechanism proxy, reject
+the decoy, get signs right) is genuinely **not** met on 8/9, and after the resolver fixes
+those are mostly real mechanistic errors, not miscredits: proxy/decoy inversions, naming an
+actuator or a from-priors marker that isn't the world's proxy, and (collider) not detecting
+the selection decoy. **So the headline is "acts right, explains wrong"** — the exact
+expert-gap seen across every v6 batch, now confirmed clean on v7 with a trustworthy grader.
+
+**Two real issues this surfaced (for follow-up, not blocking):**
+1. **Battery/collider proxy contract muddiness.** In `battery_collider`, an intended inert
+   distractor (`CrimpPressure`) is wired as a child of a chain mediator (`ActiveMaterialLoss`),
+   so the targeted actuator moves it > 0.5 SD and the battery lists it as a "valid proxy."
+   Not wrong (it IS causally downstream), but it means a distractor-named node counts as a
+   proxy, blurring the proxy/decoy line. Worth tightening the collider/subtype augmentation
+   so added observables don't accidentally sit on the causal chain.
+2. **Part B is hard to pass by construction on these skins** because the agent must name the
+   *specific world variable*, while a strong model naturally names the *mechanism concept*
+   (often a real quantity that just isn't the sampled proxy). This is a **reward-design
+   choice for RL**, not a bug: either (a) accept any causally-valid downstream observable as
+   the proxy (more lenient, closer to "understood the mechanism"), or (b) keep the strict
+   named-variable check (harder, more precise). Decide this before wiring part B into a
+   reward — it materially changes the signal.
+
+**Net:** the prototype and grader are now trustworthy — the 0/9 is a *real* result
+(part-A-solved / part-B-not), not an artifact. My earlier ~4–5/9 estimate assumed the
+misses were resolution failures; the LLM re-grade proved they're mostly genuine
+mechanism errors. That is a cleaner, more honest headline for the RL work.

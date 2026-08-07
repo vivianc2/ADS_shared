@@ -215,6 +215,8 @@ class MockScientistV6:
 
 # Nautilus (NRP) is an OpenAI-compatible gateway; override with NAUTILUS_BASE_URL.
 NAUTILUS_DEFAULT_BASE_URL = "https://ellm.nrp-nautilus.io/v1"
+# A local vLLM OpenAI-compatible server (default port); override with VLLM_BASE_URL.
+VLLM_DEFAULT_BASE_URL = "http://localhost:8000/v1"
 
 
 def build_llm(backend, model, temperature, max_new_tokens):
@@ -223,19 +225,24 @@ def build_llm(backend, model, temperature, max_new_tokens):
     if backend == "bedrock":
         from bedrock_llm import BedrockLLM
         return BedrockLLM(model_id=model, temperature=temperature, max_new_tokens=max_new_tokens)
-    if backend in ("openai", "nautilus"):
+    if backend in ("openai", "nautilus", "vllm"):
         # Self-contained OpenAI-compatible client (Qwen/gpt-oss presets +
         # reasoning_content capture); avoids world_model_causal's torch import.
+        # vLLM exposes an OpenAI-compatible server, so it reuses this path.
         from openai_llm import OpenAILLM
         if backend == "nautilus":
             base_url = os.environ.get("NAUTILUS_BASE_URL", NAUTILUS_DEFAULT_BASE_URL)
             api_key = os.environ.get("NAUTILUS_API_KEY")
             if not api_key:
                 raise RuntimeError("NAUTILUS_API_KEY not set in environment")
+        elif backend == "vllm":
+            # self-hosted vLLM: default to localhost; the server ignores the key.
+            base_url = os.environ.get("VLLM_BASE_URL", VLLM_DEFAULT_BASE_URL)
+            api_key = os.environ.get("VLLM_API_KEY", "EMPTY")
         else:
             base_url = os.environ.get("OPENAI_BASE_URL")
             api_key = os.environ.get("OPENAI_API_KEY")
-        # temperature=None lets the per-model preset choose (recommended for Qwen3.6);
+        # temperature=None lets the per-model preset choose (recommended for Qwen3);
         # pass through an explicit value only if the caller overrode the default.
         return OpenAILLM(model_name=model, base_url=base_url, api_key=api_key,
                          max_new_tokens=max_new_tokens,
@@ -560,7 +567,7 @@ def main():
                     help="built-in template name (ignored if --world-file given)")
     ap.add_argument("--world-file", default=None,
                     help="path to a generated world JSON (schema rpg_scm_v6)")
-    ap.add_argument("--backend", choices=["bedrock", "nautilus", "openai", "mock"], default="bedrock")
+    ap.add_argument("--backend", choices=["bedrock", "nautilus", "openai", "vllm", "mock"], default="bedrock")
     ap.add_argument("--model", default="us.anthropic.claude-opus-4-8")
     ap.add_argument("--temperature", type=float, default=None,
                     help="sampling temperature; default None = use the model's preset")

@@ -24,6 +24,8 @@ import sys
 import traceback
 from typing import Any, Dict, List
 
+import numpy as np
+
 from sampler import sample_world
 from generate_v7 import audit
 from engine import WorldSCM
@@ -184,6 +186,31 @@ def run():
         check(prox_ok, f"[{tag}] verbose-but-correct proxy is credited (not punished for being articulate)")
         check((g.get("benefit_recovered") or 0) >= 0.85,
               f"[{tag}] gold-equivalent answer recovers benefit (got {g.get('benefit_recovered')})")
+
+        # ---- V3: reward has within-group VARIANCE on a realistic quality spread ----
+        # GRPO needs the group's rewards to differ, else advantage=0 -> no gradient.
+        # Build 8 escalating-quality answers and confirm reward std > 0. (A SATURATED
+        # group — all identical quality — correctly gives std 0; that case is handled
+        # by DAPO dynamic sampling in the trainer, not the reward. See V3 in
+        # rpg_v7_reward_contract_decisions.md.)
+        def _reward(answer_raw, wA=0.5, wB=0.5):
+            gg = _grade(sim, answer_raw)
+            return wA * max(0.0, gg.get("benefit_recovered") or 0.0) + wB * gg["battery_fraction"]
+        ladder = [
+            {"recommended_intervention_text": [], "structured": {}},                       # q0 empty
+            {"recommended_intervention_text": rec_text, "structured": {}},                 # q1 fix only
+            {"recommended_intervention_text": rec_text,
+             "structured": {"true_mechanism_proxy": verbose_proxy}},                        # q2 +proxy
+            {"recommended_intervention_text": rec_text,
+             "structured": {"true_mechanism_proxy": verbose_proxy,
+                            "confounded_decoys": decoy_aliases}},                           # q3 +decoys
+        ]
+        if "recommended_policy_text" in articulate:
+            for a in ladder[1:]:
+                a["recommended_policy_text"] = articulate["recommended_policy_text"]
+        group = [_reward(ladder[i % len(ladder)]) for i in range(8)]
+        std = float(np.std(group))
+        check(std > 0.05, f"[{tag}] realistic mixed-quality group has reward spread (std={std:.3f})")
 
     print(f"\n{'='*60}")
     print(f"tested {n_worlds} worlds; {len(failures)} assertion(s) failed")

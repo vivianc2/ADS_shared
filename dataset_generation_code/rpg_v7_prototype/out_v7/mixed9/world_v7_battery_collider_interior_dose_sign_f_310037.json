@@ -1,10 +1,11 @@
 {
   "schema_version": "rpg_scm_v7",
-  "world_id": "v7_battery_collider_sign_flip_symptom_tr_310007",
+  "world_id": "v7_battery_collider_interior_dose_sign_f_310037",
   "domain": "battery",
   "meta": {
-    "seed": 310007,
+    "seed": 310037,
     "features": [
+      "interior_dose",
       "sign_flip",
       "symptom_trap"
     ],
@@ -27,6 +28,19 @@
           ]
         }
       },
+      "CellVintage": {
+        "aliases": [
+          "cell vintage",
+          "build date"
+        ],
+        "kind": "latent",
+        "dist": {
+          "normal": [
+            50,
+            16
+          ]
+        }
+      },
       "SeparatorSupplier": {
         "aliases": [
           "separator supplier",
@@ -40,10 +54,11 @@
           ]
         }
       },
-      "FormationCurrent": {
+      "ChargeRate": {
         "aliases": [
-          "formation current",
-          "initial cycling current"
+          "charge rate",
+          "charging c-rate",
+          "fast-charge current"
         ],
         "kind": "observable",
         "dist": {
@@ -60,17 +75,17 @@
           ]
         }
       },
-      "FormationCurrentHarmAxis": {
+      "ChargeRateHarmAxis": {
         "aliases": [
           "harm axis"
         ],
         "kind": "latent",
         "parents": [
-          "FormationCurrent"
+          "ChargeRate"
         ],
         "mech": {
           "form": "sign_flip",
-          "of": "FormationCurrent",
+          "of": "ChargeRate",
           "knee": 45,
           "lo_gain": 0.05,
           "hi_gain": 0.9,
@@ -84,12 +99,12 @@
         ],
         "kind": "latent",
         "parents": [
-          "FormationCurrentHarmAxis",
+          "ChargeRateHarmAxis",
           "DendriteNucleationSusceptibility"
         ],
         "mech": {
           "form": "interaction",
-          "a": "FormationCurrentHarmAxis",
+          "a": "ChargeRateHarmAxis",
           "b": "DendriteNucleationSusceptibility",
           "gain": 260.0,
           "scale": 100.0,
@@ -102,10 +117,10 @@
           ]
         }
       },
-      "ImpedanceGrowth": {
+      "SEIInstability": {
         "aliases": [
-          "impedance growth",
-          "internal resistance rise"
+          "sei instability",
+          "passivation-layer breakdown"
         ],
         "kind": "latent",
         "parents": [
@@ -119,19 +134,19 @@
           "n": 2
         }
       },
-      "ActiveMaterialLoss": {
+      "GasEvolution": {
         "aliases": [
-          "active-material loss",
-          "capacity fade mechanism"
+          "gas evolution",
+          "cell gassing"
         ],
         "kind": "latent",
         "parents": [
-          "ImpedanceGrowth"
+          "SEIInstability"
         ],
         "mech": {
           "form": "linear",
           "weights": {
-            "ImpedanceGrowth": 0.9
+            "SEIInstability": 0.9
           },
           "intercept": 5
         }
@@ -144,14 +159,16 @@
         ],
         "kind": "outcome",
         "parents": [
-          "ActiveMaterialLoss",
+          "GasEvolution",
+          "CellVintage",
           "SeparatorSupplier"
         ],
         "mech": {
           "form": "linear",
           "weights": {
-            "ActiveMaterialLoss": -0.9,
-            "SeparatorSupplier": 0.4
+            "GasEvolution": -0.9,
+            "CellVintage": 0.4,
+            "SeparatorSupplier": 0.1
           },
           "intercept": 15
         },
@@ -163,19 +180,19 @@
           ]
         }
       },
-      "ImpedanceSpectrum": {
+      "CoulombicEfficiency": {
         "aliases": [
-          "impedance spectrum",
-          "eis resistance"
+          "coulombic efficiency",
+          "charge efficiency"
         ],
         "kind": "observable",
         "parents": [
-          "ActiveMaterialLoss"
+          "GasEvolution"
         ],
         "mech": {
           "form": "linear",
           "weights": {
-            "ActiveMaterialLoss": 0.8
+            "GasEvolution": 0.8
           },
           "intercept": 5
         },
@@ -183,31 +200,7 @@
         "assay_noise": {
           "normal": [
             0,
-            11.84
-          ]
-        }
-      },
-      "SurfaceTemperature": {
-        "aliases": [
-          "surface temperature",
-          "cell skin temp"
-        ],
-        "kind": "observable",
-        "parents": [
-          "SeparatorSupplier"
-        ],
-        "mech": {
-          "form": "linear",
-          "weights": {
-            "SeparatorSupplier": 0.7
-          },
-          "intercept": 40
-        },
-        "measurable": true,
-        "assay_noise": {
-          "normal": [
-            0,
-            4
+            11.85
           ]
         }
       },
@@ -218,12 +211,12 @@
         ],
         "kind": "observable",
         "parents": [
-          "SeparatorSupplier"
+          "CellVintage"
         ],
         "mech": {
           "form": "linear",
           "weights": {
-            "SeparatorSupplier": 0.7
+            "CellVintage": 0.7
           },
           "intercept": 40
         },
@@ -235,10 +228,10 @@
           ]
         }
       },
-      "VentPressure": {
+      "CoolingPlateTemp": {
         "aliases": [
-          "vent pressure",
-          "burst-disc setpoint"
+          "cooling-plate temperature",
+          "thermal-plate temp"
         ],
         "kind": "observable",
         "dist": {
@@ -255,30 +248,10 @@
           ]
         }
       },
-      "AmbientHumidityBatt": {
+      "TabWeldQuality": {
         "aliases": [
-          "ambient humidity",
-          "room humidity"
-        ],
-        "kind": "observable",
-        "dist": {
-          "normal": [
-            50,
-            12
-          ]
-        },
-        "measurable": true,
-        "assay_noise": {
-          "normal": [
-            0,
-            3
-          ]
-        }
-      },
-      "PressStackForce": {
-        "aliases": [
-          "stack pressure",
-          "cell compression"
+          "tab-weld quality",
+          "current-collector weld"
         ],
         "kind": "observable",
         "dist": {
@@ -315,6 +288,66 @@
           ]
         }
       },
+      "PressStackForce": {
+        "aliases": [
+          "stack pressure",
+          "cell compression"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "CrimpPressure": {
+        "aliases": [
+          "crimp pressure",
+          "seal force"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "AmbientHumidityBatt": {
+        "aliases": [
+          "ambient humidity",
+          "room humidity"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
       "CyclingTemperature": {
         "aliases": [
           "cycling temperature",
@@ -335,10 +368,10 @@
           ]
         }
       },
-      "ElectrolyteFillVolume": {
+      "AnodeExcessRatio": {
         "aliases": [
-          "electrolyte fill volume",
-          "wetting amount"
+          "anode excess ratio",
+          "n/p ratio"
         ],
         "kind": "observable",
         "dist": {
@@ -355,10 +388,10 @@
           ]
         }
       },
-      "CoatingThickness": {
+      "RestPeriod": {
         "aliases": [
-          "coating thickness",
-          "electrode loading"
+          "rest period",
+          "relaxation time"
         ],
         "kind": "observable",
         "dist": {
@@ -375,10 +408,10 @@
           ]
         }
       },
-      "CoolingPlateTemp": {
+      "CalendarAge": {
         "aliases": [
-          "cooling-plate temperature",
-          "thermal-plate temp"
+          "calendar age",
+          "shelf time"
         ],
         "kind": "observable",
         "dist": {
@@ -395,7 +428,7 @@
           ]
         }
       },
-      "CalendarAgeDriver": {
+      "VentPressureDriver": {
         "aliases": [
           "latent driver"
         ],
@@ -407,19 +440,19 @@
           ]
         }
       },
-      "CalendarAge": {
+      "VentPressure": {
         "aliases": [
-          "calendar age",
-          "shelf time"
+          "vent pressure",
+          "burst-disc setpoint"
         ],
         "kind": "observable",
         "parents": [
-          "CalendarAgeDriver"
+          "VentPressureDriver"
         ],
         "mech": {
           "form": "linear",
           "weights": {
-            "CalendarAgeDriver": 0.9
+            "VentPressureDriver": 0.9
           },
           "intercept": 5
         },
@@ -431,21 +464,21 @@
           ]
         }
       },
-      "CrimpPressure": {
+      "ElectrolyteFillVolume": {
         "aliases": [
-          "crimp pressure",
-          "seal force"
+          "electrolyte fill volume",
+          "wetting amount"
         ],
         "kind": "observable",
         "parents": [
-          "ActiveMaterialLoss",
-          "CalendarAgeDriver"
+          "GasEvolution",
+          "VentPressureDriver"
         ],
         "mech": {
           "form": "linear",
           "weights": {
-            "ActiveMaterialLoss": 0.1220013801817952,
-            "CalendarAgeDriver": 0.0628769177215606
+            "GasEvolution": 0.12283780098622758,
+            "VentPressureDriver": 0.06197027869885062
           },
           "intercept": 0
         },
@@ -459,12 +492,13 @@
       }
     },
     "actuators": {
-      "FormationCurrent": {
+      "ChargeRate": {
         "aliases": [
-          "formation current",
-          "initial cycling current"
+          "charge rate",
+          "charging c-rate",
+          "fast-charge current"
         ],
-        "target": "FormationCurrent",
+        "target": "ChargeRate",
         "op": "set",
         "dtype": "continuous",
         "range": [
@@ -472,12 +506,12 @@
           100
         ],
         "default": 40,
-        "description": "controller for FormationCurrent"
+        "description": "controller for ChargeRate"
       },
-      "ElectrolyteAdditive": {
+      "SlowFormation": {
         "aliases": [
-          "electrolyte additive",
-          "film-forming additive"
+          "slow-formation protocol",
+          "gentle formation cycling"
         ],
         "target": "DendriteNucleation",
         "op": "scale",
@@ -488,12 +522,16 @@
         ],
         "default": 0,
         "expr": "1-sat(d;k=0.66)",
-        "description": "dosing to reduce DendriteNucleation"
+        "description": "dosing to reduce DendriteNucleation",
+        "side_effect": {
+          "target": "CapacityRetention",
+          "expr": "-overstrip(d;thr=0.66,gain=30)"
+        }
       },
-      "CapacityRecal": {
+      "VoltageWindowShift": {
         "aliases": [
-          "capacity recalibration",
-          "gauge recalibration"
+          "voltage-window shift",
+          "test-window adjustment"
         ],
         "target": "CapacityRetention",
         "op": "mask",
@@ -506,13 +544,13 @@
         "expr": "transient_boost(d)",
         "description": "a control that adjusts the CapacityRetention readout"
       },
-      "set_VentPressure": {
+      "set_CoolingPlateTemp": {
         "aliases": [
-          "set vent pressure",
-          "set burst-disc setpoint",
-          "adjust VentPressure"
+          "set cooling-plate temperature",
+          "set thermal-plate temp",
+          "adjust CoolingPlateTemp"
         ],
-        "target": "VentPressure",
+        "target": "CoolingPlateTemp",
         "op": "set",
         "dtype": "continuous",
         "range": [
@@ -520,15 +558,15 @@
           100
         ],
         "default": 50,
-        "description": "control for VentPressure"
+        "description": "control for CoolingPlateTemp"
       },
-      "set_AmbientHumidityBatt": {
+      "set_TabWeldQuality": {
         "aliases": [
-          "set ambient humidity",
-          "set room humidity",
-          "adjust AmbientHumidityBatt"
+          "set tab-weld quality",
+          "set current-collector weld",
+          "adjust TabWeldQuality"
         ],
-        "target": "AmbientHumidityBatt",
+        "target": "TabWeldQuality",
         "op": "set",
         "dtype": "continuous",
         "range": [
@@ -536,7 +574,23 @@
           100
         ],
         "default": 50,
-        "description": "control for AmbientHumidityBatt"
+        "description": "control for TabWeldQuality"
+      },
+      "set_DischargeDepth": {
+        "aliases": [
+          "set depth of discharge",
+          "set dod window",
+          "adjust DischargeDepth"
+        ],
+        "target": "DischargeDepth",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for DischargeDepth"
       },
       "set_PressStackForce": {
         "aliases": [
@@ -554,13 +608,13 @@
         "default": 50,
         "description": "control for PressStackForce"
       },
-      "set_DischargeDepth": {
+      "set_CrimpPressure": {
         "aliases": [
-          "set depth of discharge",
-          "set dod window",
-          "adjust DischargeDepth"
+          "set crimp pressure",
+          "set seal force",
+          "adjust CrimpPressure"
         ],
-        "target": "DischargeDepth",
+        "target": "CrimpPressure",
         "op": "set",
         "dtype": "continuous",
         "range": [
@@ -568,108 +622,127 @@
           100
         ],
         "default": 50,
-        "description": "control for DischargeDepth"
+        "description": "control for CrimpPressure"
+      },
+      "set_AmbientHumidityBatt": {
+        "aliases": [
+          "set ambient humidity",
+          "set room humidity",
+          "adjust AmbientHumidityBatt"
+        ],
+        "target": "AmbientHumidityBatt",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for AmbientHumidityBatt"
       }
     },
     "outcome": "CapacityRetention",
     "higher_is_better": true,
     "selection": {
-      "node": "CrimpPressure",
+      "node": "ElectrolyteFillVolume",
       "op": ">=",
-      "thresh": 4.807616496370261,
-      "soft": 0.14130138373444442
+      "thresh": 4.7543797336354565,
+      "soft": 0.14087903837725987
     }
   },
   "ground_truth": {
     "true_root": "DendriteNucleation",
-    "true_mechanism_proxy": "ImpedanceSpectrum",
+    "true_mechanism_proxy": "CoulombicEfficiency",
     "confounded_decoys": [
-      "SurfaceTemperature",
       "PackVoltage",
-      "CalendarAge"
+      "VentPressure"
     ],
-    "targeted_actuator": "ElectrolyteAdditive",
-    "symptom_trap_actuator": "CapacityRecal",
+    "targeted_actuator": "SlowFormation",
+    "symptom_trap_actuator": "VoltageWindowShift",
     "co_actuators": null,
-    "selection_decoy": "CalendarAge",
+    "selection_decoy": "VentPressure",
+    "_selection_nodes": [
+      "VentPressure",
+      "ElectrolyteFillVolume"
+    ],
     "subtype_policy": null,
-    "latent_plain_name": "a hidden dendrite nucleation that propagates through impedance growth, active-material loss to the outcome",
+    "latent_plain_name": "a hidden dendrite nucleation that propagates through sei instability, gas evolution to the outcome",
     "naive_interventions": [
       {
-        "FormationCurrent": 100
+        "ChargeRate": 100
       },
       {
-        "set_VentPressure": 100
+        "set_CoolingPlateTemp": 100
       },
       {
-        "set_AmbientHumidityBatt": 100
+        "set_TabWeldQuality": 100
       }
     ],
     "_features": [
+      "interior_dose",
       "sign_flip",
       "symptom_trap"
     ],
     "_skin": "battery",
     "_depth": 2,
     "_archetype": "collider_selection",
-    "_seed": 310007
+    "_seed": 310037
   },
   "oracle": {
     "gold": {
       "intervention": {
-        "ElectrolyteAdditive": 100.0
+        "ChargeRate": 0.0,
+        "SlowFormation": 66.0
       },
-      "expected_utility": 30.490888524270773,
-      "baseline_utility": 23.939969996430197,
+      "expected_utility": 35.48553432226839,
+      "baseline_utility": 28.864048395737438,
       "active_actuators": [
-        "FormationCurrent",
-        "ElectrolyteAdditive"
+        "ChargeRate",
+        "SlowFormation"
       ]
     },
     "counterfactual_battery": {
-      "true_mechanism_proxy": "ImpedanceSpectrum",
+      "true_mechanism_proxy": "CoulombicEfficiency",
       "valid_mechanism_proxies": [
-        "CrimpPressure",
-        "ImpedanceSpectrum"
+        "CoulombicEfficiency"
+      ],
+      "lenient_mechanism_proxies": [
+        "CoulombicEfficiency"
       ],
       "confounded_decoys": [
-        "CalendarAge",
         "PackVoltage",
-        "SurfaceTemperature"
+        "VentPressure"
       ],
       "actuator_sign_predictions": {
-        "FormationCurrent": "-",
-        "ElectrolyteAdditive": "+",
-        "CapacityRecal": "0",
-        "set_VentPressure": "0",
-        "set_AmbientHumidityBatt": "0",
+        "ChargeRate": "-",
+        "SlowFormation": "-",
+        "VoltageWindowShift": "0",
+        "set_CoolingPlateTemp": "0",
+        "set_TabWeldQuality": "0",
+        "set_DischargeDepth": "0",
         "set_PressStackForce": "0",
-        "set_DischargeDepth": "0"
+        "set_CrimpPressure": "0",
+        "set_AmbientHumidityBatt": "0"
       },
-      "targeted_actuator": "ElectrolyteAdditive",
-      "symptom_trap_actuator": "CapacityRecal"
+      "targeted_actuator": "SlowFormation",
+      "symptom_trap_actuator": "VoltageWindowShift"
     },
     "calibration": {
-      "proxy_assay_noise": 11.84,
-      "proxy_corr": 0.466,
-      "decoy_corr": 0.508
+      "proxy_assay_noise": 11.85,
+      "proxy_corr": 0.472,
+      "decoy_corr": 0.49
     },
     "audits": {
       "decoy": {
         "passed": true,
         "decoys": {
-          "SurfaceTemperature": {
-            "obs_corr": 0.508,
-            "clamp_do_effect": 0.0,
-            "ok": true
-          },
           "PackVoltage": {
-            "obs_corr": 0.51,
+            "obs_corr": 0.49,
             "clamp_do_effect": 0.0,
             "ok": true
           },
-          "CalendarAge": {
-            "obs_corr": 0.401,
+          "VentPressure": {
+            "obs_corr": 0.398,
             "clamp_do_effect": 0.0,
             "ok": true
           }
@@ -677,7 +750,7 @@
       },
       "proxy_signal": {
         "passed": true,
-        "proxy_outcome_corr": -0.467,
+        "proxy_outcome_corr": -0.468,
         "obs_ok": true,
         "interventional_shift_sd": 0.67,
         "interv_ok": false,
@@ -688,42 +761,42 @@
       },
       "distractor_inertness": {
         "passed": true,
-        "n_inert_checked": 5,
+        "n_inert_checked": 7,
         "violations": []
       },
       "gold_selfconsistency": {
         "passed": true,
-        "gold_utility": 30.49,
+        "gold_utility": 35.49,
         "beating_perturbations": []
       },
       "counterintuitiveness": {
         "passed": true,
-        "baseline_utility": 23.92,
-        "gold_utility": 30.49,
+        "baseline_utility": 28.88,
+        "gold_utility": 35.49,
         "naive_results": [
           {
             "naive": {
-              "FormationCurrent": 100
+              "ChargeRate": 100
             },
-            "utility": -14.45,
-            "gain_over_baseline": -38.37,
-            "fraction_of_gold_benefit": -5.841,
+            "utility": -9.45,
+            "gain_over_baseline": -38.32,
+            "fraction_of_gold_benefit": -5.798,
             "helps": false
           },
           {
             "naive": {
-              "set_VentPressure": 100
+              "set_CoolingPlateTemp": 100
             },
-            "utility": 23.92,
+            "utility": 28.88,
             "gain_over_baseline": 0.0,
             "fraction_of_gold_benefit": 0.0,
             "helps": false
           },
           {
             "naive": {
-              "set_AmbientHumidityBatt": 100
+              "set_TabWeldQuality": 100
             },
-            "utility": 23.92,
+            "utility": 28.88,
             "gain_over_baseline": 0.0,
             "fraction_of_gold_benefit": 0.0,
             "helps": false

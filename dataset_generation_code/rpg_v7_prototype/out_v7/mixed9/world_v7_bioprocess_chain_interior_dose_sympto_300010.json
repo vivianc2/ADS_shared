@@ -1,19 +1,21 @@
 {
   "schema_version": "rpg_scm_v7",
-  "world_id": "v7_bioprocess_chain_symptom_trap_300020",
+  "world_id": "v7_bioprocess_chain_interior_dose_sympto_300010",
   "domain": "bioprocess",
   "meta": {
-    "seed": 300020,
+    "seed": 300010,
     "features": [
-      "symptom_trap"
+      "interior_dose",
+      "symptom_trap",
+      "two_cause"
     ],
     "skin": "bioprocess",
-    "depth": 3
+    "depth": 2
   },
   "scenario": "A 2,000 L mammalian-cell bioreactor producing a secreted therapeutic protein has seen product titer fall about 30% over the last three weeks, and the loss has persisted across several batches. The decline began shortly after a maintenance shutdown in which a feed-water line fitting was replaced and probes were recalibrated. The operators' leading theories are dissolved-oxygen control drift or a temperature excursion. Batch records note the broth has looked cloudier than usual at harvest. Routine panels look broadly within range. The feed-water system, gas train, cooling jacket, and dosing pumps are all instrumented and adjustable. You have a limited number of experiments; you may measure quantities and apply available controls or additives, alone or in combination. Determine what is really driving the loss and what to do about it.",
   "scm": {
     "variables": {
-      "EndotoxinLoadSusceptibility": {
+      "ShearStressLoadSusceptibility": {
         "aliases": [
           "susceptibility",
           "batch susceptibility"
@@ -40,11 +42,10 @@
           ]
         }
       },
-      "FeedWaterFlowRate": {
+      "MediaExchangeRate": {
         "aliases": [
-          "feed water flow",
-          "feed flow",
-          "water flow"
+          "media exchange rate",
+          "perfusion rate"
         ],
         "kind": "observable",
         "dist": {
@@ -61,47 +62,47 @@
           ]
         }
       },
-      "EndotoxinLoad": {
+      "GlutamineConc": {
         "aliases": [
-          "endotoxin load",
-          "endotoxin",
-          "pyrogen level"
+          "glutamine",
+          "amino acid feed"
         ],
-        "kind": "latent",
-        "parents": [
-          "FeedWaterFlowRate",
-          "EndotoxinLoadSusceptibility"
-        ],
-        "mech": {
-          "form": "interaction",
-          "a": "FeedWaterFlowRate",
-          "b": "EndotoxinLoadSusceptibility",
-          "gain": 260.0,
-          "scale": 100.0,
-          "intercept": 3.0
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            20,
+            8
+          ]
         },
-        "noise": {
+        "measurable": true,
+        "assay_noise": {
           "normal": [
             0,
-            1.5
+            3
           ]
         }
       },
-      "MembraneDamage": {
+      "ShearStressLoad": {
         "aliases": [
-          "membrane damage",
-          "cell envelope stress"
+          "shear stress",
+          "mechanical shear",
+          "hydrodynamic stress"
         ],
         "kind": "latent",
         "parents": [
-          "EndotoxinLoad"
+          "MediaExchangeRate",
+          "GlutamineConc"
         ],
         "mech": {
-          "form": "hill",
-          "of": "EndotoxinLoad",
-          "vmax": 70,
-          "k": 35,
-          "n": 2
+          "form": "gated_and",
+          "a": "MediaExchangeRate",
+          "b": "GlutamineConc",
+          "ta": 55,
+          "tb": 55,
+          "wa": 9,
+          "wb": 9,
+          "vmax": 95.0,
+          "intercept": 3.0
         }
       },
       "OxidativeStress": {
@@ -112,14 +113,14 @@
         ],
         "kind": "latent",
         "parents": [
-          "MembraneDamage"
+          "ShearStressLoad"
         ],
         "mech": {
-          "form": "linear",
-          "weights": {
-            "MembraneDamage": 0.9
-          },
-          "intercept": 5
+          "form": "hill",
+          "of": "ShearStressLoad",
+          "vmax": 70,
+          "k": 35,
+          "n": 2
         }
       },
       "ProteaseActivity": {
@@ -154,10 +155,10 @@
         "mech": {
           "form": "linear",
           "weights": {
-            "ProteaseActivity": -0.9,
-            "BatchSeedAge": 0.4
+            "ProteaseActivity": 0.9,
+            "BatchSeedAge": 0.1
           },
-          "intercept": 15
+          "intercept": 8
         },
         "measurable": true,
         "assay_noise": {
@@ -167,20 +168,19 @@
           ]
         }
       },
-      "LDHRelease": {
+      "FragmentedProteinPct": {
         "aliases": [
-          "ldh release",
-          "cell lysis marker",
-          "membrane leakage"
+          "fragmented protein",
+          "clipping percent"
         ],
         "kind": "observable",
         "parents": [
-          "OxidativeStress"
+          "ProteaseActivity"
         ],
         "mech": {
           "form": "linear",
           "weights": {
-            "OxidativeStress": 0.8
+            "ProteaseActivity": 0.8
           },
           "intercept": 5
         },
@@ -188,7 +188,7 @@
         "assay_noise": {
           "normal": [
             0,
-            14.77
+            0.5
           ]
         }
       },
@@ -214,6 +214,46 @@
           "normal": [
             0,
             4
+          ]
+        }
+      },
+      "pH": {
+        "aliases": [
+          "ph",
+          "acidity"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "Osmolality": {
+        "aliases": [
+          "osmolality",
+          "osmotic pressure"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
           ]
         }
       },
@@ -257,90 +297,10 @@
           ]
         }
       },
-      "AmmoniaConc": {
-        "aliases": [
-          "ammonia",
-          "ammonium"
-        ],
-        "kind": "observable",
-        "dist": {
-          "normal": [
-            50,
-            12
-          ]
-        },
-        "measurable": true,
-        "assay_noise": {
-          "normal": [
-            0,
-            3
-          ]
-        }
-      },
       "LactateConc": {
         "aliases": [
           "lactate",
           "lactic acid"
-        ],
-        "kind": "observable",
-        "dist": {
-          "normal": [
-            50,
-            12
-          ]
-        },
-        "measurable": true,
-        "assay_noise": {
-          "normal": [
-            0,
-            3
-          ]
-        }
-      },
-      "CoolingWaterTemp": {
-        "aliases": [
-          "cooling water",
-          "jacket temperature"
-        ],
-        "kind": "observable",
-        "dist": {
-          "normal": [
-            50,
-            12
-          ]
-        },
-        "measurable": true,
-        "assay_noise": {
-          "normal": [
-            0,
-            3
-          ]
-        }
-      },
-      "pH": {
-        "aliases": [
-          "ph",
-          "acidity"
-        ],
-        "kind": "observable",
-        "dist": {
-          "normal": [
-            50,
-            12
-          ]
-        },
-        "measurable": true,
-        "assay_noise": {
-          "normal": [
-            0,
-            3
-          ]
-        }
-      },
-      "GlucoseFeedRate": {
-        "aliases": [
-          "glucose feed",
-          "sugar feed"
         ],
         "kind": "observable",
         "dist": {
@@ -378,10 +338,10 @@
           ]
         }
       },
-      "GlutamineConc": {
+      "AmmoniaConc": {
         "aliases": [
-          "glutamine",
-          "amino acid feed"
+          "ammonia",
+          "ammonium"
         ],
         "kind": "observable",
         "dist": {
@@ -398,10 +358,10 @@
           ]
         }
       },
-      "GasSpargeRate": {
+      "AntifoamLevel": {
         "aliases": [
-          "sparge rate",
-          "aeration rate"
+          "antifoam",
+          "defoamer"
         ],
         "kind": "observable",
         "dist": {
@@ -420,13 +380,12 @@
       }
     },
     "actuators": {
-      "FeedWaterFlowRate": {
+      "MediaExchangeRate": {
         "aliases": [
-          "feed water flow",
-          "feed flow",
-          "water flow"
+          "media exchange rate",
+          "perfusion rate"
         ],
-        "target": "FeedWaterFlowRate",
+        "target": "MediaExchangeRate",
         "op": "set",
         "dtype": "continuous",
         "range": [
@@ -434,23 +393,22 @@
           100
         ],
         "default": 40,
-        "description": "controller for FeedWaterFlowRate"
+        "description": "controller for MediaExchangeRate"
       },
-      "AntioxidantDosing": {
+      "GlutamineConc": {
         "aliases": [
-          "antioxidant additive",
-          "radical scavenger"
+          "glutamine",
+          "amino acid feed"
         ],
-        "target": "EndotoxinLoad",
-        "op": "scale",
+        "target": "GlutamineConc",
+        "op": "set",
         "dtype": "continuous",
         "range": [
           0,
           100
         ],
-        "default": 0,
-        "expr": "1-sat(d;k=0.66)",
-        "description": "dosing to reduce EndotoxinLoad"
+        "default": 20,
+        "description": "controller for GlutamineConc"
       },
       "StabilizerAdditive": {
         "aliases": [
@@ -468,6 +426,38 @@
         "default": 0,
         "expr": "transient_boost(d)",
         "description": "a control that adjusts the ProductTiter readout"
+      },
+      "set_pH": {
+        "aliases": [
+          "set ph",
+          "set acidity",
+          "adjust pH"
+        ],
+        "target": "pH",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for pH"
+      },
+      "set_Osmolality": {
+        "aliases": [
+          "set osmolality",
+          "set osmotic pressure",
+          "adjust Osmolality"
+        ],
+        "target": "Osmolality",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for Osmolality"
       },
       "set_CO2Level": {
         "aliases": [
@@ -500,131 +490,94 @@
         ],
         "default": 50,
         "description": "control for Temperature"
-      },
-      "set_AmmoniaConc": {
-        "aliases": [
-          "set ammonia",
-          "set ammonium",
-          "adjust AmmoniaConc"
-        ],
-        "target": "AmmoniaConc",
-        "op": "set",
-        "dtype": "continuous",
-        "range": [
-          0,
-          100
-        ],
-        "default": 50,
-        "description": "control for AmmoniaConc"
-      },
-      "set_LactateConc": {
-        "aliases": [
-          "set lactate",
-          "set lactic acid",
-          "adjust LactateConc"
-        ],
-        "target": "LactateConc",
-        "op": "set",
-        "dtype": "continuous",
-        "range": [
-          0,
-          100
-        ],
-        "default": 50,
-        "description": "control for LactateConc"
-      },
-      "set_CoolingWaterTemp": {
-        "aliases": [
-          "set cooling water",
-          "set jacket temperature",
-          "adjust CoolingWaterTemp"
-        ],
-        "target": "CoolingWaterTemp",
-        "op": "set",
-        "dtype": "continuous",
-        "range": [
-          0,
-          100
-        ],
-        "default": 50,
-        "description": "control for CoolingWaterTemp"
       }
     },
     "outcome": "ProductTiter",
     "higher_is_better": true
   },
   "ground_truth": {
-    "true_root": "EndotoxinLoad",
-    "true_mechanism_proxy": "LDHRelease",
+    "true_root": "ShearStressLoad",
+    "true_mechanism_proxy": "FragmentedProteinPct",
     "confounded_decoys": [
       "DissolvedOxygen"
     ],
-    "targeted_actuator": "AntioxidantDosing",
+    "targeted_actuator": "MediaExchangeRate",
     "symptom_trap_actuator": "StabilizerAdditive",
-    "co_actuators": null,
+    "co_actuators": [
+      "MediaExchangeRate",
+      "GlutamineConc"
+    ],
     "selection_decoy": null,
+    "_selection_nodes": [],
     "subtype_policy": null,
-    "latent_plain_name": "a hidden endotoxin load that propagates through membrane damage, oxidative stress, protease activity to the outcome",
+    "latent_plain_name": "a hidden shear stress that propagates through oxidative stress, protease activity to the outcome",
     "naive_interventions": [
       {
-        "set_CO2Level": 100
+        "set_pH": 100
       },
       {
-        "set_Temperature": 100
+        "set_Osmolality": 100
       }
     ],
     "_features": [
-      "symptom_trap"
+      "interior_dose",
+      "symptom_trap",
+      "two_cause"
     ],
     "_skin": "bioprocess",
-    "_depth": 3,
+    "_depth": 2,
     "_archetype": "confounded_chain",
-    "_seed": 300020
+    "_seed": 300010
   },
   "oracle": {
     "gold": {
       "intervention": {
-        "AntioxidantDosing": 100.0
+        "MediaExchangeRate": 100.0,
+        "GlutamineConc": 100.0
       },
-      "expected_utility": 26.440888524270772,
-      "baseline_utility": -8.039405210087757,
+      "expected_utility": 67.63410498185193,
+      "baseline_utility": 18.127565661100224,
       "active_actuators": [
-        "FeedWaterFlowRate",
-        "AntioxidantDosing"
+        "MediaExchangeRate",
+        "GlutamineConc"
       ]
     },
     "counterfactual_battery": {
-      "true_mechanism_proxy": "LDHRelease",
+      "true_mechanism_proxy": "FragmentedProteinPct",
       "valid_mechanism_proxies": [
-        "LDHRelease"
+        "FragmentedProteinPct",
+        "MediaExchangeRate"
+      ],
+      "lenient_mechanism_proxies": [
+        "FragmentedProteinPct",
+        "MediaExchangeRate"
       ],
       "confounded_decoys": [
         "DissolvedOxygen"
       ],
       "actuator_sign_predictions": {
-        "FeedWaterFlowRate": "-",
-        "AntioxidantDosing": "+",
+        "MediaExchangeRate": "+",
+        "GlutamineConc": "+",
         "StabilizerAdditive": "0",
+        "set_pH": "0",
+        "set_Osmolality": "0",
         "set_CO2Level": "0",
-        "set_Temperature": "0",
-        "set_AmmoniaConc": "0",
-        "set_LactateConc": "0",
-        "set_CoolingWaterTemp": "0"
+        "set_Temperature": "0"
       },
-      "targeted_actuator": "AntioxidantDosing",
+      "targeted_actuator": "MediaExchangeRate",
       "symptom_trap_actuator": "StabilizerAdditive"
     },
     "calibration": {
-      "proxy_assay_noise": 14.77,
-      "proxy_corr": 0.479,
-      "decoy_corr": 0.477
+      "proxy_assay_noise": 0.5,
+      "proxy_corr": 0.074,
+      "decoy_corr": 0.443
     },
     "audits": {
       "decoy": {
         "passed": true,
         "decoys": {
           "DissolvedOxygen": {
-            "obs_corr": 0.477,
+            "obs_corr": 0.443,
             "clamp_do_effect": 0.0,
             "ok": true
           }
@@ -632,9 +585,9 @@
       },
       "proxy_signal": {
         "passed": true,
-        "proxy_outcome_corr": -0.48,
-        "obs_ok": true,
-        "interventional_shift_sd": 1.9,
+        "proxy_outcome_corr": 0.096,
+        "obs_ok": false,
+        "interventional_shift_sd": 65.74,
         "interv_ok": true,
         "band": [
           0.35,
@@ -643,33 +596,33 @@
       },
       "distractor_inertness": {
         "passed": true,
-        "n_inert_checked": 6,
+        "n_inert_checked": 5,
         "violations": []
       },
       "gold_selfconsistency": {
         "passed": true,
-        "gold_utility": 26.44,
+        "gold_utility": 67.63,
         "beating_perturbations": []
       },
       "counterintuitiveness": {
         "passed": true,
-        "baseline_utility": -8.02,
-        "gold_utility": 26.44,
+        "baseline_utility": 18.13,
+        "gold_utility": 67.63,
         "naive_results": [
           {
             "naive": {
-              "set_CO2Level": 100
+              "set_pH": 100
             },
-            "utility": -8.02,
+            "utility": 18.13,
             "gain_over_baseline": 0.0,
             "fraction_of_gold_benefit": 0.0,
             "helps": false
           },
           {
             "naive": {
-              "set_Temperature": 100
+              "set_Osmolality": 100
             },
-            "utility": -8.02,
+            "utility": 18.13,
             "gain_over_baseline": 0.0,
             "fraction_of_gold_benefit": 0.0,
             "helps": false

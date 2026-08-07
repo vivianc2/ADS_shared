@@ -233,8 +233,15 @@ def counterfactual_battery(world: Dict[str, Any], *, n=15000, seed=777) -> Dict[
     tgt = gt["targeted_actuator"]
     tspec = scm.actuators[tgt]
     thi = tspec["range"][1] if tspec.get("dtype") == "continuous" else tspec.get("values", ["off", "on"])[-1]
+    # SELECTION APPARATUS is excluded from the proxy scan: the collider node (and
+    # selection-decoy driver's observable) sit downstream of the mediator BY
+    # CONSTRUCTION (that is how conditioning opens the spurious path), so the
+    # targeted actuator moves them and they would be mislabeled "valid proxies".
+    # They are the selection machinery / decoys, not the mechanism proxy.
+    excluded = set(gt.get("_selection_nodes", []))
     measurables = [nm for nm, s in scm.variables.items()
-                   if (s["kind"] in ("observable",) or s.get("measurable")) and nm != scm.outcome]
+                   if (s["kind"] in ("observable",) or s.get("measurable"))
+                   and nm != scm.outcome and nm not in excluded]
     base_obs = scm.measure(scm.sample(n, seed=seed + 1), measurables, seed=seed + 2)
     do_obs = scm.measure(scm.sample(n, intervention={tgt: thi}, seed=seed + 1),
                          measurables, seed=seed + 2, intervention={tgt: thi})
@@ -244,9 +251,21 @@ def counterfactual_battery(world: Dict[str, Any], *, n=15000, seed=777) -> Dict[
         sd = float(base_obs[nm].std()) + 1e-9
         if shift / sd > 0.5:      # the true lever meaningfully moves this signal
             valid_proxies.append(nm)
+    # LENIENT proxy set (used by the RL REWARD, not the strict eval): any measurable
+    # that is causally DOWNSTREAM of the true root on the mechanism chain and is not
+    # a decoy or selection node. This credits "understood the mechanism" even when
+    # the agent names a downstream marker other than the exact sampled proxy
+    # variable (the mixed9 "coulombic efficiency / interveinal chlorosis" case),
+    # without crediting decoys/selection apparatus (V4). See reward-contract doc V5.
+    root = gt.get("true_root")
+    downstream = scm._descendants({root}) if root in scm.variables else set()
+    lenient = {nm for nm in measurables
+               if nm in downstream and nm not in set(gt.get("confounded_decoys", []))}
+    lenient |= set(valid_proxies) | {gt["true_mechanism_proxy"]}
     return {
         "true_mechanism_proxy": gt["true_mechanism_proxy"],
         "valid_mechanism_proxies": sorted(set(valid_proxies) | {gt["true_mechanism_proxy"]}),
+        "lenient_mechanism_proxies": sorted(lenient),
         "confounded_decoys": sorted(gt["confounded_decoys"]),
         "actuator_sign_predictions": act_signs,
         "targeted_actuator": gt["targeted_actuator"],
@@ -254,18 +273,26 @@ def counterfactual_battery(world: Dict[str, Any], *, n=15000, seed=777) -> Dict[
     }
 
 
-def _score_battery(battery, answer, recommended=None):
+def _score_battery(battery, answer, recommended=None, strict=True):
     st = answer.get("structured", {}) or {}
     items = []
-    # Accept ANY genuine proxy on the causal chain, not one hardcoded name.
-    valid_proxies = set(battery.get("valid_mechanism_proxies", [battery["true_mechanism_proxy"]]))
-    items.append(("true_mechanism_proxy", st.get("true_mechanism_proxy") in valid_proxies))
+    # Proxy credit. STRICT (eval/benchmark): the exact sampled proxy or an
+    # empirically-equivalent one (valid_mechanism_proxies). LENIENT (RL reward):
+    # any measurable causally downstream of the true root that is not a decoy /
+    # selection node -- rewards "understood the mechanism" without punishing an
+    # articulate-but-non-canonical name. See reward-contract doc V5.
+    if strict:
+        proxy_set = set(battery.get("valid_mechanism_proxies", [battery["true_mechanism_proxy"]]))
+    else:
+        proxy_set = set(battery.get("lenient_mechanism_proxies",
+                                    battery.get("valid_mechanism_proxies", [battery["true_mechanism_proxy"]])))
+    items.append(("true_mechanism_proxy", st.get("true_mechanism_proxy") in proxy_set))
     agent_decoys = set(st.get("confounded_decoys", []))
     gt_decoys = set(battery["confounded_decoys"])
     # decoy check: must flag the true confounder(s), and must NOT mislabel any
     # genuine proxy as a decoy.
     items.append(("confounded_decoys",
-                  gt_decoys.issubset(agent_decoys) and not (agent_decoys & valid_proxies)))
+                  gt_decoys.issubset(agent_decoys) and not (agent_decoys & proxy_set)))
     pred = st.get("actuator_sign_predictions", {}) or {}
     trap = battery.get("symptom_trap_actuator")
     gold_signs = battery["actuator_sign_predictions"]
@@ -319,7 +346,14 @@ def _normalize_policy_answer(scm: WorldSCM, answer: Dict[str, Any],
 
 
 def grade(world: Dict[str, Any], answer: Dict[str, Any], gold: Dict[str, Any],
-          battery: Dict[str, Any], *, n=30000, seed=999, tolerance=2.0) -> Dict[str, Any]:
+          battery: Dict[str, Any], *, n=30000, seed=999, tolerance=2.0,
+          strict=True) -> Dict[str, Any]:
+    """Grade an answer. ``strict`` controls part-B proxy credit:
+    - strict=True (DEFAULT, eval/benchmark): the exact sampled proxy (or an
+      empirically-equivalent one). Precise, comparable — the reported number.
+    - strict=False (RL reward): any measurable downstream of the true root that is
+      not a decoy/selection node. Rewards mechanism understanding, not exact naming.
+    See docs/rpg/rpg_v7_reward_contract_decisions.md V5."""
     scm: WorldSCM = world["scm"]
     rec = answer.get("recommended_intervention", {}) or {}
     valid = {k: v for k, v in rec.items() if k in scm.actuators}
@@ -335,7 +369,7 @@ def grade(world: Dict[str, Any], answer: Dict[str, Any], gold: Dict[str, Any],
     else:
         benefit = None
         part_a = bool(u >= gold_u - tolerance)
-    frac, items = _score_battery(battery, answer, recommended=valid)
+    frac, items = _score_battery(battery, answer, recommended=valid, strict=strict)
     part_b = bool(frac >= 0.8)
     return {"accepted": bool(part_a and part_b), "part_a_utility_ok": part_a, "part_b_battery_ok": part_b,
             "recommended_intervention": valid, "recommended_utility": round(u, 3),

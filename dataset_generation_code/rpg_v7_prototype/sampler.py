@@ -384,11 +384,23 @@ def sample_world(seed: int, skin: Optional[str] = None,
         naive.append({f"set_{iv['name']}": 100})
 
     all_decoys = [d["name"] for d in decoys]
+    selection_nodes = []
     if sel_decoy is not None:
         # the selection decoy is causally inert on the outcome -> it is a decoy the
         # agent must NOT recommend acting on, and (if it has a handle) pushing it
         # is a naive move that fails.
         all_decoys.append(sel_decoy["name"])
+        selection_nodes.append(sel_decoy["name"])
+    if col_node is not None:
+        # the COLLIDER node is causally downstream of the mediator by construction
+        # (that is why conditioning on it opens the spurious path), so the targeted
+        # actuator moves it and the empirical proxy scan would wrongly call it a
+        # "valid mechanism proxy". It is NOT the mechanism proxy and NOT a classic
+        # confounded decoy (a collider is both-parents->node, not confounder->both);
+        # it is the SELECTION APPARATUS. Record it as a selection node so the proxy
+        # scan excludes it, but do NOT force it into confounded_decoys (that would
+        # fail the confounder-style decoy audit).
+        selection_nodes.append(col_node["name"])
 
     gt = {
         "true_root": root["name"],
@@ -398,6 +410,7 @@ def sample_world(seed: int, skin: Optional[str] = None,
         "symptom_trap_actuator": trap_id if trap_id else (fix_id or src["name"]),
         "co_actuators": co_acts,
         "selection_decoy": sel_decoy["name"] if sel_decoy is not None else None,
+        "_selection_nodes": selection_nodes,   # selection apparatus: excluded from proxy scan
         "subtype_policy": sub_info,   # None unless hidden_subtype archetype
         "latent_plain_name": f"a hidden {root['aliases'][0]} that propagates through "
                              f"{', '.join(m['aliases'][0] for m in mediators)} to the outcome",

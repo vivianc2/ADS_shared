@@ -23,6 +23,7 @@ import argparse
 import glob
 import json
 import os
+import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -97,19 +98,32 @@ def main():
     resolver_llm = None
     if args.resolver_llm:
         resolver_llm = build_resolver_llm("bedrock", None, no_resolver_llm=False)
+        if resolver_llm is None:
+            print("WARNING: --resolver-llm requested but no resolver LLM built "
+                  "(AWS_BEARER_TOKEN_BEDROCK not set?). Falling back to lexical.",
+                  flush=True)
+
+    print(f"re-grading {len(paths)} world(s) in {rdir} "
+          f"(resolver_llm={'ON — expect a few Bedrock calls per world' if resolver_llm else 'off/lexical'})",
+          flush=True)
 
     rows = []
-    for p in paths:
+    for i, p in enumerate(paths, 1):
         with open(p, encoding="utf-8") as f:
             result = json.load(f)
+        wid = result.get("world_id", Path(p).stem)
+        print(f"  [{i}/{len(paths)}] {wid} ...", end="", flush=True)
+        t0 = time.time()
         row = _regrade_one(result, resolver_llm)
         if row is None:
-            print(f"  [skip] {Path(p).name} — world file not found")
+            print(" skip (world file not found)", flush=True)
             continue
         rows.append(row)
         if args.write and "new_grade" in row:
             with open(rdir / f"regrade_{row['world_id']}.json", "w", encoding="utf-8") as f:
                 json.dump(row["new_grade"], f, indent=2, default=str)
+        print(f" B {row['old_B']:.2f}->{row['new_B']:.2f}  "
+              f"acc {row['old_accept']}->{row['new_accept']}  ({time.time()-t0:.0f}s)", flush=True)
 
     n = len(rows)
     old_acc = sum(r["old_accept"] for r in rows)
