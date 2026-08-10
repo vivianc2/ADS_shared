@@ -25,7 +25,14 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
-TOPOLOGY_RE = re.compile(r"(bioreactor_titer_loss|datacenter_throughput|greenhouse_yield|clinic_readmission)")
+# v6 hand-authored topologies (legacy) OR v7 structural archetype tags. v7 world_ids
+# are v7_<skin>_<chain|collider|subtype>_<features>_<seed>; the archetype tag is the
+# meaningful grouping (the structural family), so key on it.
+TOPOLOGY_RE = re.compile(
+    r"(bioreactor_titer_loss|datacenter_throughput|greenhouse_yield|clinic_readmission"
+    r"|_chain_|_collider_|_subtype_)")
+_V7_TAG = {"_chain_": "confounded_chain", "_collider_": "collider_selection",
+           "_subtype_": "hidden_subtype"}
 
 
 def wilson(k: int, n: int, z: float = 1.96) -> Tuple[float, float, float]:
@@ -41,7 +48,9 @@ def wilson(k: int, n: int, z: float = 1.96) -> Tuple[float, float, float]:
 
 def topology_of(world_id: str) -> str:
     m = TOPOLOGY_RE.search(world_id)
-    return m.group(1) if m else "unknown"
+    if not m:
+        return "unknown"
+    return _V7_TAG.get(m.group(1), m.group(1))
 
 
 def load_run(run_dir: str) -> List[Dict[str, Any]]:
@@ -90,10 +99,16 @@ def main():
         label, d = spec.split("=", 1)
         runs[label] = load_run(d)
 
-    topologies = ["bioreactor_titer_loss", "datacenter_throughput",
-                  "greenhouse_yield", "clinic_readmission"]
+    # topologies present in the data, in a stable order (v7 archetypes first, then
+    # any v6 legacy topologies, then unknown). Derived, not hardcoded, so the report
+    # tracks whatever generation of worlds was run.
+    _ORDER = ["confounded_chain", "collider_selection", "hidden_subtype",
+              "bioreactor_titer_loss", "datacenter_throughput", "greenhouse_yield",
+              "clinic_readmission"]
+    present = {r["topology"] for rows in runs.values() for r in rows}
+    topologies = [t for t in _ORDER if t in present] + sorted(present - set(_ORDER))
 
-    lines: List[str] = ["# RPG v6 — Results\n"]
+    lines: List[str] = ["# RPG v7 — Results\n"]
 
     # ---- overall per model ----
     lines.append("## Overall (all topologies pooled)\n")

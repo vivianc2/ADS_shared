@@ -48,8 +48,43 @@ from sim_v6 import SimV6                 # noqa: E402
 
 logger = logging.getLogger("run_agent_v6")
 
-_ACTION_RE = re.compile(r'<action\s+type="(measure|intervene|code|answer|give_up)">\s*(.*?)\s*</action>',
-                        re.DOTALL | re.IGNORECASE)
+# Primary action tag. Quotes around the type are optional and may be single or
+# double (smaller / thinking models frequently emit type='code', type=code, or add
+# whitespace) — being strict here silently DROPS the turn, which misreads as "the
+# model never used that action". Accept the common variants.
+_ACTION_RE = re.compile(
+    r'<action\s+type\s*=\s*["\']?(measure|intervene|code|answer|give_up)["\']?\s*>\s*(.*?)\s*</action>',
+    re.DOTALL | re.IGNORECASE)
+# Fallback if the closing tag is missing/mangled (common when a long code block or
+# thinking run gets truncated): capture from the opening action tag to end-of-text.
+_ACTION_OPEN_RE = re.compile(
+    r'<action\s+type\s*=\s*["\']?(measure|intervene|code|answer|give_up)["\']?\s*>\s*(.*)',
+    re.DOTALL | re.IGNORECASE)
+
+
+def _strip_fences(text: str) -> str:
+    """Remove a leading ```lang / trailing ``` markdown fence around a payload.
+    Thinking models often wrap code/JSON in fences, which breaks naive tag parsing
+    and json.loads. Leaves un-fenced text unchanged."""
+    t = text.strip()
+    if t.startswith("```"):
+        t = re.sub(r"^```[a-zA-Z0-9_+-]*\s*\n?", "", t)
+        t = re.sub(r"\n?```\s*$", "", t)
+    return t.strip()
+
+
+def _parse_action(raw: str):
+    """Return (atype, payload) or (None, None). Tries the strict tag, then an
+    open-tag-to-EOF fallback, stripping any markdown fence around the payload."""
+    m = _ACTION_RE.search(raw)
+    if m:
+        return m.group(1).lower(), _strip_fences(m.group(2))
+    m = _ACTION_OPEN_RE.search(raw)
+    if m:
+        # drop a dangling ```/</action> remnant the greedy capture may have taken
+        payload = re.sub(r"</action\s*>?\s*$", "", m.group(2), flags=re.I)
+        return m.group(1).lower(), _strip_fences(payload)
+    return None, None
 
 
 def _tag(text: str, tag: str) -> str:
@@ -373,13 +408,12 @@ YOUR MEMORY
         dt = round(time.time() - t0, 2)
         memory = _tag(raw, "memory") or memory
         reasoning = _tag(raw, "reasoning")
-        m = _ACTION_RE.search(raw)
+        atype, payload = _parse_action(raw)
         rec: Dict[str, Any] = {"turn": turn, "latency_s": dt, "reasoning": reasoning, "memory": memory, "raw": raw}
-        if not m:
+        if atype is None:
             rec["error"] = "no action parsed"
             turns.append(rec)
             continue
-        atype, payload = m.group(1).lower(), m.group(2).strip()
         rec["action_type"] = atype
         try:
             data = json.loads(payload) if payload and payload[0] in "{[" else {}
