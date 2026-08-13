@@ -1,0 +1,765 @@
+{
+  "schema_version": "rpg_scm_v7",
+  "world_id": "v7_watertreatment_collider_interior_dose_sign_f_10000868",
+  "domain": "watertreatment",
+  "meta": {
+    "seed": 10000868,
+    "features": [
+      "interior_dose",
+      "sign_flip",
+      "symptom_trap"
+    ],
+    "skin": "watertreatment",
+    "depth": 2
+  },
+  "scenario": "A water utility's water clarity score has dropped about 40% over the past month (more discoloration reaching customers). It began after crews increased line flushing following a main repair. Tap water looks faintly rusty at some addresses. Routine water-quality panels look broadly within range. The flushing program, disinfection, and chemical dosing are adjustable, and dosing equipment is available. You have a limited number of experiments; you may measure quantities and apply available controls or additives, alone or in combination. Determine what is really driving the drop and what to do about it.",
+  "scm": {
+    "variables": {
+      "MobilizedScaleSusceptibility": {
+        "aliases": [
+          "susceptibility",
+          "batch susceptibility"
+        ],
+        "kind": "latent",
+        "dist": {
+          "normal": [
+            55,
+            20
+          ]
+        }
+      },
+      "SeasonalDemand": {
+        "aliases": [
+          "seasonal demand",
+          "demand swing"
+        ],
+        "kind": "latent",
+        "dist": {
+          "normal": [
+            50,
+            16
+          ]
+        }
+      },
+      "LineFlushRate": {
+        "aliases": [
+          "line flush rate",
+          "flushing intensity"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            40,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "LineFlushRateHarmAxis": {
+        "aliases": [
+          "harm axis"
+        ],
+        "kind": "latent",
+        "parents": [
+          "LineFlushRate"
+        ],
+        "mech": {
+          "form": "sign_flip",
+          "of": "LineFlushRate",
+          "knee": 45,
+          "lo_gain": 0.05,
+          "hi_gain": 0.9,
+          "intercept": 2.0
+        }
+      },
+      "MobilizedScale": {
+        "aliases": [
+          "mobilized pipe scale",
+          "scale release",
+          "iron release"
+        ],
+        "kind": "latent",
+        "parents": [
+          "LineFlushRateHarmAxis",
+          "MobilizedScaleSusceptibility"
+        ],
+        "mech": {
+          "form": "interaction",
+          "a": "LineFlushRateHarmAxis",
+          "b": "MobilizedScaleSusceptibility",
+          "gain": 260.0,
+          "scale": 100.0,
+          "intercept": 3.0
+        },
+        "noise": {
+          "normal": [
+            0,
+            1.5
+          ]
+        }
+      },
+      "IronParticulate": {
+        "aliases": [
+          "iron particulate",
+          "particulate load"
+        ],
+        "kind": "latent",
+        "parents": [
+          "MobilizedScale"
+        ],
+        "mech": {
+          "form": "hill",
+          "of": "MobilizedScale",
+          "vmax": 70,
+          "k": 35,
+          "n": 2
+        }
+      },
+      "TurbidityLoad": {
+        "aliases": [
+          "turbidity load",
+          "suspended solids"
+        ],
+        "kind": "latent",
+        "parents": [
+          "IronParticulate"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "IronParticulate": 0.9
+          },
+          "intercept": 5
+        }
+      },
+      "WaterClarityScore": {
+        "aliases": [
+          "water clarity score",
+          "clarity index",
+          "clearness rating"
+        ],
+        "kind": "outcome",
+        "parents": [
+          "TurbidityLoad",
+          "SeasonalDemand"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "TurbidityLoad": -0.9,
+            "SeasonalDemand": 0.4
+          },
+          "intercept": 15
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "MetalColorimetry": {
+        "aliases": [
+          "metal colorimetry",
+          "iron colorimetric reading"
+        ],
+        "kind": "observable",
+        "parents": [
+          "TurbidityLoad"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "TurbidityLoad": 0.8
+          },
+          "intercept": 5
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            12.36
+          ]
+        }
+      },
+      "PressureReading": {
+        "aliases": [
+          "line pressure",
+          "system pressure"
+        ],
+        "kind": "observable",
+        "parents": [
+          "SeasonalDemand"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "SeasonalDemand": 0.7
+          },
+          "intercept": 40
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            4
+          ]
+        }
+      },
+      "ResidualChlorine": {
+        "aliases": [
+          "residual chlorine",
+          "disinfectant residual"
+        ],
+        "kind": "observable",
+        "parents": [
+          "SeasonalDemand"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "SeasonalDemand": 0.7
+          },
+          "intercept": 40
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            4
+          ]
+        }
+      },
+      "FilterHeadloss": {
+        "aliases": [
+          "filter headloss",
+          "filter pressure drop"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "FluorideLevel": {
+        "aliases": [
+          "fluoride level",
+          "fluoridation"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "PumpCycles": {
+        "aliases": [
+          "pump cycles",
+          "pump starts"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "UVDose": {
+        "aliases": [
+          "uv dose",
+          "uv disinfection"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "HardnessCaCO3": {
+        "aliases": [
+          "hardness",
+          "calcium carbonate"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "ContactTime": {
+        "aliases": [
+          "contact time",
+          "detention time"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "TankLevel": {
+        "aliases": [
+          "tank level",
+          "reservoir level"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "BackwashRateDriver": {
+        "aliases": [
+          "latent driver"
+        ],
+        "kind": "latent",
+        "dist": {
+          "normal": [
+            50,
+            16
+          ]
+        }
+      },
+      "BackwashRate": {
+        "aliases": [
+          "backwash rate",
+          "filter backwash"
+        ],
+        "kind": "observable",
+        "parents": [
+          "BackwashRateDriver"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "BackwashRateDriver": 0.9
+          },
+          "intercept": 5
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            4
+          ]
+        }
+      },
+      "WaterTemp": {
+        "aliases": [
+          "water temperature",
+          "supply temperature"
+        ],
+        "kind": "observable",
+        "parents": [
+          "TurbidityLoad",
+          "BackwashRateDriver"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "TurbidityLoad": 0.12378213758394883,
+            "BackwashRateDriver": 0.06339933821805797
+          },
+          "intercept": 0
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            0.1
+          ]
+        }
+      }
+    },
+    "actuators": {
+      "LineFlushRate": {
+        "aliases": [
+          "line flush rate",
+          "flushing intensity"
+        ],
+        "target": "LineFlushRate",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 40,
+        "description": "controller for LineFlushRate"
+      },
+      "CorrosionInhibitor": {
+        "aliases": [
+          "corrosion inhibitor",
+          "orthophosphate dosing"
+        ],
+        "target": "MobilizedScale",
+        "op": "scale",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 0,
+        "expr": "1-sat(d;k=0.66)",
+        "description": "dosing to reduce MobilizedScale",
+        "side_effect": {
+          "target": "WaterClarityScore",
+          "expr": "-overstrip(d;thr=0.66,gain=30)"
+        }
+      },
+      "MaskingAdditive": {
+        "aliases": [
+          "dye-masking additive",
+          "color-masking agent"
+        ],
+        "target": "WaterClarityScore",
+        "op": "mask",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 0,
+        "expr": "transient_boost(d)",
+        "description": "a control that adjusts the WaterClarityScore readout"
+      },
+      "set_FilterHeadloss": {
+        "aliases": [
+          "set filter headloss",
+          "set filter pressure drop",
+          "adjust FilterHeadloss"
+        ],
+        "target": "FilterHeadloss",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for FilterHeadloss"
+      },
+      "set_FluorideLevel": {
+        "aliases": [
+          "set fluoride level",
+          "set fluoridation",
+          "adjust FluorideLevel"
+        ],
+        "target": "FluorideLevel",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for FluorideLevel"
+      },
+      "set_PumpCycles": {
+        "aliases": [
+          "set pump cycles",
+          "set pump starts",
+          "adjust PumpCycles"
+        ],
+        "target": "PumpCycles",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for PumpCycles"
+      },
+      "set_UVDose": {
+        "aliases": [
+          "set uv dose",
+          "set uv disinfection",
+          "adjust UVDose"
+        ],
+        "target": "UVDose",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for UVDose"
+      },
+      "set_HardnessCaCO3": {
+        "aliases": [
+          "set hardness",
+          "set calcium carbonate",
+          "adjust HardnessCaCO3"
+        ],
+        "target": "HardnessCaCO3",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for HardnessCaCO3"
+      },
+      "set_ContactTime": {
+        "aliases": [
+          "set contact time",
+          "set detention time",
+          "adjust ContactTime"
+        ],
+        "target": "ContactTime",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for ContactTime"
+      }
+    },
+    "outcome": "WaterClarityScore",
+    "higher_is_better": true,
+    "selection": {
+      "node": "WaterTemp",
+      "op": ">=",
+      "thresh": 4.8612346962026125,
+      "soft": 0.14399567163633722
+    }
+  },
+  "ground_truth": {
+    "true_root": "MobilizedScale",
+    "true_mechanism_proxy": "MetalColorimetry",
+    "confounded_decoys": [
+      "PressureReading",
+      "ResidualChlorine",
+      "BackwashRate"
+    ],
+    "targeted_actuator": "CorrosionInhibitor",
+    "symptom_trap_actuator": "MaskingAdditive",
+    "co_actuators": null,
+    "selection_decoy": "BackwashRate",
+    "_selection_nodes": [
+      "BackwashRate",
+      "WaterTemp"
+    ],
+    "subtype_policy": null,
+    "surrogate_node": null,
+    "latent_plain_name": "a hidden mobilized pipe scale that propagates through iron particulate, turbidity load to the outcome",
+    "naive_interventions": [
+      {
+        "LineFlushRate": 100
+      },
+      {
+        "set_FilterHeadloss": 100
+      },
+      {
+        "set_FluorideLevel": 100
+      }
+    ],
+    "_features": [
+      "interior_dose",
+      "sign_flip",
+      "symptom_trap"
+    ],
+    "_skin": "watertreatment",
+    "_depth": 2,
+    "_archetype": "collider_selection",
+    "_seed": 10000868
+  },
+  "oracle": {
+    "gold": {
+      "intervention": {
+        "LineFlushRate": 0.0,
+        "CorrosionInhibitor": 66.0
+      },
+      "expected_utility": 30.490888524270773,
+      "baseline_utility": 23.939969996430197,
+      "active_actuators": [
+        "LineFlushRate",
+        "CorrosionInhibitor"
+      ]
+    },
+    "counterfactual_battery": {
+      "true_mechanism_proxy": "MetalColorimetry",
+      "valid_mechanism_proxies": [
+        "MetalColorimetry"
+      ],
+      "lenient_mechanism_proxies": [
+        "MetalColorimetry"
+      ],
+      "confounded_decoys": [
+        "BackwashRate",
+        "PressureReading",
+        "ResidualChlorine"
+      ],
+      "actuator_sign_predictions": {
+        "LineFlushRate": "-",
+        "CorrosionInhibitor": "-",
+        "MaskingAdditive": "0",
+        "set_FilterHeadloss": "0",
+        "set_FluorideLevel": "0",
+        "set_PumpCycles": "0",
+        "set_UVDose": "0",
+        "set_HardnessCaCO3": "0",
+        "set_ContactTime": "0"
+      },
+      "targeted_actuator": "CorrosionInhibitor",
+      "symptom_trap_actuator": "MaskingAdditive"
+    },
+    "calibration": {
+      "proxy_assay_noise": 12.36,
+      "proxy_corr": 0.476,
+      "decoy_corr": 0.489
+    },
+    "audits": {
+      "decoy": {
+        "passed": true,
+        "decoys": {
+          "PressureReading": {
+            "obs_corr": 0.489,
+            "clamp_do_effect": 0.0,
+            "ok": true
+          },
+          "ResidualChlorine": {
+            "obs_corr": 0.496,
+            "clamp_do_effect": 0.0,
+            "ok": true
+          },
+          "BackwashRate": {
+            "obs_corr": 0.405,
+            "clamp_do_effect": 0.0,
+            "ok": true
+          }
+        }
+      },
+      "proxy_signal": {
+        "passed": true,
+        "proxy_outcome_corr": -0.463,
+        "obs_ok": true,
+        "interventional_shift_sd": 0.65,
+        "interv_ok": false,
+        "band": [
+          0.35,
+          0.75
+        ]
+      },
+      "distractor_inertness": {
+        "passed": true,
+        "n_inert_checked": 7,
+        "violations": []
+      },
+      "gold_selfconsistency": {
+        "passed": true,
+        "gold_utility": 30.49,
+        "beating_perturbations": []
+      },
+      "counterintuitiveness": {
+        "passed": true,
+        "baseline_utility": 23.92,
+        "gold_utility": 30.49,
+        "naive_results": [
+          {
+            "naive": {
+              "LineFlushRate": 100
+            },
+            "utility": -14.45,
+            "gain_over_baseline": -38.37,
+            "fraction_of_gold_benefit": -5.841,
+            "helps": false
+          },
+          {
+            "naive": {
+              "set_FilterHeadloss": 100
+            },
+            "utility": 23.92,
+            "gain_over_baseline": 0.0,
+            "fraction_of_gold_benefit": 0.0,
+            "helps": false
+          },
+          {
+            "naive": {
+              "set_FluorideLevel": 100
+            },
+            "utility": 23.92,
+            "gain_over_baseline": 0.0,
+            "fraction_of_gold_benefit": 0.0,
+            "helps": false
+          }
+        ],
+        "note": "obvious first move must not meaningfully help"
+      }
+    }
+  }
+}

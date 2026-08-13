@@ -1,0 +1,701 @@
+{
+  "schema_version": "rpg_scm_v7",
+  "world_id": "v7_bioprocess_chain_interior_dose_sympto_10001087",
+  "domain": "bioprocess",
+  "meta": {
+    "seed": 10001087,
+    "features": [
+      "interior_dose",
+      "symptom_trap",
+      "two_cause"
+    ],
+    "skin": "bioprocess",
+    "depth": 3
+  },
+  "scenario": "A 2,000 L mammalian-cell bioreactor producing a secreted therapeutic protein has seen product titer fall about 30% over the last three weeks, and the loss has persisted across several batches. The decline began shortly after a maintenance shutdown in which a feed-water line fitting was replaced and probes were recalibrated. The operators' leading theories are dissolved-oxygen control drift or a temperature excursion. Batch records note the broth has looked cloudier than usual at harvest. Routine panels look broadly within range. The feed-water system, gas train, cooling jacket, and dosing pumps are all instrumented and adjustable. You have a limited number of experiments; you may measure quantities and apply available controls or additives, alone or in combination. Determine what is really driving the loss and what to do about it.",
+  "scm": {
+    "variables": {
+      "EndotoxinLoadSusceptibility": {
+        "aliases": [
+          "susceptibility",
+          "batch susceptibility"
+        ],
+        "kind": "latent",
+        "dist": {
+          "normal": [
+            55,
+            20
+          ]
+        }
+      },
+      "BatchSeedAge": {
+        "aliases": [
+          "seed age",
+          "inoculum age",
+          "cell line age"
+        ],
+        "kind": "latent",
+        "dist": {
+          "normal": [
+            50,
+            16
+          ]
+        }
+      },
+      "MediaExchangeRate": {
+        "aliases": [
+          "media exchange rate",
+          "perfusion rate"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            40,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "GasSpargeRate": {
+        "aliases": [
+          "sparge rate",
+          "aeration rate"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            20,
+            8
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "EndotoxinLoad": {
+        "aliases": [
+          "endotoxin load",
+          "endotoxin",
+          "pyrogen level"
+        ],
+        "kind": "latent",
+        "parents": [
+          "MediaExchangeRate",
+          "GasSpargeRate"
+        ],
+        "mech": {
+          "form": "gated_and",
+          "a": "MediaExchangeRate",
+          "b": "GasSpargeRate",
+          "ta": 55,
+          "tb": 55,
+          "wa": 9,
+          "wb": 9,
+          "vmax": 95.0,
+          "intercept": 3.0
+        }
+      },
+      "MisfoldingRate": {
+        "aliases": [
+          "misfolding rate",
+          "aggregation propensity"
+        ],
+        "kind": "latent",
+        "parents": [
+          "EndotoxinLoad"
+        ],
+        "mech": {
+          "form": "hill",
+          "of": "EndotoxinLoad",
+          "vmax": 70,
+          "k": 35,
+          "n": 2
+        }
+      },
+      "MetabolicFluxLoss": {
+        "aliases": [
+          "metabolic flux loss",
+          "carbon flux drop"
+        ],
+        "kind": "latent",
+        "parents": [
+          "MisfoldingRate"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "MisfoldingRate": 0.9
+          },
+          "intercept": 5
+        }
+      },
+      "MembraneDamage": {
+        "aliases": [
+          "membrane damage",
+          "cell envelope stress"
+        ],
+        "kind": "latent",
+        "parents": [
+          "MetabolicFluxLoss"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "MetabolicFluxLoss": 0.9
+          },
+          "intercept": 5
+        }
+      },
+      "ProductTiter": {
+        "aliases": [
+          "product titer",
+          "protein yield",
+          "titer",
+          "yield"
+        ],
+        "kind": "outcome",
+        "parents": [
+          "MembraneDamage",
+          "BatchSeedAge"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "MembraneDamage": 0.9,
+            "BatchSeedAge": 0.1
+          },
+          "intercept": 8
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "FragmentedProteinPct": {
+        "aliases": [
+          "fragmented protein",
+          "clipping percent"
+        ],
+        "kind": "observable",
+        "parents": [
+          "MetabolicFluxLoss"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "MetabolicFluxLoss": 0.8
+          },
+          "intercept": 5
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            0.5
+          ]
+        }
+      },
+      "ViableCellDensity": {
+        "aliases": [
+          "viable cell density",
+          "VCD",
+          "cell count"
+        ],
+        "kind": "observable",
+        "parents": [
+          "BatchSeedAge"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "BatchSeedAge": 0.7
+          },
+          "intercept": 40
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            4
+          ]
+        }
+      },
+      "DissolvedOxygen": {
+        "aliases": [
+          "dissolved oxygen",
+          "DO",
+          "pO2"
+        ],
+        "kind": "observable",
+        "parents": [
+          "BatchSeedAge"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "BatchSeedAge": 0.7
+          },
+          "intercept": 40
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            4
+          ]
+        }
+      },
+      "GlucoseFeedRate": {
+        "aliases": [
+          "glucose feed",
+          "sugar feed"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "GlutamineConc": {
+        "aliases": [
+          "glutamine",
+          "amino acid feed"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "AgitationRate": {
+        "aliases": [
+          "agitation",
+          "impeller speed",
+          "rpm"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "CO2Level": {
+        "aliases": [
+          "dissolved co2",
+          "pCO2"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "Temperature": {
+        "aliases": [
+          "temperature",
+          "culture temperature"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "AntifoamLevel": {
+        "aliases": [
+          "antifoam",
+          "defoamer"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "VesselPressure": {
+        "aliases": [
+          "headspace pressure",
+          "vessel pressure"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "pH": {
+        "aliases": [
+          "ph",
+          "acidity"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      }
+    },
+    "actuators": {
+      "MediaExchangeRate": {
+        "aliases": [
+          "media exchange rate",
+          "perfusion rate"
+        ],
+        "target": "MediaExchangeRate",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 40,
+        "description": "controller for MediaExchangeRate"
+      },
+      "GasSpargeRate": {
+        "aliases": [
+          "sparge rate",
+          "aeration rate"
+        ],
+        "target": "GasSpargeRate",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 20,
+        "description": "controller for GasSpargeRate"
+      },
+      "StabilizerAdditive": {
+        "aliases": [
+          "protein stabilizer",
+          "formulation stabilizer",
+          "protectant"
+        ],
+        "target": "ProductTiter",
+        "op": "mask",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 0,
+        "expr": "transient_boost(d)",
+        "description": "a control that adjusts the ProductTiter readout"
+      },
+      "set_GlucoseFeedRate": {
+        "aliases": [
+          "set glucose feed",
+          "set sugar feed",
+          "adjust GlucoseFeedRate"
+        ],
+        "target": "GlucoseFeedRate",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for GlucoseFeedRate"
+      },
+      "set_GlutamineConc": {
+        "aliases": [
+          "set glutamine",
+          "set amino acid feed",
+          "adjust GlutamineConc"
+        ],
+        "target": "GlutamineConc",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for GlutamineConc"
+      },
+      "set_AgitationRate": {
+        "aliases": [
+          "set agitation",
+          "set impeller speed",
+          "adjust AgitationRate"
+        ],
+        "target": "AgitationRate",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for AgitationRate"
+      },
+      "set_CO2Level": {
+        "aliases": [
+          "set dissolved co2",
+          "set pCO2",
+          "adjust CO2Level"
+        ],
+        "target": "CO2Level",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for CO2Level"
+      },
+      "set_Temperature": {
+        "aliases": [
+          "set temperature",
+          "set culture temperature",
+          "adjust Temperature"
+        ],
+        "target": "Temperature",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for Temperature"
+      }
+    },
+    "outcome": "ProductTiter",
+    "higher_is_better": true
+  },
+  "ground_truth": {
+    "true_root": "EndotoxinLoad",
+    "true_mechanism_proxy": "FragmentedProteinPct",
+    "confounded_decoys": [
+      "ViableCellDensity",
+      "DissolvedOxygen"
+    ],
+    "targeted_actuator": "MediaExchangeRate",
+    "symptom_trap_actuator": "StabilizerAdditive",
+    "co_actuators": [
+      "MediaExchangeRate",
+      "GasSpargeRate"
+    ],
+    "selection_decoy": null,
+    "_selection_nodes": [],
+    "subtype_policy": null,
+    "surrogate_node": null,
+    "latent_plain_name": "a hidden endotoxin load that propagates through misfolding rate, metabolic flux loss, membrane damage to the outcome",
+    "naive_interventions": [
+      {
+        "set_GlucoseFeedRate": 100
+      },
+      {
+        "set_GlutamineConc": 100
+      }
+    ],
+    "_features": [
+      "interior_dose",
+      "symptom_trap",
+      "two_cause"
+    ],
+    "_skin": "bioprocess",
+    "_depth": 3,
+    "_archetype": "confounded_chain",
+    "_seed": 10001087
+  },
+  "oracle": {
+    "gold": {
+      "intervention": {
+        "GasSpargeRate": 100.0,
+        "MediaExchangeRate": 100.0
+      },
+      "expected_utility": 66.6704666967735,
+      "baseline_utility": 22.114581308096973,
+      "active_actuators": [
+        "GasSpargeRate",
+        "MediaExchangeRate"
+      ]
+    },
+    "counterfactual_battery": {
+      "true_mechanism_proxy": "FragmentedProteinPct",
+      "valid_mechanism_proxies": [
+        "FragmentedProteinPct",
+        "MediaExchangeRate"
+      ],
+      "lenient_mechanism_proxies": [
+        "FragmentedProteinPct",
+        "MediaExchangeRate"
+      ],
+      "confounded_decoys": [
+        "DissolvedOxygen",
+        "ViableCellDensity"
+      ],
+      "actuator_sign_predictions": {
+        "MediaExchangeRate": "+",
+        "GasSpargeRate": "+",
+        "StabilizerAdditive": "0",
+        "set_GlucoseFeedRate": "0",
+        "set_GlutamineConc": "0",
+        "set_AgitationRate": "0",
+        "set_CO2Level": "0",
+        "set_Temperature": "0"
+      },
+      "targeted_actuator": "MediaExchangeRate",
+      "symptom_trap_actuator": "StabilizerAdditive"
+    },
+    "calibration": {
+      "proxy_assay_noise": 0.5,
+      "proxy_corr": 0.066,
+      "decoy_corr": 0.444
+    },
+    "audits": {
+      "decoy": {
+        "passed": true,
+        "decoys": {
+          "ViableCellDensity": {
+            "obs_corr": 0.444,
+            "clamp_do_effect": 0.0,
+            "ok": true
+          },
+          "DissolvedOxygen": {
+            "obs_corr": 0.444,
+            "clamp_do_effect": 0.0,
+            "ok": true
+          }
+        }
+      },
+      "proxy_signal": {
+        "passed": true,
+        "proxy_outcome_corr": 0.086,
+        "obs_ok": false,
+        "interventional_shift_sd": 65.74,
+        "interv_ok": true,
+        "band": [
+          0.35,
+          0.75
+        ]
+      },
+      "distractor_inertness": {
+        "passed": true,
+        "n_inert_checked": 6,
+        "violations": []
+      },
+      "gold_selfconsistency": {
+        "passed": true,
+        "gold_utility": 66.67,
+        "beating_perturbations": []
+      },
+      "counterintuitiveness": {
+        "passed": true,
+        "baseline_utility": 22.12,
+        "gold_utility": 66.67,
+        "naive_results": [
+          {
+            "naive": {
+              "set_GlucoseFeedRate": 100
+            },
+            "utility": 22.12,
+            "gain_over_baseline": 0.0,
+            "fraction_of_gold_benefit": 0.0,
+            "helps": false
+          },
+          {
+            "naive": {
+              "set_GlutamineConc": 100
+            },
+            "utility": 22.12,
+            "gain_over_baseline": 0.0,
+            "fraction_of_gold_benefit": 0.0,
+            "helps": false
+          }
+        ],
+        "note": "obvious first move must not meaningfully help"
+      }
+    }
+  }
+}
