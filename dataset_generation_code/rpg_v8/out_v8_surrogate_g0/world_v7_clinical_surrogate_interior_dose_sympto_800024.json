@@ -1,0 +1,707 @@
+{
+  "schema_version": "rpg_scm_v7",
+  "world_id": "v7_clinical_surrogate_interior_dose_sympto_800024",
+  "domain": "clinical",
+  "meta": {
+    "seed": 800024,
+    "features": [
+      "interior_dose",
+      "symptom_trap"
+    ],
+    "skin": "clinical",
+    "depth": 3
+  },
+  "scenario": "On a post-surgical step-down unit, the average functional recovery score for recovering patients has slipped about 25% over the past quarter, and the pattern has held across successive admissions. It emerged after a change to the unit's standing medication and fluid protocol. The care team's leading theories are that patients are dehydrated or under-oxygenated, so they favor more fluids and oxygen. Several patients have shown low-grade temperature readings on and off. Routine labs and vitals read broadly within range. The fluid and oxygen orders, medication list, and supportive care are all adjustable within protocol. You have a limited number of experiments; you may measure quantities and apply available interventions, alone or in combination. Determine what is really driving the decline and what to do about it.",
+  "scm": {
+    "variables": {
+      "DrugInteractionSusceptibility": {
+        "aliases": [
+          "susceptibility",
+          "batch susceptibility"
+        ],
+        "kind": "latent",
+        "dist": {
+          "normal": [
+            55,
+            20
+          ]
+        }
+      },
+      "ComorbidityIndex": {
+        "aliases": [
+          "comorbidity index",
+          "baseline frailty"
+        ],
+        "kind": "latent",
+        "dist": {
+          "normal": [
+            50,
+            16
+          ]
+        }
+      },
+      "PatientAge": {
+        "aliases": [
+          "patient age",
+          "age band"
+        ],
+        "kind": "latent",
+        "dist": {
+          "normal": [
+            50,
+            16
+          ]
+        }
+      },
+      "FluidInfusionRate": {
+        "aliases": [
+          "fluid infusion rate",
+          "iv fluid rate",
+          "hydration rate"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            40,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "DrugInteraction": {
+        "aliases": [
+          "drug interaction",
+          "medication interaction",
+          "polypharmacy effect"
+        ],
+        "kind": "latent",
+        "parents": [
+          "FluidInfusionRate",
+          "DrugInteractionSusceptibility"
+        ],
+        "mech": {
+          "form": "interaction",
+          "a": "FluidInfusionRate",
+          "b": "DrugInteractionSusceptibility",
+          "gain": 260.0,
+          "scale": 100.0,
+          "intercept": 3.0
+        },
+        "noise": {
+          "normal": [
+            0,
+            1.5
+          ]
+        }
+      },
+      "SystemicInflammation": {
+        "aliases": [
+          "systemic inflammation",
+          "inflammatory cascade"
+        ],
+        "kind": "latent",
+        "parents": [
+          "DrugInteraction"
+        ],
+        "mech": {
+          "form": "hill",
+          "of": "DrugInteraction",
+          "vmax": 70,
+          "k": 35,
+          "n": 2
+        }
+      },
+      "MetabolicStress": {
+        "aliases": [
+          "metabolic stress",
+          "catabolic load"
+        ],
+        "kind": "latent",
+        "parents": [
+          "SystemicInflammation"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "SystemicInflammation": 0.9
+          },
+          "intercept": 5
+        }
+      },
+      "TissueOxygenDelivery": {
+        "aliases": [
+          "tissue oxygen delivery",
+          "oxygen delivery"
+        ],
+        "kind": "latent",
+        "parents": [
+          "MetabolicStress"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "MetabolicStress": 0.9
+          },
+          "intercept": 5
+        }
+      },
+      "RecoveryScore": {
+        "aliases": [
+          "recovery score",
+          "recovery index",
+          "functional recovery"
+        ],
+        "kind": "outcome",
+        "parents": [
+          "TissueOxygenDelivery",
+          "ComorbidityIndex",
+          "PatientAge"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "TissueOxygenDelivery": -0.9,
+            "ComorbidityIndex": 0.4,
+            "PatientAge": 0.1
+          },
+          "intercept": 15
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "CReactiveProtein": {
+        "aliases": [
+          "c-reactive protein",
+          "crp",
+          "inflammatory marker"
+        ],
+        "kind": "observable",
+        "parents": [
+          "MetabolicStress"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "MetabolicStress": 0.8
+          },
+          "intercept": 5
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            14.41
+          ]
+        }
+      },
+      "BodyTemperature": {
+        "aliases": [
+          "body temperature",
+          "core temp",
+          "fever reading"
+        ],
+        "kind": "observable",
+        "parents": [
+          "ComorbidityIndex"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "ComorbidityIndex": 0.7
+          },
+          "intercept": 40
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            4
+          ]
+        }
+      },
+      "BloodPressure": {
+        "aliases": [
+          "blood pressure",
+          "arterial pressure"
+        ],
+        "kind": "observable",
+        "parents": [
+          "ComorbidityIndex"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "ComorbidityIndex": 0.7
+          },
+          "intercept": 40
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            4
+          ]
+        }
+      },
+      "BloodGlucose": {
+        "aliases": [
+          "blood glucose",
+          "serum glucose"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "VisitorFrequency": {
+        "aliases": [
+          "visitor frequency",
+          "family visits"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "MobilizationLevel": {
+        "aliases": [
+          "mobilization level",
+          "ambulation"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "PainScore": {
+        "aliases": [
+          "pain score",
+          "reported pain"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "CaloricIntake": {
+        "aliases": [
+          "caloric intake",
+          "nutrition intake"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "UrineOutput": {
+        "aliases": [
+          "urine output",
+          "diuresis"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "RespiratoryRate": {
+        "aliases": [
+          "respiratory rate",
+          "breathing rate"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "PhysioTherapyDose": {
+        "aliases": [
+          "physiotherapy dose",
+          "rehab intensity"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      }
+    },
+    "actuators": {
+      "FluidInfusionRate": {
+        "aliases": [
+          "fluid infusion rate",
+          "iv fluid rate",
+          "hydration rate"
+        ],
+        "target": "FluidInfusionRate",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 40,
+        "description": "controller for FluidInfusionRate"
+      },
+      "set_BloodPressure": {
+        "aliases": [
+          "set blood pressure",
+          "set arterial pressure",
+          "adjust BloodPressure"
+        ],
+        "target": "BloodPressure",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for BloodPressure"
+      },
+      "TargetedAntimicrobial": {
+        "aliases": [
+          "targeted antimicrobial",
+          "culture-directed antibiotic"
+        ],
+        "target": "DrugInteraction",
+        "op": "scale",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 0,
+        "expr": "1-sat(d;k=0.66)",
+        "description": "dosing to reduce DrugInteraction",
+        "side_effect": {
+          "target": "RecoveryScore",
+          "expr": "-overstrip(d;thr=0.66,gain=30)"
+        }
+      },
+      "ScoreReweighting": {
+        "aliases": [
+          "score reweighting",
+          "assessment recalibration"
+        ],
+        "target": "RecoveryScore",
+        "op": "mask",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 0,
+        "expr": "transient_boost(d)",
+        "description": "a control that adjusts the RecoveryScore readout"
+      },
+      "set_BloodGlucose": {
+        "aliases": [
+          "set blood glucose",
+          "set serum glucose",
+          "adjust BloodGlucose"
+        ],
+        "target": "BloodGlucose",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for BloodGlucose"
+      },
+      "set_VisitorFrequency": {
+        "aliases": [
+          "set visitor frequency",
+          "set family visits",
+          "adjust VisitorFrequency"
+        ],
+        "target": "VisitorFrequency",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for VisitorFrequency"
+      },
+      "set_MobilizationLevel": {
+        "aliases": [
+          "set mobilization level",
+          "set ambulation",
+          "adjust MobilizationLevel"
+        ],
+        "target": "MobilizationLevel",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for MobilizationLevel"
+      },
+      "set_PainScore": {
+        "aliases": [
+          "set pain score",
+          "set reported pain",
+          "adjust PainScore"
+        ],
+        "target": "PainScore",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for PainScore"
+      }
+    },
+    "outcome": "RecoveryScore",
+    "higher_is_better": true
+  },
+  "ground_truth": {
+    "true_root": "DrugInteraction",
+    "true_mechanism_proxy": "CReactiveProtein",
+    "confounded_decoys": [
+      "BodyTemperature",
+      "BloodPressure"
+    ],
+    "targeted_actuator": "TargetedAntimicrobial",
+    "symptom_trap_actuator": "ScoreReweighting",
+    "co_actuators": null,
+    "selection_decoy": null,
+    "_selection_nodes": [],
+    "subtype_policy": null,
+    "surrogate_node": "BloodPressure",
+    "latent_plain_name": "a hidden drug interaction that propagates through systemic inflammation, metabolic stress, tissue oxygen delivery to the outcome",
+    "naive_interventions": [
+      {
+        "set_BloodGlucose": 100
+      },
+      {
+        "set_VisitorFrequency": 100
+      },
+      {
+        "set_BloodPressure": 100
+      }
+    ],
+    "_features": [
+      "interior_dose",
+      "symptom_trap"
+    ],
+    "_skin": "clinical",
+    "_depth": 3,
+    "_archetype": "surrogate_trap",
+    "_seed": 800024
+  },
+  "oracle": {
+    "gold": {
+      "intervention": {
+        "FluidInfusionRate": 0.0,
+        "TargetedAntimicrobial": 66.0
+      },
+      "expected_utility": 31.435534322268396,
+      "baseline_utility": -3.1013693653290204,
+      "active_actuators": [
+        "FluidInfusionRate",
+        "TargetedAntimicrobial"
+      ]
+    },
+    "counterfactual_battery": {
+      "true_mechanism_proxy": "CReactiveProtein",
+      "valid_mechanism_proxies": [
+        "CReactiveProtein"
+      ],
+      "lenient_mechanism_proxies": [
+        "CReactiveProtein"
+      ],
+      "confounded_decoys": [
+        "BloodPressure",
+        "BodyTemperature"
+      ],
+      "actuator_sign_predictions": {
+        "FluidInfusionRate": "-",
+        "set_BloodPressure": "0",
+        "TargetedAntimicrobial": "+",
+        "ScoreReweighting": "0",
+        "set_BloodGlucose": "0",
+        "set_VisitorFrequency": "0",
+        "set_MobilizationLevel": "0",
+        "set_PainScore": "0"
+      },
+      "targeted_actuator": "TargetedAntimicrobial",
+      "symptom_trap_actuator": "ScoreReweighting"
+    },
+    "calibration": {
+      "proxy_assay_noise": 14.41,
+      "proxy_corr": 0.48,
+      "decoy_corr": 0.478
+    },
+    "audits": {
+      "decoy": {
+        "passed": true,
+        "decoys": {
+          "BodyTemperature": {
+            "obs_corr": 0.478,
+            "clamp_do_effect": 0.0,
+            "ok": true
+          },
+          "BloodPressure": {
+            "obs_corr": 0.482,
+            "clamp_do_effect": 0.0,
+            "ok": true
+          }
+        }
+      },
+      "proxy_signal": {
+        "passed": true,
+        "proxy_outcome_corr": -0.479,
+        "obs_ok": true,
+        "interventional_shift_sd": 1.94,
+        "interv_ok": true,
+        "band": [
+          0.35,
+          0.75
+        ]
+      },
+      "distractor_inertness": {
+        "passed": true,
+        "n_inert_checked": 6,
+        "violations": []
+      },
+      "gold_selfconsistency": {
+        "passed": true,
+        "gold_utility": 31.44,
+        "beating_perturbations": []
+      },
+      "counterintuitiveness": {
+        "passed": true,
+        "baseline_utility": -3.09,
+        "gold_utility": 31.44,
+        "naive_results": [
+          {
+            "naive": {
+              "set_BloodGlucose": 100
+            },
+            "utility": -3.09,
+            "gain_over_baseline": 0.0,
+            "fraction_of_gold_benefit": 0.0,
+            "helps": false
+          },
+          {
+            "naive": {
+              "set_VisitorFrequency": 100
+            },
+            "utility": -3.09,
+            "gain_over_baseline": 0.0,
+            "fraction_of_gold_benefit": 0.0,
+            "helps": false
+          },
+          {
+            "naive": {
+              "set_BloodPressure": 100
+            },
+            "utility": -3.09,
+            "gain_over_baseline": 0.0,
+            "fraction_of_gold_benefit": 0.0,
+            "helps": false
+          }
+        ],
+        "note": "obvious first move must not meaningfully help"
+      }
+    }
+  }
+}
