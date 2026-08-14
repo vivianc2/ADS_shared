@@ -54,6 +54,10 @@ class OpenAILLM:
 
     client: Any = field(default=None, init=False, repr=False)
     last_reasoning: Optional[str] = field(default=None, init=False, repr=False)
+    # finish_reason of the most recent completion ("stop" = clean; "length" = the
+    # output cap truncated the turn). Surfaced so callers can enforce the "no
+    # truncation" rule — a thinking turn cut at "length" produces no valid action.
+    last_finish_reason: Optional[str] = field(default=None, init=False, repr=False)
 
     def __post_init__(self):
         from openai import OpenAI
@@ -96,6 +100,7 @@ class OpenAILLM:
         if self.extra_body:
             kwargs["extra_body"] = self.extra_body
         response = self.client.chat.completions.create(**kwargs)
+        self.last_finish_reason = response.choices[0].finish_reason
         msg = response.choices[0].message
         reasoning = getattr(msg, "reasoning_content", None)
         if self.capture_reasoning:

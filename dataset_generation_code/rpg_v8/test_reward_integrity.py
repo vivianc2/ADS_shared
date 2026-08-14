@@ -79,23 +79,27 @@ def _grade(sim: SimV6, answer_raw: Dict[str, Any]) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 CASES = [
-    # (seed, skin, archetype) — a spread across archetypes/skins
-    (300020 - 300000 + 100000, "bioprocess", "confounded_chain"),
-    (700001, "clinical", "collider_selection"),
-    (800001, "clinical", "hidden_subtype"),
-    (222, "catalysis", "confounded_chain"),
-    (333, "battery", "collider_selection"),
-    (444, "agronomy", "hidden_subtype"),
-    (800001, "bioprocess", "surrogate_trap"),
-    (700001, "datacenter", "surrogate_trap"),
-    (610001, "bioprocess", "instrument_only"),
-    (610004, "agronomy", "instrument_only"),
-    (560001, "datacenter", "competing_causes"),
-    (560006, "aquaculture", "competing_causes"),
-    (481001, "bioprocess", "dose_window"),
-    (492001, "datacenter", "confounded_reversal"),
-    (470001, "datacenter", "synergy_pair"),
-    (470005, "semiconductor", "synergy_pair"),
+    # (seed, skin, archetype) — real audited worlds pulled from the v9 dataset
+    # (rpg_v9_fast_think, 2026-08-14) so every case builds+audits (no skips). Held-out
+    # archetypes (surrogate_trap/hidden_subtype/competing_causes) come from the validation
+    # split (seed0=20M, reserved skins); train archetypes from the train split (seed0=10M).
+    (20000005, "catalysis", "surrogate_trap"),     # trap probe MUST fire here
+    (20000006, "aquaculture", "surrogate_trap"),
+    (20000008, "catalysis", "hidden_subtype"),
+    (20000016, "watertreatment", "hidden_subtype"),
+    (20000001, "aquaculture", "competing_causes"),
+    (20000002, "bioprocess", "competing_causes"),
+    (10000006, "semiconductor", "collider_selection"),
+    (10000011, "watertreatment", "collider_selection"),
+    (10000001, "semiconductor", "instrument_only"),
+    (10000002, "bioprocess", "instrument_only"),
+    (10000003, "watertreatment", "dose_window"),
+    (10000009, "agronomy", "dose_window"),
+    (10000030, "aquaculture", "confounded_reversal"),
+    (10000038, "aquaculture", "confounded_reversal"),
+    (10000017, "battery", "synergy_pair"),
+    (10000000, "semiconductor", "confounded_chain"),
+    (10000008, "aquaculture", "confounded_chain"),
 ]
 
 failures: List[str] = []

@@ -408,12 +408,18 @@ YOUR MEMORY
 {memory}
 """
         t0 = time.time()
-        raw = llm.generate(SYSTEM_PROMPT, user, max_new_tokens=2500)
+        # Use the LLM's configured output cap (set from --max-new-tokens), NOT a hardcoded
+        # value: a thinking model (Qwen3.6) needs a large cap or turns truncate mid-reasoning
+        # and emit no valid action. finish_reason is recorded per turn so a "length"
+        # truncation is visible instead of being silently misread as agent failure.
+        raw = llm.generate(SYSTEM_PROMPT, user)
         dt = round(time.time() - t0, 2)
+        finish_reason = getattr(llm, "last_finish_reason", None)
         memory = _tag(raw, "memory") or memory
         reasoning = _tag(raw, "reasoning")
         atype, payload = _parse_action(raw)
-        rec: Dict[str, Any] = {"turn": turn, "latency_s": dt, "reasoning": reasoning, "memory": memory, "raw": raw}
+        rec: Dict[str, Any] = {"turn": turn, "latency_s": dt, "finish_reason": finish_reason,
+                               "reasoning": reasoning, "memory": memory, "raw": raw}
         if atype is None:
             rec["error"] = "no action parsed"
             turns.append(rec)
