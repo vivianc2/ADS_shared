@@ -186,7 +186,13 @@ YOUR MEMORY
 
         if atype == "code":
             from sandbox import run_code
-            out, new_vars = run_code(payload, self._csv_map, self._carried)
+            # The model frequently wraps code as JSON `{"code":"..."}` (mirroring measure/intervene,
+            # which REQUIRE a JSON object). `data` was already parsed from `payload` at line ~171; if
+            # it carries a "code" string, run THAT. Otherwise exec'ing the raw JSON string as Python
+            # is a bare dict-display -> silent no-op (discarded dict) or SyntaxError, and the model's
+            # code never runs. Fall back to the raw payload for a bare (non-JSON) code block.
+            code_src = data["code"] if isinstance(data, dict) and isinstance(data.get("code"), str) else payload
+            out, new_vars = run_code(code_src, self._csv_map, self._carried)
             self._carried.update(new_vars)
             self._latest = "CODE OUTPUT:\n" + out
             rec["code_output"] = out
@@ -198,14 +204,24 @@ YOUR MEMORY
             raw_ids = data.get("ids", [])
             ids = [i for i in (raw_ids if isinstance(raw_ids, list) else [])
                    if isinstance(i, str) and self.cat.measurable_name(i)]
-            names = [self.cat.measurable_name(i) for i in ids]
-            result = self.sim.measure(names)
-            self._used += 1
-            if result.get("raw_csv"):
-                self._csv_map[f"experiment_{result['experiment_id']}_csv"] = result["raw_csv"]
-            self._latest = self._render_measure(result, ids)
-            rec["result"] = result
-            self.turns.append(rec)
+            if not ids:
+                # No valid m* ids resolved (bare array, wrong keys, or all-invalid ids). Do NOT
+                # charge budget or consume an experiment id, and give an explicit error instead of
+                # a blank `MEASURE (n=400):` that leaves the model to flail. (Was: silent budget
+                # charge + empty result + non-contiguous experiment numbering.)
+                self._latest = ('(no valid measurable ids — expected {"ids":["m0","m1",...]} using '
+                                'the m* ids from the catalog; no experiment run, budget not charged)')
+                rec["error"] = "measure: no valid ids"
+                self.turns.append(rec)
+            else:
+                names = [self.cat.measurable_name(i) for i in ids]
+                result = self.sim.measure(names)
+                self._used += 1
+                if result.get("raw_csv"):
+                    self._csv_map[f"experiment_{result['experiment_id']}_csv"] = result["raw_csv"]
+                self._latest = self._render_measure(result, ids)
+                rec["result"] = result
+                self.turns.append(rec)
         elif atype == "intervene":
             # Element-level hardening: `actions` entries must be dicts (the model sometimes emits a
             # list of bare strings -> x.get(...) raised 'str' has no attribute 'get' and killed the
@@ -218,15 +234,24 @@ YOUR MEMORY
             mids = [i for i in (raw_measure if isinstance(raw_measure, list) else [])
                     if isinstance(i, str) and self.cat.measurable_name(i)]
             mnames = [self.cat.measurable_name(i) for i in mids]
-            result = self.sim.intervene(acts, mnames)
-            self._used += 1
-            if result.get("applied_intervention"):
-                self._n_interv += 1
-            if result.get("raw_csv"):
-                self._csv_map[f"experiment_{result['experiment_id']}_csv"] = result["raw_csv"]
-            self._latest = self._render_intervene(result)
-            rec["result"] = result
-            self.turns.append(rec)
+            if not acts and not mids:
+                # Nothing valid to do (no recognized actuator AND no recognized measurable). Don't
+                # charge budget / consume an experiment; return an explicit error (mirrors measure).
+                self._latest = ('(no valid actuators in intervene — expected {"actions":[{"actuator":'
+                                '"a0","value":<x>}],"measure":["m0",...]} using catalog a*/m* ids; '
+                                'no experiment run, budget not charged)')
+                rec["error"] = "intervene: no valid actuators/measures"
+                self.turns.append(rec)
+            else:
+                result = self.sim.intervene(acts, mnames)
+                self._used += 1
+                if result.get("applied_intervention"):
+                    self._n_interv += 1
+                if result.get("raw_csv"):
+                    self._csv_map[f"experiment_{result['experiment_id']}_csv"] = result["raw_csv"]
+                self._latest = self._render_intervene(result)
+                rec["result"] = result
+                self.turns.append(rec)
 
         if cap_hit:
             return self._terminal(None, rec, forced=True)

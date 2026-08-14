@@ -1,0 +1,858 @@
+{
+  "schema_version": "rpg_scm_v7",
+  "world_id": "v7_battery_collider_interior_dose_sign_f_10001630",
+  "domain": "battery",
+  "meta": {
+    "seed": 10001630,
+    "features": [
+      "interior_dose",
+      "sign_flip",
+      "symptom_trap"
+    ],
+    "skin": "battery",
+    "depth": 4
+  },
+  "scenario": "A lithium-ion cell plant producing automotive pouch cells has seen capacity retention degrade about 25% faster than spec over the past two months, consistently across production lots. The problem appeared after a facilities change to the dry-room HVAC and an electrolyte-supplier switch. Cell engineers' leading theories are that charging is too aggressive or cells run too hot, so they favor slower charging and more cooling. Early-life coulombic-efficiency readings have looked slightly low. Standard line data read broadly within spec. The charging profile, formation, environmental, and additive systems are all adjustable. You have a limited number of experiments; you may measure quantities and apply available process controls, alone or in combination. Determine what is really driving the accelerated fade and what to do about it.",
+  "scm": {
+    "variables": {
+      "ElectrolyteContaminantSusceptibility": {
+        "aliases": [
+          "susceptibility",
+          "batch susceptibility"
+        ],
+        "kind": "latent",
+        "dist": {
+          "normal": [
+            55,
+            20
+          ]
+        }
+      },
+      "SeparatorSupplier": {
+        "aliases": [
+          "separator supplier",
+          "component lot"
+        ],
+        "kind": "latent",
+        "dist": {
+          "normal": [
+            50,
+            16
+          ]
+        }
+      },
+      "FormationCurrent": {
+        "aliases": [
+          "formation current",
+          "initial cycling current"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            40,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "FormationCurrentHarmAxis": {
+        "aliases": [
+          "harm axis"
+        ],
+        "kind": "latent",
+        "parents": [
+          "FormationCurrent"
+        ],
+        "mech": {
+          "form": "sign_flip",
+          "of": "FormationCurrent",
+          "knee": 45,
+          "lo_gain": 0.05,
+          "hi_gain": 0.9,
+          "intercept": 2.0
+        }
+      },
+      "ElectrolyteContaminant": {
+        "aliases": [
+          "electrolyte contaminant",
+          "trace-metal in electrolyte"
+        ],
+        "kind": "latent",
+        "parents": [
+          "FormationCurrentHarmAxis",
+          "ElectrolyteContaminantSusceptibility"
+        ],
+        "mech": {
+          "form": "interaction",
+          "a": "FormationCurrentHarmAxis",
+          "b": "ElectrolyteContaminantSusceptibility",
+          "gain": 260.0,
+          "scale": 100.0,
+          "intercept": 3.0
+        },
+        "noise": {
+          "normal": [
+            0,
+            1.5
+          ]
+        }
+      },
+      "LithiumPlating": {
+        "aliases": [
+          "lithium plating",
+          "metallic-lithium deposition"
+        ],
+        "kind": "latent",
+        "parents": [
+          "ElectrolyteContaminant"
+        ],
+        "mech": {
+          "form": "hill",
+          "of": "ElectrolyteContaminant",
+          "vmax": 70,
+          "k": 35,
+          "n": 2
+        }
+      },
+      "GasEvolution": {
+        "aliases": [
+          "gas evolution",
+          "cell gassing"
+        ],
+        "kind": "latent",
+        "parents": [
+          "LithiumPlating"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "LithiumPlating": 0.9
+          },
+          "intercept": 5
+        }
+      },
+      "ActiveMaterialLoss": {
+        "aliases": [
+          "active-material loss",
+          "capacity fade mechanism"
+        ],
+        "kind": "latent",
+        "parents": [
+          "GasEvolution"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "GasEvolution": 0.9
+          },
+          "intercept": 5
+        }
+      },
+      "SEIInstability": {
+        "aliases": [
+          "sei instability",
+          "passivation-layer breakdown"
+        ],
+        "kind": "latent",
+        "parents": [
+          "ActiveMaterialLoss"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "ActiveMaterialLoss": 0.9
+          },
+          "intercept": 5
+        }
+      },
+      "CapacityRetention": {
+        "aliases": [
+          "capacity retention",
+          "cycle-life retention",
+          "capacity health"
+        ],
+        "kind": "outcome",
+        "parents": [
+          "SEIInstability",
+          "SeparatorSupplier"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "SEIInstability": -0.9,
+            "SeparatorSupplier": 0.2
+          },
+          "intercept": 15
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "ImpedanceSpectrum": {
+        "aliases": [
+          "impedance spectrum",
+          "eis resistance"
+        ],
+        "kind": "observable",
+        "parents": [
+          "GasEvolution"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "GasEvolution": 0.8
+          },
+          "intercept": 5
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            11.29
+          ]
+        }
+      },
+      "PackVoltage": {
+        "aliases": [
+          "pack voltage",
+          "terminal voltage"
+        ],
+        "kind": "observable",
+        "parents": [
+          "SeparatorSupplier"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "SeparatorSupplier": 0.7
+          },
+          "intercept": 40
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            4
+          ]
+        }
+      },
+      "SurfaceTemperature": {
+        "aliases": [
+          "surface temperature",
+          "cell skin temp"
+        ],
+        "kind": "observable",
+        "parents": [
+          "SeparatorSupplier"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "SeparatorSupplier": 0.7
+          },
+          "intercept": 40
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            4
+          ]
+        }
+      },
+      "PressStackForce": {
+        "aliases": [
+          "stack pressure",
+          "cell compression"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "CrimpPressure": {
+        "aliases": [
+          "crimp pressure",
+          "seal force"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "AmbientHumidityBatt": {
+        "aliases": [
+          "ambient humidity",
+          "room humidity"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "CalendarAge": {
+        "aliases": [
+          "calendar age",
+          "shelf time"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "CoolingPlateTemp": {
+        "aliases": [
+          "cooling-plate temperature",
+          "thermal-plate temp"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "AnodeExcessRatio": {
+        "aliases": [
+          "anode excess ratio",
+          "n/p ratio"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "DischargeDepth": {
+        "aliases": [
+          "depth of discharge",
+          "dod window"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "CyclingTemperature": {
+        "aliases": [
+          "cycling temperature",
+          "test-chamber temp"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "ElectrolyteFillVolume": {
+        "aliases": [
+          "electrolyte fill volume",
+          "wetting amount"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "TabWeldQuality": {
+        "aliases": [
+          "tab-weld quality",
+          "current-collector weld"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "RestPeriodDriver": {
+        "aliases": [
+          "latent driver"
+        ],
+        "kind": "latent",
+        "dist": {
+          "normal": [
+            50,
+            16
+          ]
+        }
+      },
+      "RestPeriod": {
+        "aliases": [
+          "rest period",
+          "relaxation time"
+        ],
+        "kind": "observable",
+        "parents": [
+          "RestPeriodDriver"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "RestPeriodDriver": 0.9
+          },
+          "intercept": 5
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            4
+          ]
+        }
+      },
+      "CoatingThickness": {
+        "aliases": [
+          "coating thickness",
+          "electrode loading"
+        ],
+        "kind": "observable",
+        "parents": [
+          "SEIInstability",
+          "RestPeriodDriver"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "SEIInstability": 0.1498258224941263,
+            "RestPeriodDriver": 0.06251866542981689
+          },
+          "intercept": 0
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            0.1
+          ]
+        }
+      }
+    },
+    "actuators": {
+      "FormationCurrent": {
+        "aliases": [
+          "formation current",
+          "initial cycling current"
+        ],
+        "target": "FormationCurrent",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 40,
+        "description": "controller for FormationCurrent"
+      },
+      "ElectrolyteAdditive": {
+        "aliases": [
+          "electrolyte additive",
+          "film-forming additive"
+        ],
+        "target": "ElectrolyteContaminant",
+        "op": "scale",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 0,
+        "expr": "1-sat(d;k=0.66)",
+        "description": "dosing to reduce ElectrolyteContaminant",
+        "side_effect": {
+          "target": "CapacityRetention",
+          "expr": "-overstrip(d;thr=0.66,gain=30)"
+        }
+      },
+      "VoltageWindowShift": {
+        "aliases": [
+          "voltage-window shift",
+          "test-window adjustment"
+        ],
+        "target": "CapacityRetention",
+        "op": "mask",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 0,
+        "expr": "transient_boost(d)",
+        "description": "a control that adjusts the CapacityRetention readout"
+      },
+      "set_PressStackForce": {
+        "aliases": [
+          "set stack pressure",
+          "set cell compression",
+          "adjust PressStackForce"
+        ],
+        "target": "PressStackForce",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for PressStackForce"
+      },
+      "set_CrimpPressure": {
+        "aliases": [
+          "set crimp pressure",
+          "set seal force",
+          "adjust CrimpPressure"
+        ],
+        "target": "CrimpPressure",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for CrimpPressure"
+      },
+      "set_AmbientHumidityBatt": {
+        "aliases": [
+          "set ambient humidity",
+          "set room humidity",
+          "adjust AmbientHumidityBatt"
+        ],
+        "target": "AmbientHumidityBatt",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for AmbientHumidityBatt"
+      },
+      "set_CalendarAge": {
+        "aliases": [
+          "set calendar age",
+          "set shelf time",
+          "adjust CalendarAge"
+        ],
+        "target": "CalendarAge",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for CalendarAge"
+      },
+      "set_CoolingPlateTemp": {
+        "aliases": [
+          "set cooling-plate temperature",
+          "set thermal-plate temp",
+          "adjust CoolingPlateTemp"
+        ],
+        "target": "CoolingPlateTemp",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for CoolingPlateTemp"
+      },
+      "set_AnodeExcessRatio": {
+        "aliases": [
+          "set anode excess ratio",
+          "set n/p ratio",
+          "adjust AnodeExcessRatio"
+        ],
+        "target": "AnodeExcessRatio",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for AnodeExcessRatio"
+      }
+    },
+    "outcome": "CapacityRetention",
+    "higher_is_better": true,
+    "selection": {
+      "node": "CoatingThickness",
+      "op": ">=",
+      "thresh": 6.1934865752261175,
+      "soft": 0.13994875981402272
+    }
+  },
+  "ground_truth": {
+    "true_root": "ElectrolyteContaminant",
+    "true_mechanism_proxy": "ImpedanceSpectrum",
+    "confounded_decoys": [
+      "PackVoltage",
+      "SurfaceTemperature",
+      "RestPeriod"
+    ],
+    "targeted_actuator": "ElectrolyteAdditive",
+    "symptom_trap_actuator": "VoltageWindowShift",
+    "co_actuators": null,
+    "selection_decoy": "RestPeriod",
+    "_selection_nodes": [
+      "RestPeriod",
+      "CoatingThickness"
+    ],
+    "subtype_policy": null,
+    "surrogate_node": null,
+    "latent_plain_name": "a hidden electrolyte contaminant that propagates through lithium plating, gas evolution, active-material loss, sei instability to the outcome",
+    "naive_interventions": [
+      {
+        "FormationCurrent": 100
+      },
+      {
+        "set_PressStackForce": 100
+      },
+      {
+        "set_CrimpPressure": 100
+      }
+    ],
+    "_features": [
+      "interior_dose",
+      "sign_flip",
+      "symptom_trap"
+    ],
+    "_skin": "battery",
+    "_depth": 4,
+    "_archetype": "collider_selection",
+    "_seed": 10001630
+  },
+  "oracle": {
+    "gold": {
+      "intervention": {
+        "FormationCurrent": 0.0,
+        "ElectrolyteAdditive": 66.0
+      },
+      "expected_utility": 12.800444262135386,
+      "baseline_utility": 7.494200254584521,
+      "active_actuators": [
+        "FormationCurrent",
+        "ElectrolyteAdditive"
+      ]
+    },
+    "counterfactual_battery": {
+      "true_mechanism_proxy": "ImpedanceSpectrum",
+      "valid_mechanism_proxies": [
+        "ImpedanceSpectrum"
+      ],
+      "lenient_mechanism_proxies": [
+        "ImpedanceSpectrum"
+      ],
+      "confounded_decoys": [
+        "PackVoltage",
+        "RestPeriod",
+        "SurfaceTemperature"
+      ],
+      "actuator_sign_predictions": {
+        "FormationCurrent": "-",
+        "ElectrolyteAdditive": "-",
+        "VoltageWindowShift": "0",
+        "set_PressStackForce": "0",
+        "set_CrimpPressure": "0",
+        "set_AmbientHumidityBatt": "0",
+        "set_CalendarAge": "0",
+        "set_CoolingPlateTemp": "0",
+        "set_AnodeExcessRatio": "0"
+      },
+      "targeted_actuator": "ElectrolyteAdditive",
+      "symptom_trap_actuator": "VoltageWindowShift"
+    },
+    "calibration": {
+      "proxy_assay_noise": 11.29,
+      "proxy_corr": 0.522,
+      "decoy_corr": 0.338
+    },
+    "audits": {
+      "decoy": {
+        "passed": true,
+        "decoys": {
+          "PackVoltage": {
+            "obs_corr": 0.338,
+            "clamp_do_effect": 0.0,
+            "ok": true
+          },
+          "SurfaceTemperature": {
+            "obs_corr": 0.338,
+            "clamp_do_effect": 0.0,
+            "ok": true
+          },
+          "RestPeriod": {
+            "obs_corr": 0.423,
+            "clamp_do_effect": 0.0,
+            "ok": true
+          }
+        }
+      },
+      "proxy_signal": {
+        "passed": true,
+        "proxy_outcome_corr": -0.537,
+        "obs_ok": true,
+        "interventional_shift_sd": 0.68,
+        "interv_ok": false,
+        "band": [
+          0.35,
+          0.75
+        ]
+      },
+      "distractor_inertness": {
+        "passed": true,
+        "n_inert_checked": 7,
+        "violations": []
+      },
+      "gold_selfconsistency": {
+        "passed": true,
+        "gold_utility": 12.8,
+        "beating_perturbations": []
+      },
+      "counterintuitiveness": {
+        "passed": true,
+        "baseline_utility": 7.48,
+        "gold_utility": 12.8,
+        "naive_results": [
+          {
+            "naive": {
+              "FormationCurrent": 100
+            },
+            "utility": -23.6,
+            "gain_over_baseline": -31.08,
+            "fraction_of_gold_benefit": -5.843,
+            "helps": false
+          },
+          {
+            "naive": {
+              "set_PressStackForce": 100
+            },
+            "utility": 7.48,
+            "gain_over_baseline": 0.0,
+            "fraction_of_gold_benefit": 0.0,
+            "helps": false
+          },
+          {
+            "naive": {
+              "set_CrimpPressure": 100
+            },
+            "utility": 7.48,
+            "gain_over_baseline": 0.0,
+            "fraction_of_gold_benefit": 0.0,
+            "helps": false
+          }
+        ],
+        "note": "obvious first move must not meaningfully help"
+      }
+    }
+  }
+}

@@ -1,0 +1,643 @@
+{
+  "schema_version": "rpg_scm_v7",
+  "world_id": "v7_fermentation_dosewin_interior_dose_sign_f_481029",
+  "domain": "fermentation",
+  "meta": {
+    "seed": 481029,
+    "features": [
+      "interior_dose",
+      "sign_flip",
+      "symptom_trap"
+    ],
+    "skin": "fermentation",
+    "depth": 2
+  },
+  "scenario": "A industrial fermentation plant running a batch ethanol fermentation has seen fermentation yield fall about 25% over the past three weeks, repeating batch after batch. The drop began after a cleaning-protocol change and a switch to a new yeast-propagation batch. The production team's leading theories are that fermentation runs too cool or is underfed, so they favor warmer temperatures and more sugar feed. Batches have smelled faintly sour at the end of fermentation. Routine process panels read broadly within range. The feed, temperature, dosing, and treatment systems are all adjustable, and dosing and treatment options are available. You have a limited number of experiments; you may measure quantities and apply available controls or additives, alone or in combination. Determine what is really driving the loss and what to do about it.",
+  "scm": {
+    "variables": {
+      "OrganicAcidInhibitionSusceptibility": {
+        "aliases": [
+          "susceptibility",
+          "batch susceptibility"
+        ],
+        "kind": "latent",
+        "dist": {
+          "normal": [
+            55,
+            20
+          ]
+        }
+      },
+      "PitchBatch": {
+        "aliases": [
+          "pitch batch",
+          "yeast pitch lot"
+        ],
+        "kind": "latent",
+        "dist": {
+          "normal": [
+            50,
+            16
+          ]
+        }
+      },
+      "FermentTemp": {
+        "aliases": [
+          "fermentation temperature",
+          "brew temperature"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            40,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "FermentTempHarmAxis": {
+        "aliases": [
+          "harm axis"
+        ],
+        "kind": "latent",
+        "parents": [
+          "FermentTemp"
+        ],
+        "mech": {
+          "form": "sign_flip",
+          "of": "FermentTemp",
+          "knee": 45,
+          "lo_gain": 0.05,
+          "hi_gain": 0.9,
+          "intercept": 2.0
+        }
+      },
+      "OrganicAcidInhibition": {
+        "aliases": [
+          "organic-acid inhibition",
+          "acetic-acid stress",
+          "weak-acid inhibition"
+        ],
+        "kind": "latent",
+        "parents": [
+          "FermentTempHarmAxis",
+          "OrganicAcidInhibitionSusceptibility"
+        ],
+        "mech": {
+          "form": "interaction",
+          "a": "FermentTempHarmAxis",
+          "b": "OrganicAcidInhibitionSusceptibility",
+          "gain": 260.0,
+          "scale": 100.0,
+          "intercept": 3.0
+        },
+        "noise": {
+          "normal": [
+            0,
+            1.5
+          ]
+        }
+      },
+      "GlycolyticFlux": {
+        "aliases": [
+          "glycolytic flux",
+          "sugar-uptake flux"
+        ],
+        "kind": "latent",
+        "parents": [
+          "OrganicAcidInhibition"
+        ],
+        "mech": {
+          "form": "hill",
+          "of": "OrganicAcidInhibition",
+          "vmax": 70,
+          "k": 35,
+          "n": 2
+        }
+      },
+      "YeastViability": {
+        "aliases": [
+          "yeast viability",
+          "cell vitality"
+        ],
+        "kind": "latent",
+        "parents": [
+          "GlycolyticFlux"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "GlycolyticFlux": 0.9
+          },
+          "intercept": 5
+        }
+      },
+      "EthanolYield": {
+        "aliases": [
+          "ethanol yield",
+          "fermentation yield",
+          "product yield",
+          "yield"
+        ],
+        "kind": "outcome",
+        "parents": [
+          "YeastViability",
+          "PitchBatch"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "YeastViability": -0.9,
+            "PitchBatch": 0.2
+          },
+          "intercept": 15
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "OrganicAcidTiter": {
+        "aliases": [
+          "organic-acid titer",
+          "acetate concentration"
+        ],
+        "kind": "observable",
+        "parents": [
+          "YeastViability"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "YeastViability": 0.8
+          },
+          "intercept": 5
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            8.61
+          ]
+        }
+      },
+      "BrothFoaming": {
+        "aliases": [
+          "broth foaming",
+          "foam level"
+        ],
+        "kind": "observable",
+        "parents": [
+          "PitchBatch"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "PitchBatch": 0.7
+          },
+          "intercept": 40
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            4
+          ]
+        }
+      },
+      "YeastGeneration": {
+        "aliases": [
+          "yeast generation",
+          "repitch count"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "AgitationFerm": {
+        "aliases": [
+          "agitation rate",
+          "stir speed"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "InoculationVolume": {
+        "aliases": [
+          "inoculation volume",
+          "pitch volume"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "MashTemp": {
+        "aliases": [
+          "mash temperature",
+          "conversion temp"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "NitrogenSource": {
+        "aliases": [
+          "nitrogen source",
+          "yan level"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "DissolvedO2Ferm": {
+        "aliases": [
+          "dissolved oxygen",
+          "aeration level"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "ClarifierDose": {
+        "aliases": [
+          "clarifier dose",
+          "fining agent"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "WaterHardnessFerm": {
+        "aliases": [
+          "water hardness",
+          "brewing-liquor minerals"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      }
+    },
+    "actuators": {
+      "FermentTemp": {
+        "aliases": [
+          "fermentation temperature",
+          "brew temperature"
+        ],
+        "target": "FermentTemp",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 40,
+        "description": "controller for FermentTemp"
+      },
+      "pHBuffering": {
+        "aliases": [
+          "ph buffering",
+          "acid neutralization"
+        ],
+        "target": "OrganicAcidInhibition",
+        "op": "scale",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 0,
+        "expr": "1-sat(d;k=0.66)",
+        "description": "dosing to reduce OrganicAcidInhibition",
+        "side_effect": {
+          "target": "EthanolYield",
+          "expr": "-overstrip(d;thr=0.66,gain=30)"
+        }
+      },
+      "Antifoam": {
+        "aliases": [
+          "antifoam addition",
+          "defoamer dosing"
+        ],
+        "target": "EthanolYield",
+        "op": "mask",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 0,
+        "expr": "transient_boost(d)",
+        "description": "a control that adjusts the EthanolYield readout"
+      },
+      "set_YeastGeneration": {
+        "aliases": [
+          "set yeast generation",
+          "set repitch count",
+          "adjust YeastGeneration"
+        ],
+        "target": "YeastGeneration",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for YeastGeneration"
+      },
+      "set_AgitationFerm": {
+        "aliases": [
+          "set agitation rate",
+          "set stir speed",
+          "adjust AgitationFerm"
+        ],
+        "target": "AgitationFerm",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for AgitationFerm"
+      },
+      "set_InoculationVolume": {
+        "aliases": [
+          "set inoculation volume",
+          "set pitch volume",
+          "adjust InoculationVolume"
+        ],
+        "target": "InoculationVolume",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for InoculationVolume"
+      },
+      "set_MashTemp": {
+        "aliases": [
+          "set mash temperature",
+          "set conversion temp",
+          "adjust MashTemp"
+        ],
+        "target": "MashTemp",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for MashTemp"
+      }
+    },
+    "outcome": "EthanolYield",
+    "higher_is_better": true
+  },
+  "ground_truth": {
+    "true_root": "OrganicAcidInhibition",
+    "true_mechanism_proxy": "OrganicAcidTiter",
+    "confounded_decoys": [
+      "BrothFoaming"
+    ],
+    "targeted_actuator": "pHBuffering",
+    "symptom_trap_actuator": "Antifoam",
+    "co_actuators": null,
+    "selection_decoy": null,
+    "_selection_nodes": [],
+    "subtype_policy": null,
+    "surrogate_node": null,
+    "latent_plain_name": "a hidden organic-acid inhibition that propagates through glycolytic flux, yeast viability to the outcome",
+    "naive_interventions": [
+      {
+        "FermentTemp": 100
+      },
+      {
+        "set_YeastGeneration": 100
+      },
+      {
+        "set_AgitationFerm": 100
+      }
+    ],
+    "_features": [
+      "interior_dose",
+      "sign_flip",
+      "symptom_trap"
+    ],
+    "_skin": "fermentation",
+    "_depth": 2,
+    "_archetype": "dose_window",
+    "_seed": 481029
+  },
+  "oracle": {
+    "gold": {
+      "intervention": {
+        "FermentTemp": 0.0,
+        "pHBuffering": 66.0
+      },
+      "expected_utility": 20.495444262135386,
+      "baseline_utility": 13.944525734294812,
+      "active_actuators": [
+        "FermentTemp",
+        "pHBuffering"
+      ]
+    },
+    "counterfactual_battery": {
+      "true_mechanism_proxy": "OrganicAcidTiter",
+      "valid_mechanism_proxies": [
+        "OrganicAcidTiter"
+      ],
+      "lenient_mechanism_proxies": [
+        "OrganicAcidTiter"
+      ],
+      "confounded_decoys": [
+        "BrothFoaming"
+      ],
+      "actuator_sign_predictions": {
+        "FermentTemp": "-",
+        "pHBuffering": "-",
+        "Antifoam": "0",
+        "set_YeastGeneration": "0",
+        "set_AgitationFerm": "0",
+        "set_InoculationVolume": "0",
+        "set_MashTemp": "0"
+      },
+      "targeted_actuator": "pHBuffering",
+      "symptom_trap_actuator": "Antifoam"
+    },
+    "calibration": {
+      "proxy_assay_noise": 8.61,
+      "proxy_corr": 0.521,
+      "decoy_corr": 0.356
+    },
+    "audits": {
+      "decoy": {
+        "passed": true,
+        "decoys": {
+          "BrothFoaming": {
+            "obs_corr": 0.356,
+            "clamp_do_effect": 0.0,
+            "ok": true
+          }
+        }
+      },
+      "proxy_signal": {
+        "passed": true,
+        "proxy_outcome_corr": -0.521,
+        "obs_ok": true,
+        "interventional_shift_sd": 0.55,
+        "interv_ok": false,
+        "band": [
+          0.35,
+          0.75
+        ]
+      },
+      "distractor_inertness": {
+        "passed": true,
+        "n_inert_checked": 5,
+        "violations": []
+      },
+      "gold_selfconsistency": {
+        "passed": true,
+        "gold_utility": 20.5,
+        "beating_perturbations": []
+      },
+      "counterintuitiveness": {
+        "passed": true,
+        "baseline_utility": 13.93,
+        "gold_utility": 20.5,
+        "naive_results": [
+          {
+            "naive": {
+              "FermentTemp": 100
+            },
+            "utility": -24.44,
+            "gain_over_baseline": -38.37,
+            "fraction_of_gold_benefit": -5.844,
+            "helps": false
+          },
+          {
+            "naive": {
+              "set_YeastGeneration": 100
+            },
+            "utility": 13.93,
+            "gain_over_baseline": 0.0,
+            "fraction_of_gold_benefit": 0.0,
+            "helps": false
+          },
+          {
+            "naive": {
+              "set_AgitationFerm": 100
+            },
+            "utility": 13.93,
+            "gain_over_baseline": 0.0,
+            "fraction_of_gold_benefit": 0.0,
+            "helps": false
+          }
+        ],
+        "note": "obvious first move must not meaningfully help"
+      }
+    }
+  }
+}

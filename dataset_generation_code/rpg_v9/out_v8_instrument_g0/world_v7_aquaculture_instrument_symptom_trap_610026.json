@@ -1,0 +1,639 @@
+{
+  "schema_version": "rpg_scm_v7",
+  "world_id": "v7_aquaculture_instrument_symptom_trap_610026",
+  "domain": "aquaculture",
+  "meta": {
+    "seed": 610026,
+    "features": [
+      "symptom_trap"
+    ],
+    "skin": "aquaculture",
+    "depth": 2
+  },
+  "scenario": "A recirculating aquaculture facility raising Atlantic salmon has seen harvest biomass at harvest fall about 30% over the last two cohorts, repeating across grow-out cohorts. The shortfall began after a change in intake water after a neighboring discharge permit was revised. The farm team's leading theories are underfeeding or overcrowding, so they favor more feed and lower density. Fish have been seen flaring their gills and crowding the inflow. Routine water-quality panels read broadly within range. The feeding, stocking, filtration, and aeration systems are all adjustable, and treatment equipment is available. You have a limited number of experiments; you may measure quantities and apply available controls or treatments, alone or in combination. Determine what is really driving the loss and what to do about it.",
+  "scm": {
+    "variables": {
+      "DissolvedToxicantSusceptibility": {
+        "aliases": [
+          "susceptibility",
+          "batch susceptibility"
+        ],
+        "kind": "latent",
+        "dist": {
+          "normal": [
+            55,
+            20
+          ]
+        }
+      },
+      "SourceWaterSeason": {
+        "aliases": [
+          "source-water season",
+          "intake seasonality"
+        ],
+        "kind": "latent",
+        "dist": {
+          "normal": [
+            50,
+            16
+          ]
+        }
+      },
+      "FeedRate": {
+        "aliases": [
+          "feed rate",
+          "feeding intensity",
+          "ration size"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            40,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "DissolvedToxicant": {
+        "aliases": [
+          "dissolved toxicant",
+          "waterborne toxin",
+          "trace toxicant"
+        ],
+        "kind": "latent",
+        "parents": [
+          "FeedRate",
+          "DissolvedToxicantSusceptibility"
+        ],
+        "mech": {
+          "form": "interaction",
+          "a": "FeedRate",
+          "b": "DissolvedToxicantSusceptibility",
+          "gain": 260.0,
+          "scale": 100.0,
+          "intercept": 3.0
+        },
+        "noise": {
+          "normal": [
+            0,
+            1.5
+          ]
+        }
+      },
+      "FeedConversion": {
+        "aliases": [
+          "feed conversion",
+          "feed efficiency"
+        ],
+        "kind": "latent",
+        "parents": [
+          "DissolvedToxicant"
+        ],
+        "mech": {
+          "form": "hill",
+          "of": "DissolvedToxicant",
+          "vmax": 70,
+          "k": 35,
+          "n": 2
+        }
+      },
+      "GrowthHormoneAxis": {
+        "aliases": [
+          "growth-hormone axis",
+          "somatic growth signaling"
+        ],
+        "kind": "latent",
+        "parents": [
+          "FeedConversion"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "FeedConversion": 0.9
+          },
+          "intercept": 5
+        }
+      },
+      "HarvestBiomass": {
+        "aliases": [
+          "harvest biomass",
+          "grow-out biomass",
+          "final biomass",
+          "biomass"
+        ],
+        "kind": "outcome",
+        "parents": [
+          "GrowthHormoneAxis",
+          "SourceWaterSeason"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "GrowthHormoneAxis": -0.9,
+            "SourceWaterSeason": 0.4
+          },
+          "intercept": 15
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "GillHistologyScore": {
+        "aliases": [
+          "gill histology score",
+          "gill damage index"
+        ],
+        "kind": "observable",
+        "parents": [
+          "GrowthHormoneAxis"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "GrowthHormoneAxis": 0.8
+          },
+          "intercept": 5
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            14.98
+          ]
+        }
+      },
+      "SurfaceActivity": {
+        "aliases": [
+          "surface activity",
+          "swimming activity"
+        ],
+        "kind": "observable",
+        "parents": [
+          "SourceWaterSeason"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "SourceWaterSeason": 0.7
+          },
+          "intercept": 40
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            4
+          ]
+        }
+      },
+      "TankTurbidity": {
+        "aliases": [
+          "tank turbidity",
+          "water cloudiness"
+        ],
+        "kind": "observable",
+        "parents": [
+          "SourceWaterSeason"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "SourceWaterSeason": 0.7
+          },
+          "intercept": 40
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            4
+          ]
+        }
+      },
+      "TankDepth": {
+        "aliases": [
+          "tank depth",
+          "water column depth"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "AmmoniaLevel": {
+        "aliases": [
+          "ammonia level",
+          "total ammonia"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "CalciumHardness": {
+        "aliases": [
+          "calcium hardness",
+          "water hardness"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "WaterTempAqua": {
+        "aliases": [
+          "water temperature",
+          "tank temperature"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "FeedProteinPct": {
+        "aliases": [
+          "feed protein",
+          "protein content"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "FlowThroughRate": {
+        "aliases": [
+          "flow-through rate",
+          "water exchange"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "PelletSize": {
+        "aliases": [
+          "pellet size",
+          "feed particle size"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "NitriteLevel": {
+        "aliases": [
+          "nitrite level",
+          "nitrite concentration"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      }
+    },
+    "actuators": {
+      "FeedRate": {
+        "aliases": [
+          "feed rate",
+          "feeding intensity",
+          "ration size"
+        ],
+        "target": "FeedRate",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 40,
+        "description": "controller for FeedRate"
+      },
+      "AppetiteStimulant": {
+        "aliases": [
+          "appetite stimulant",
+          "feed attractant"
+        ],
+        "target": "HarvestBiomass",
+        "op": "mask",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 0,
+        "expr": "transient_boost(d)",
+        "description": "a control that adjusts the HarvestBiomass readout"
+      },
+      "set_TankDepth": {
+        "aliases": [
+          "set tank depth",
+          "set water column depth",
+          "adjust TankDepth"
+        ],
+        "target": "TankDepth",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for TankDepth"
+      },
+      "set_AmmoniaLevel": {
+        "aliases": [
+          "set ammonia level",
+          "set total ammonia",
+          "adjust AmmoniaLevel"
+        ],
+        "target": "AmmoniaLevel",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for AmmoniaLevel"
+      },
+      "set_CalciumHardness": {
+        "aliases": [
+          "set calcium hardness",
+          "set water hardness",
+          "adjust CalciumHardness"
+        ],
+        "target": "CalciumHardness",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for CalciumHardness"
+      },
+      "set_WaterTempAqua": {
+        "aliases": [
+          "set water temperature",
+          "set tank temperature",
+          "adjust WaterTempAqua"
+        ],
+        "target": "WaterTempAqua",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for WaterTempAqua"
+      },
+      "set_FeedProteinPct": {
+        "aliases": [
+          "set feed protein",
+          "set protein content",
+          "adjust FeedProteinPct"
+        ],
+        "target": "FeedProteinPct",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for FeedProteinPct"
+      }
+    },
+    "outcome": "HarvestBiomass",
+    "higher_is_better": true
+  },
+  "ground_truth": {
+    "true_root": "DissolvedToxicant",
+    "true_mechanism_proxy": "GillHistologyScore",
+    "confounded_decoys": [
+      "SurfaceActivity",
+      "TankTurbidity"
+    ],
+    "targeted_actuator": "FeedRate",
+    "symptom_trap_actuator": "AppetiteStimulant",
+    "co_actuators": null,
+    "selection_decoy": null,
+    "_selection_nodes": [],
+    "subtype_policy": null,
+    "surrogate_node": null,
+    "latent_plain_name": "a hidden dissolved toxicant that propagates through feed conversion, growth-hormone axis to the outcome",
+    "naive_interventions": [
+      {
+        "set_TankDepth": 100
+      },
+      {
+        "set_AmmoniaLevel": 100
+      }
+    ],
+    "_features": [
+      "symptom_trap"
+    ],
+    "_skin": "aquaculture",
+    "_depth": 2,
+    "_archetype": "instrument_only",
+    "_seed": 610026
+  },
+  "oracle": {
+    "gold": {
+      "intervention": {
+        "FeedRate": 0.0
+      },
+      "expected_utility": 30.077355298987474,
+      "baseline_utility": -7.820548958349815,
+      "active_actuators": [
+        "FeedRate"
+      ]
+    },
+    "counterfactual_battery": {
+      "true_mechanism_proxy": "GillHistologyScore",
+      "valid_mechanism_proxies": [
+        "FeedRate",
+        "GillHistologyScore"
+      ],
+      "lenient_mechanism_proxies": [
+        "FeedRate",
+        "GillHistologyScore"
+      ],
+      "confounded_decoys": [
+        "SurfaceActivity",
+        "TankTurbidity"
+      ],
+      "actuator_sign_predictions": {
+        "FeedRate": "-",
+        "AppetiteStimulant": "0",
+        "set_TankDepth": "0",
+        "set_AmmoniaLevel": "0",
+        "set_CalciumHardness": "0",
+        "set_WaterTempAqua": "0",
+        "set_FeedProteinPct": "0"
+      },
+      "targeted_actuator": "FeedRate",
+      "symptom_trap_actuator": "AppetiteStimulant"
+    },
+    "calibration": {
+      "proxy_assay_noise": 14.98,
+      "proxy_corr": 0.489,
+      "decoy_corr": 0.442
+    },
+    "audits": {
+      "decoy": {
+        "passed": true,
+        "decoys": {
+          "SurfaceActivity": {
+            "obs_corr": 0.442,
+            "clamp_do_effect": 0.0,
+            "ok": true
+          },
+          "TankTurbidity": {
+            "obs_corr": 0.452,
+            "clamp_do_effect": 0.0,
+            "ok": true
+          }
+        }
+      },
+      "proxy_signal": {
+        "passed": true,
+        "proxy_outcome_corr": -0.491,
+        "obs_ok": true,
+        "interventional_shift_sd": 0.64,
+        "interv_ok": false,
+        "band": [
+          0.35,
+          0.75
+        ]
+      },
+      "distractor_inertness": {
+        "passed": true,
+        "n_inert_checked": 6,
+        "violations": []
+      },
+      "gold_selfconsistency": {
+        "passed": true,
+        "gold_utility": 30.08,
+        "beating_perturbations": []
+      },
+      "counterintuitiveness": {
+        "passed": true,
+        "baseline_utility": -7.8,
+        "gold_utility": 30.08,
+        "naive_results": [
+          {
+            "naive": {
+              "set_TankDepth": 100
+            },
+            "utility": -7.8,
+            "gain_over_baseline": 0.0,
+            "fraction_of_gold_benefit": 0.0,
+            "helps": false
+          },
+          {
+            "naive": {
+              "set_AmmoniaLevel": 100
+            },
+            "utility": -7.8,
+            "gain_over_baseline": 0.0,
+            "fraction_of_gold_benefit": 0.0,
+            "helps": false
+          }
+        ],
+        "note": "obvious first move must not meaningfully help"
+      }
+    }
+  }
+}

@@ -1,0 +1,792 @@
+{
+  "schema_version": "rpg_scm_v7",
+  "world_id": "v7_bioprocess_surrogate_sign_flip_symptom_tr_800040",
+  "domain": "bioprocess",
+  "meta": {
+    "seed": 800040,
+    "features": [
+      "sign_flip",
+      "symptom_trap"
+    ],
+    "skin": "bioprocess",
+    "depth": 2
+  },
+  "scenario": "A 2,000 L mammalian-cell bioreactor producing a secreted therapeutic protein has seen product titer fall about 30% over the last three weeks, and the loss has persisted across several batches. The decline began shortly after a maintenance shutdown in which a feed-water line fitting was replaced and probes were recalibrated. The operators' leading theories are dissolved-oxygen control drift or a temperature excursion. Batch records note the broth has looked cloudier than usual at harvest. Routine panels look broadly within range. The feed-water system, gas train, cooling jacket, and dosing pumps are all instrumented and adjustable. You have a limited number of experiments; you may measure quantities and apply available controls or additives, alone or in combination. Determine what is really driving the loss and what to do about it.",
+  "scm": {
+    "variables": {
+      "ShearStressLoadSusceptibility": {
+        "aliases": [
+          "susceptibility",
+          "batch susceptibility"
+        ],
+        "kind": "latent",
+        "dist": {
+          "normal": [
+            55,
+            20
+          ]
+        }
+      },
+      "BatchSeedAge": {
+        "aliases": [
+          "seed age",
+          "inoculum age",
+          "cell line age"
+        ],
+        "kind": "latent",
+        "dist": {
+          "normal": [
+            50,
+            16
+          ]
+        }
+      },
+      "MediaExchangeRate": {
+        "aliases": [
+          "media exchange rate",
+          "perfusion rate"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            40,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "MediaExchangeRateHarmAxis": {
+        "aliases": [
+          "harm axis"
+        ],
+        "kind": "latent",
+        "parents": [
+          "MediaExchangeRate"
+        ],
+        "mech": {
+          "form": "sign_flip",
+          "of": "MediaExchangeRate",
+          "knee": 45,
+          "lo_gain": 0.05,
+          "hi_gain": 0.9,
+          "intercept": 2.0
+        }
+      },
+      "ShearStressLoad": {
+        "aliases": [
+          "shear stress",
+          "mechanical shear",
+          "hydrodynamic stress"
+        ],
+        "kind": "latent",
+        "parents": [
+          "MediaExchangeRateHarmAxis",
+          "ShearStressLoadSusceptibility"
+        ],
+        "mech": {
+          "form": "interaction",
+          "a": "MediaExchangeRateHarmAxis",
+          "b": "ShearStressLoadSusceptibility",
+          "gain": 260.0,
+          "scale": 100.0,
+          "intercept": 3.0
+        },
+        "noise": {
+          "normal": [
+            0,
+            1.5
+          ]
+        }
+      },
+      "MisfoldingRate": {
+        "aliases": [
+          "misfolding rate",
+          "aggregation propensity"
+        ],
+        "kind": "latent",
+        "parents": [
+          "ShearStressLoad"
+        ],
+        "mech": {
+          "form": "hill",
+          "of": "ShearStressLoad",
+          "vmax": 70,
+          "k": 35,
+          "n": 2
+        }
+      },
+      "MembraneDamage": {
+        "aliases": [
+          "membrane damage",
+          "cell envelope stress"
+        ],
+        "kind": "latent",
+        "parents": [
+          "MisfoldingRate"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "MisfoldingRate": 0.9
+          },
+          "intercept": 5
+        }
+      },
+      "ProductTiter": {
+        "aliases": [
+          "product titer",
+          "protein yield",
+          "titer",
+          "yield"
+        ],
+        "kind": "outcome",
+        "parents": [
+          "MembraneDamage",
+          "BatchSeedAge"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "MembraneDamage": -0.9,
+            "BatchSeedAge": 0.2
+          },
+          "intercept": 15
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "BrothTurbidity": {
+        "aliases": [
+          "broth turbidity",
+          "cloudiness",
+          "lysis marker"
+        ],
+        "kind": "observable",
+        "parents": [
+          "MembraneDamage"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "MembraneDamage": 0.8
+          },
+          "intercept": 5
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            8.61
+          ]
+        }
+      },
+      "ViableCellDensity": {
+        "aliases": [
+          "viable cell density",
+          "VCD",
+          "cell count"
+        ],
+        "kind": "observable",
+        "parents": [
+          "BatchSeedAge"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "BatchSeedAge": 0.7
+          },
+          "intercept": 40
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            4
+          ]
+        }
+      },
+      "DissolvedOxygen": {
+        "aliases": [
+          "dissolved oxygen",
+          "DO",
+          "pO2"
+        ],
+        "kind": "observable",
+        "parents": [
+          "BatchSeedAge"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "BatchSeedAge": 0.7
+          },
+          "intercept": 40
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            4
+          ]
+        }
+      },
+      "GlucoseFeedRate": {
+        "aliases": [
+          "glucose feed",
+          "sugar feed"
+        ],
+        "kind": "observable",
+        "parents": [
+          "BatchSeedAge"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "BatchSeedAge": 0.7
+          },
+          "intercept": 40
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            4
+          ]
+        }
+      },
+      "Osmolality": {
+        "aliases": [
+          "osmolality",
+          "osmotic pressure"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "Temperature": {
+        "aliases": [
+          "temperature",
+          "culture temperature"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "AmmoniaConc": {
+        "aliases": [
+          "ammonia",
+          "ammonium"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "CoolingWaterTemp": {
+        "aliases": [
+          "cooling water",
+          "jacket temperature"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "VesselPressure": {
+        "aliases": [
+          "headspace pressure",
+          "vessel pressure"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "GlutamineConc": {
+        "aliases": [
+          "glutamine",
+          "amino acid feed"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "CO2Level": {
+        "aliases": [
+          "dissolved co2",
+          "pCO2"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "pH": {
+        "aliases": [
+          "ph",
+          "acidity"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "AgitationRate": {
+        "aliases": [
+          "agitation",
+          "impeller speed",
+          "rpm"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "AntifoamLevel": {
+        "aliases": [
+          "antifoam",
+          "defoamer"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      }
+    },
+    "actuators": {
+      "MediaExchangeRate": {
+        "aliases": [
+          "media exchange rate",
+          "perfusion rate"
+        ],
+        "target": "MediaExchangeRate",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 40,
+        "description": "controller for MediaExchangeRate"
+      },
+      "set_GlucoseFeedRate": {
+        "aliases": [
+          "set glucose feed",
+          "set sugar feed",
+          "adjust GlucoseFeedRate"
+        ],
+        "target": "GlucoseFeedRate",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for GlucoseFeedRate"
+      },
+      "ChelatorDosing": {
+        "aliases": [
+          "chelating agent",
+          "metal chelator",
+          "sequestering agent",
+          "chelation"
+        ],
+        "target": "ShearStressLoad",
+        "op": "scale",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 0,
+        "expr": "1-sat(d;k=0.66)",
+        "description": "dosing to reduce ShearStressLoad"
+      },
+      "StabilizerAdditive": {
+        "aliases": [
+          "protein stabilizer",
+          "formulation stabilizer",
+          "protectant"
+        ],
+        "target": "ProductTiter",
+        "op": "mask",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 0,
+        "expr": "transient_boost(d)",
+        "description": "a control that adjusts the ProductTiter readout"
+      },
+      "set_Osmolality": {
+        "aliases": [
+          "set osmolality",
+          "set osmotic pressure",
+          "adjust Osmolality"
+        ],
+        "target": "Osmolality",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for Osmolality"
+      },
+      "set_Temperature": {
+        "aliases": [
+          "set temperature",
+          "set culture temperature",
+          "adjust Temperature"
+        ],
+        "target": "Temperature",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for Temperature"
+      },
+      "set_AmmoniaConc": {
+        "aliases": [
+          "set ammonia",
+          "set ammonium",
+          "adjust AmmoniaConc"
+        ],
+        "target": "AmmoniaConc",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for AmmoniaConc"
+      },
+      "set_CoolingWaterTemp": {
+        "aliases": [
+          "set cooling water",
+          "set jacket temperature",
+          "adjust CoolingWaterTemp"
+        ],
+        "target": "CoolingWaterTemp",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for CoolingWaterTemp"
+      },
+      "set_VesselPressure": {
+        "aliases": [
+          "set headspace pressure",
+          "set vessel pressure",
+          "adjust VesselPressure"
+        ],
+        "target": "VesselPressure",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for VesselPressure"
+      }
+    },
+    "outcome": "ProductTiter",
+    "higher_is_better": true
+  },
+  "ground_truth": {
+    "true_root": "ShearStressLoad",
+    "true_mechanism_proxy": "BrothTurbidity",
+    "confounded_decoys": [
+      "ViableCellDensity",
+      "DissolvedOxygen",
+      "GlucoseFeedRate"
+    ],
+    "targeted_actuator": "ChelatorDosing",
+    "symptom_trap_actuator": "StabilizerAdditive",
+    "co_actuators": null,
+    "selection_decoy": null,
+    "_selection_nodes": [],
+    "subtype_policy": null,
+    "surrogate_node": "GlucoseFeedRate",
+    "latent_plain_name": "a hidden shear stress that propagates through misfolding rate, membrane damage to the outcome",
+    "naive_interventions": [
+      {
+        "MediaExchangeRate": 100
+      },
+      {
+        "set_Osmolality": 100
+      },
+      {
+        "set_Temperature": 100
+      },
+      {
+        "set_GlucoseFeedRate": 100
+      }
+    ],
+    "_features": [
+      "sign_flip",
+      "symptom_trap"
+    ],
+    "_skin": "bioprocess",
+    "_depth": 2,
+    "_archetype": "surrogate_trap",
+    "_seed": 800040
+  },
+  "oracle": {
+    "gold": {
+      "intervention": {
+        "ChelatorDosing": 100.0
+      },
+      "expected_utility": 20.495444262135386,
+      "baseline_utility": 13.944525734294812,
+      "active_actuators": [
+        "MediaExchangeRate",
+        "ChelatorDosing"
+      ]
+    },
+    "counterfactual_battery": {
+      "true_mechanism_proxy": "BrothTurbidity",
+      "valid_mechanism_proxies": [
+        "BrothTurbidity"
+      ],
+      "lenient_mechanism_proxies": [
+        "BrothTurbidity"
+      ],
+      "confounded_decoys": [
+        "DissolvedOxygen",
+        "GlucoseFeedRate",
+        "ViableCellDensity"
+      ],
+      "actuator_sign_predictions": {
+        "MediaExchangeRate": "-",
+        "set_GlucoseFeedRate": "0",
+        "ChelatorDosing": "+",
+        "StabilizerAdditive": "0",
+        "set_Osmolality": "0",
+        "set_Temperature": "0",
+        "set_AmmoniaConc": "0",
+        "set_CoolingWaterTemp": "0",
+        "set_VesselPressure": "0"
+      },
+      "targeted_actuator": "ChelatorDosing",
+      "symptom_trap_actuator": "StabilizerAdditive"
+    },
+    "calibration": {
+      "proxy_assay_noise": 8.61,
+      "proxy_corr": 0.521,
+      "decoy_corr": 0.356
+    },
+    "audits": {
+      "decoy": {
+        "passed": true,
+        "decoys": {
+          "ViableCellDensity": {
+            "obs_corr": 0.356,
+            "clamp_do_effect": 0.0,
+            "ok": true
+          },
+          "DissolvedOxygen": {
+            "obs_corr": 0.363,
+            "clamp_do_effect": 0.0,
+            "ok": true
+          },
+          "GlucoseFeedRate": {
+            "obs_corr": 0.355,
+            "clamp_do_effect": 0.0,
+            "ok": true
+          }
+        }
+      },
+      "proxy_signal": {
+        "passed": true,
+        "proxy_outcome_corr": -0.521,
+        "obs_ok": true,
+        "interventional_shift_sd": 0.55,
+        "interv_ok": false,
+        "band": [
+          0.35,
+          0.75
+        ]
+      },
+      "distractor_inertness": {
+        "passed": true,
+        "n_inert_checked": 7,
+        "violations": []
+      },
+      "gold_selfconsistency": {
+        "passed": true,
+        "gold_utility": 20.5,
+        "beating_perturbations": []
+      },
+      "counterintuitiveness": {
+        "passed": true,
+        "baseline_utility": 13.93,
+        "gold_utility": 20.5,
+        "naive_results": [
+          {
+            "naive": {
+              "MediaExchangeRate": 100
+            },
+            "utility": -24.44,
+            "gain_over_baseline": -38.37,
+            "fraction_of_gold_benefit": -5.844,
+            "helps": false
+          },
+          {
+            "naive": {
+              "set_Osmolality": 100
+            },
+            "utility": 13.93,
+            "gain_over_baseline": 0.0,
+            "fraction_of_gold_benefit": 0.0,
+            "helps": false
+          },
+          {
+            "naive": {
+              "set_Temperature": 100
+            },
+            "utility": 13.93,
+            "gain_over_baseline": 0.0,
+            "fraction_of_gold_benefit": 0.0,
+            "helps": false
+          },
+          {
+            "naive": {
+              "set_GlucoseFeedRate": 100
+            },
+            "utility": 13.93,
+            "gain_over_baseline": 0.0,
+            "fraction_of_gold_benefit": 0.0,
+            "helps": false
+          }
+        ],
+        "note": "obvious first move must not meaningfully help"
+      }
+    }
+  }
+}

@@ -1,0 +1,626 @@
+{
+  "schema_version": "rpg_scm_v7",
+  "world_id": "v7_fermentation_competing_symptom_trap_550019",
+  "domain": "fermentation",
+  "meta": {
+    "seed": 550019,
+    "features": [
+      "symptom_trap"
+    ],
+    "skin": "fermentation",
+    "depth": 2
+  },
+  "scenario": "A industrial fermentation plant running a batch ethanol fermentation has seen fermentation yield fall about 25% over the past three weeks, repeating batch after batch. The drop began after a cleaning-protocol change and a switch to a new yeast-propagation batch. The production team's leading theories are that fermentation runs too cool or is underfed, so they favor warmer temperatures and more sugar feed. Batches have smelled faintly sour at the end of fermentation. Routine process panels read broadly within range. The feed, temperature, dosing, and treatment systems are all adjustable, and dosing and treatment options are available. You have a limited number of experiments; you may measure quantities and apply available controls or additives, alone or in combination. Determine what is really driving the loss and what to do about it.",
+  "scm": {
+    "variables": {
+      "TraceMetalDeficiencySusceptibility": {
+        "aliases": [
+          "susceptibility",
+          "batch susceptibility"
+        ],
+        "kind": "latent",
+        "dist": {
+          "normal": [
+            55,
+            20
+          ]
+        }
+      },
+      "FermenterHistory": {
+        "aliases": [
+          "fermenter history",
+          "vessel service age"
+        ],
+        "kind": "latent",
+        "dist": {
+          "normal": [
+            50,
+            16
+          ]
+        }
+      },
+      "SugarFeedRate": {
+        "aliases": [
+          "sugar feed rate",
+          "substrate feed",
+          "wort feed rate"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            40,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "TraceMetalDeficiency": {
+        "aliases": [
+          "trace-metal deficiency",
+          "micronutrient shortfall"
+        ],
+        "kind": "latent",
+        "parents": [
+          "SugarFeedRate",
+          "TraceMetalDeficiencySusceptibility"
+        ],
+        "mech": {
+          "form": "interaction",
+          "a": "SugarFeedRate",
+          "b": "TraceMetalDeficiencySusceptibility",
+          "gain": 260.0,
+          "scale": 100.0,
+          "intercept": 3.0
+        },
+        "noise": {
+          "normal": [
+            0,
+            1.5
+          ]
+        }
+      },
+      "BuddingRate": {
+        "aliases": [
+          "budding rate",
+          "proliferation rate"
+        ],
+        "kind": "latent",
+        "parents": [
+          "TraceMetalDeficiency"
+        ],
+        "mech": {
+          "form": "hill",
+          "of": "TraceMetalDeficiency",
+          "vmax": 70,
+          "k": 35,
+          "n": 2
+        }
+      },
+      "RedoxBalance": {
+        "aliases": [
+          "redox balance",
+          "nad ratio"
+        ],
+        "kind": "latent",
+        "parents": [
+          "BuddingRate"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "BuddingRate": 0.9
+          },
+          "intercept": 5
+        }
+      },
+      "WildYeastContamination": {
+        "aliases": [
+          "wild-yeast contamination",
+          "contaminant strain",
+          "off-strain load"
+        ],
+        "kind": "latent",
+        "dist": {
+          "normal": [
+            55,
+            18
+          ]
+        }
+      },
+      "EthanolYield": {
+        "aliases": [
+          "ethanol yield",
+          "fermentation yield",
+          "product yield",
+          "yield"
+        ],
+        "kind": "outcome",
+        "parents": [
+          "RedoxBalance",
+          "FermenterHistory",
+          "WildYeastContamination"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "RedoxBalance": -0.9,
+            "FermenterHistory": 0.4,
+            "WildYeastContamination": -0.5
+          },
+          "intercept": 15
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "OrganicAcidTiter": {
+        "aliases": [
+          "organic-acid titer",
+          "acetate concentration"
+        ],
+        "kind": "observable",
+        "parents": [
+          "RedoxBalance"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "RedoxBalance": 0.8
+          },
+          "intercept": 5
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            10.06
+          ]
+        }
+      },
+      "CO2OffgasRate": {
+        "aliases": [
+          "co2 offgas rate",
+          "gas-evolution rate"
+        ],
+        "kind": "observable",
+        "parents": [
+          "FermenterHistory"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "FermenterHistory": 0.7
+          },
+          "intercept": 40
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            4
+          ]
+        }
+      },
+      "DissolvedO2Ferm": {
+        "aliases": [
+          "dissolved oxygen",
+          "aeration level"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "TankGeometry": {
+        "aliases": [
+          "tank geometry",
+          "vessel aspect ratio"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "ChillRate": {
+        "aliases": [
+          "chill rate",
+          "crash-cool rate"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "GravityInitial": {
+        "aliases": [
+          "original gravity",
+          "starting sugar"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "WaterHardnessFerm": {
+        "aliases": [
+          "water hardness",
+          "brewing-liquor minerals"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "VesselPressureFerm": {
+        "aliases": [
+          "vessel pressure",
+          "headspace pressure"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "MashTemp": {
+        "aliases": [
+          "mash temperature",
+          "conversion temp"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "ClarifierDose": {
+        "aliases": [
+          "clarifier dose",
+          "fining agent"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      }
+    },
+    "actuators": {
+      "FixWildYeastContamination": {
+        "aliases": [
+          "reduce wild-yeast contamination",
+          "dosing for wild-yeast contamination"
+        ],
+        "target": "WildYeastContamination",
+        "op": "scale",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 0,
+        "expr": "1-sat(d;k=0.66)",
+        "description": "dosing to reduce WildYeastContamination"
+      },
+      "MicronutrientSpike": {
+        "aliases": [
+          "micronutrient spike",
+          "trace-metal supplement"
+        ],
+        "target": "TraceMetalDeficiency",
+        "op": "scale",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 0,
+        "expr": "1-sat(d;k=0.66)",
+        "description": "dosing to reduce TraceMetalDeficiency"
+      },
+      "RefractometerRecal": {
+        "aliases": [
+          "refractometer recalibration",
+          "gravity-meter recalibration"
+        ],
+        "target": "EthanolYield",
+        "op": "mask",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 0,
+        "expr": "transient_boost(d)",
+        "description": "a control that adjusts the EthanolYield readout"
+      },
+      "set_DissolvedO2Ferm": {
+        "aliases": [
+          "set dissolved oxygen",
+          "set aeration level",
+          "adjust DissolvedO2Ferm"
+        ],
+        "target": "DissolvedO2Ferm",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for DissolvedO2Ferm"
+      },
+      "set_TankGeometry": {
+        "aliases": [
+          "set tank geometry",
+          "set vessel aspect ratio",
+          "adjust TankGeometry"
+        ],
+        "target": "TankGeometry",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for TankGeometry"
+      },
+      "set_ChillRate": {
+        "aliases": [
+          "set chill rate",
+          "set crash-cool rate",
+          "adjust ChillRate"
+        ],
+        "target": "ChillRate",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for ChillRate"
+      },
+      "set_GravityInitial": {
+        "aliases": [
+          "set original gravity",
+          "set starting sugar",
+          "adjust GravityInitial"
+        ],
+        "target": "GravityInitial",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for GravityInitial"
+      }
+    },
+    "outcome": "EthanolYield",
+    "higher_is_better": true
+  },
+  "ground_truth": {
+    "true_root": "TraceMetalDeficiency",
+    "true_mechanism_proxy": "OrganicAcidTiter",
+    "confounded_decoys": [
+      "CO2OffgasRate"
+    ],
+    "targeted_actuator": "MicronutrientSpike",
+    "symptom_trap_actuator": "RefractometerRecal",
+    "co_actuators": [
+      "MicronutrientSpike",
+      "FixWildYeastContamination"
+    ],
+    "selection_decoy": null,
+    "_selection_nodes": [],
+    "subtype_policy": null,
+    "surrogate_node": null,
+    "latent_plain_name": "a hidden trace-metal deficiency that propagates through budding rate, redox balance to the outcome",
+    "naive_interventions": [
+      {
+        "set_DissolvedO2Ferm": 100
+      },
+      {
+        "set_TankGeometry": 100
+      }
+    ],
+    "_features": [
+      "symptom_trap"
+    ],
+    "_skin": "fermentation",
+    "_depth": 2,
+    "_archetype": "competing_causes",
+    "_seed": 550019
+  },
+  "oracle": {
+    "gold": {
+      "intervention": {
+        "FixWildYeastContamination": 100.0,
+        "MicronutrientSpike": 100.0
+      },
+      "expected_utility": 30.490888524270773,
+      "baseline_utility": -35.32143302683397,
+      "active_actuators": [
+        "FixWildYeastContamination",
+        "MicronutrientSpike"
+      ]
+    },
+    "counterfactual_battery": {
+      "true_mechanism_proxy": "OrganicAcidTiter",
+      "valid_mechanism_proxies": [
+        "OrganicAcidTiter"
+      ],
+      "lenient_mechanism_proxies": [
+        "OrganicAcidTiter"
+      ],
+      "confounded_decoys": [
+        "CO2OffgasRate"
+      ],
+      "actuator_sign_predictions": {
+        "FixWildYeastContamination": "+",
+        "MicronutrientSpike": "+",
+        "RefractometerRecal": "0",
+        "set_DissolvedO2Ferm": "0",
+        "set_TankGeometry": "0",
+        "set_ChillRate": "0",
+        "set_GravityInitial": "0"
+      },
+      "targeted_actuator": "MicronutrientSpike",
+      "symptom_trap_actuator": "RefractometerRecal"
+    },
+    "calibration": {
+      "proxy_assay_noise": 10.06,
+      "proxy_corr": 0.508,
+      "decoy_corr": 0.37
+    },
+    "audits": {
+      "decoy": {
+        "passed": true,
+        "decoys": {
+          "CO2OffgasRate": {
+            "obs_corr": 0.37,
+            "clamp_do_effect": 0.0,
+            "ok": true
+          }
+        }
+      },
+      "proxy_signal": {
+        "passed": true,
+        "proxy_outcome_corr": -0.506,
+        "obs_ok": true,
+        "interventional_shift_sd": 2.37,
+        "interv_ok": true,
+        "band": [
+          0.35,
+          0.75
+        ]
+      },
+      "distractor_inertness": {
+        "passed": true,
+        "n_inert_checked": 5,
+        "violations": []
+      },
+      "gold_selfconsistency": {
+        "passed": true,
+        "gold_utility": 30.49,
+        "beating_perturbations": []
+      },
+      "counterintuitiveness": {
+        "passed": true,
+        "baseline_utility": -35.29,
+        "gold_utility": 30.49,
+        "naive_results": [
+          {
+            "naive": {
+              "set_DissolvedO2Ferm": 100
+            },
+            "utility": -35.29,
+            "gain_over_baseline": 0.0,
+            "fraction_of_gold_benefit": 0.0,
+            "helps": false
+          },
+          {
+            "naive": {
+              "set_TankGeometry": 100
+            },
+            "utility": -35.29,
+            "gain_over_baseline": 0.0,
+            "fraction_of_gold_benefit": 0.0,
+            "helps": false
+          }
+        ],
+        "note": "obvious first move must not meaningfully help"
+      }
+    }
+  }
+}

@@ -45,8 +45,14 @@ class RewardConfig:
     w_b: float = 0.5             # weight on part B (understood the mechanism)
     c_invalid: float = 0.25      # penalty per unit fraction of invalid ids in the answer
     strict_part_b: bool = True   # V5: strict proxy credit
+    # FAITHFULNESS (v9): "observation/code alone CANNOT establish causation" (system prompt).
+    # An answer produced with ZERO applied interventions did not do interventional science, so it
+    # cannot have EARNED either the fix (part A) or the mechanism (part B) — it can only have guessed
+    # from priors/labels. Gate ALL positive credit on >=1 applied intervention. This closes the
+    # "answer from priors, no experiment" hack that c_no_evidence=0 left open.
+    require_evidence: bool = True   # zero part_a/part_b if n_interventions == 0
     # optional shaping (off by default; enable via trainer if needed):
-    c_no_evidence: float = 0.0   # penalty if the episode ran 0 interventions (see env)
+    c_no_evidence: float = 0.0   # ADDITIONAL flat penalty if the episode ran 0 interventions
 
 
 def _num(x, default=None):
@@ -154,24 +160,37 @@ def compute_reward(struct: Dict[str, Any], world: Dict[str, Any], cat: Catalog,
     ``reward`` plus its components and the full grade (for logging/debugging)."""
     answer, invalid_frac = _to_canonical_answer(struct, cat)
 
+    def _pa(g):
+        """The recovered-utility scalar compute_reward derives part_a from (kept in sync
+        with the block below), used to pick the better of two gradings."""
+        b = g.get("benefit_recovered")
+        return max(0.0, min(1.0, b)) if b is not None else (1.0 if g.get("part_a_utility_ok") else 0.0)
+
     def _grade_answer(ans):
-        """Grade an answer, but don't let an OPTIONAL, spurious conditional `policy`
-        zero an otherwise-valid answer. The policy field is advertised in the answer
-        schema, so the policy WILL emit one on almost every world (measured: 83/83 at
-        step-0 eval) — including non-subtype worlds where a `policy` object drives a
-        dict-valued dose into the oracle and raises (TypeError: float() ... 'dict').
-        If grading raises AND a policy was included, retry once with the policy stripped
-        (the base intervention + battery still deserve their credit). Only if the
-        policy-free answer ALSO fails do we treat it as ungradeable. This makes part-A
-        for a correct fix robust to the model's near-universal habit of attaching a
-        policy; a LEGITIMATE, well-formed subtype policy still grades on the first try."""
-        try:
-            return grade(world, ans, gold, battery, strict=cfg.strict_part_b)
-        except Exception:
-            if "recommended_policy" in ans:
-                ans_no_pol = {k: v for k, v in ans.items() if k != "recommended_policy"}
-                return grade(world, ans_no_pol, gold, battery, strict=cfg.strict_part_b)
-            raise
+        """Grade an answer, but don't let an OPTIONAL, spurious `recommended_policy` cost an
+        otherwise-valid answer its credit. The policy field is advertised in the schema, so the
+        model emits one on almost every world (measured: 83/83 at step-0) — including non-subtype
+        worlds where it is spurious. A spurious policy hurts in TWO ways:
+          (a) scale/add treatment actuators -> a dict-valued dose raises (TypeError float()... 'dict');
+          (b) `set` treatment actuators -> the policy is EXECUTED (engine.py:344) and
+              `_normalize_policy_answer` OVERRIDES the agent's good scalar dose with the stratified
+              policy, silently DEFLATING part-A (no exception, so an except-only retry never fires).
+        So: whenever a policy is present, grade BOTH the as-given and the policy-stripped answer and
+        credit whichever recovers more utility. This fixes (a) and (b) symmetrically. A LEGITIMATE
+        conditional-subtype policy still wins, because stripping it LOWERS benefit on those worlds.
+        Only if EVERY variant fails to grade do we propagate the exception (-> reward 0, reward_error)."""
+        variants = [ans]
+        if "recommended_policy" in ans:
+            variants.append({k: v for k, v in ans.items() if k != "recommended_policy"})
+        grades, last_err = [], None
+        for v in variants:
+            try:
+                grades.append(grade(world, v, gold, battery, strict=cfg.strict_part_b))
+            except Exception as e:  # noqa: BLE001
+                last_err = e
+        if not grades:
+            raise last_err
+        return max(grades, key=_pa)
 
     try:
         g = _grade_answer(answer)
@@ -190,6 +209,13 @@ def compute_reward(struct: Dict[str, Any], world: Dict[str, Any], cat: Catalog,
             "grade": {"error": f"{type(e).__name__}: {e}"}, "reward_error": True,
         }
 
+    # FAITHFULNESS GATE (v9): no interventional evidence -> no discovery credit. Zero both parts
+    # so an answer read off priors/labels without experimenting cannot score. (n_interventions is
+    # the count of APPLIED interventions, passed by the env; None = caller didn't track -> no gate.)
+    evidence_gated = bool(cfg.require_evidence and n_interventions == 0)
+    if evidence_gated:
+        part_a, part_b = 0.0, 0.0
+
     reward = cfg.w_a * part_a + cfg.w_b * part_b
     reward -= cfg.c_invalid * invalid_frac
     if cfg.c_no_evidence and n_interventions == 0:
@@ -199,6 +225,6 @@ def compute_reward(struct: Dict[str, Any], world: Dict[str, Any], cat: Catalog,
         "reward": float(reward),
         "part_a": part_a, "part_b": part_b,
         "invalid_id_fraction": invalid_frac,
-        "accepted": bool(g["accepted"]),
-        "grade": g, "reward_error": False,
+        "accepted": bool(g["accepted"]) and not evidence_gated,
+        "grade": g, "reward_error": False, "evidence_gated": evidence_gated,
     }

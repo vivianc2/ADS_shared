@@ -1,0 +1,687 @@
+{
+  "schema_version": "rpg_scm_v7",
+  "world_id": "v7_datacenter_reversal_symptom_trap_492011",
+  "domain": "datacenter",
+  "meta": {
+    "seed": 492011,
+    "features": [
+      "symptom_trap"
+    ],
+    "skin": "datacenter",
+    "depth": 3
+  },
+  "scenario": "A production compute cluster's job throughput has dropped about 30% over the past two weeks and has not recovered. The decline followed a data-hall maintenance window in which cooling was serviced and a line card was reseated. A rack inlet-temperature sensor has been reading warmer than its historical band, and the operations team's leading theory is that the room is running hot, so they are considering increasing cooling. Standard host metrics look broadly normal. The cooling plant, power distribution, storage QoS, and environmental controls are all adjustable, and portable environmental equipment is available. You have a limited number of experiments; you may measure quantities and apply available controls, alone or in combination. Determine what is really driving the loss and what to do about it.",
+  "scm": {
+    "variables": {
+      "CoilCondensationSusceptibility": {
+        "aliases": [
+          "susceptibility",
+          "batch susceptibility"
+        ],
+        "kind": "latent",
+        "dist": {
+          "normal": [
+            55,
+            20
+          ]
+        }
+      },
+      "TenantMixShift": {
+        "aliases": [
+          "tenant mix",
+          "workload mix shift"
+        ],
+        "kind": "latent",
+        "dist": {
+          "normal": [
+            50,
+            16
+          ]
+        }
+      },
+      "MaintenanceRecency": {
+        "aliases": [
+          "recent maintenance",
+          "maintenance recency"
+        ],
+        "kind": "latent",
+        "dist": {
+          "normal": [
+            50,
+            16
+          ]
+        }
+      },
+      "CoolingAggressiveness": {
+        "aliases": [
+          "cooling aggressiveness",
+          "how hard cooling runs"
+        ],
+        "kind": "observable",
+        "parents": [
+          "MaintenanceRecency"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "MaintenanceRecency": 1.2
+          },
+          "intercept": 0
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "CoilCondensation": {
+        "aliases": [
+          "coil condensation",
+          "condensation",
+          "moisture on the coil"
+        ],
+        "kind": "latent",
+        "parents": [
+          "CoolingAggressiveness",
+          "CoilCondensationSusceptibility"
+        ],
+        "mech": {
+          "form": "interaction",
+          "a": "CoolingAggressiveness",
+          "b": "CoilCondensationSusceptibility",
+          "gain": 260.0,
+          "scale": 100.0,
+          "intercept": 3.0
+        },
+        "noise": {
+          "normal": [
+            0,
+            1.5
+          ]
+        }
+      },
+      "InterfaceErrorRate": {
+        "aliases": [
+          "interface errors",
+          "link errors",
+          "crc errors"
+        ],
+        "kind": "latent",
+        "parents": [
+          "CoilCondensation"
+        ],
+        "mech": {
+          "form": "hill",
+          "of": "CoilCondensation",
+          "vmax": 70,
+          "k": 35,
+          "n": 2
+        }
+      },
+      "EffectiveBandwidth": {
+        "aliases": [
+          "effective bandwidth",
+          "usable bandwidth"
+        ],
+        "kind": "latent",
+        "parents": [
+          "InterfaceErrorRate"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "InterfaceErrorRate": 0.9
+          },
+          "intercept": 5
+        }
+      },
+      "PacketRetransmit": {
+        "aliases": [
+          "packet retransmits",
+          "retransmission rate"
+        ],
+        "kind": "latent",
+        "parents": [
+          "EffectiveBandwidth"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "EffectiveBandwidth": 0.9
+          },
+          "intercept": 5
+        }
+      },
+      "JobThroughput": {
+        "aliases": [
+          "job throughput",
+          "throughput",
+          "jobs per hour"
+        ],
+        "kind": "outcome",
+        "parents": [
+          "PacketRetransmit",
+          "TenantMixShift",
+          "MaintenanceRecency"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "PacketRetransmit": -0.9,
+            "TenantMixShift": 0.2,
+            "MaintenanceRecency": 0.6
+          },
+          "intercept": 15
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "DewPointMargin": {
+        "aliases": [
+          "dew point margin",
+          "coil moisture",
+          "condensation sensor"
+        ],
+        "kind": "observable",
+        "parents": [
+          "EffectiveBandwidth"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "EffectiveBandwidth": 0.8
+          },
+          "intercept": 5
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            0.5
+          ]
+        }
+      },
+      "RackInletTemp": {
+        "aliases": [
+          "rack inlet temperature",
+          "hot rack sensor",
+          "rack temp"
+        ],
+        "kind": "observable",
+        "parents": [
+          "TenantMixShift"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "TenantMixShift": 0.7
+          },
+          "intercept": 40
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            4
+          ]
+        }
+      },
+      "PduLoad": {
+        "aliases": [
+          "pdu load",
+          "rack power draw"
+        ],
+        "kind": "observable",
+        "parents": [
+          "TenantMixShift"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "TenantMixShift": 0.7
+          },
+          "intercept": 40
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            4
+          ]
+        }
+      },
+      "CpuClock": {
+        "aliases": [
+          "cpu clock",
+          "processor frequency"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "AmbientRoomHumidity": {
+        "aliases": [
+          "room humidity",
+          "ambient humidity"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "DiskIoWait": {
+        "aliases": [
+          "disk io wait",
+          "storage latency"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "JobQueueDepth": {
+        "aliases": [
+          "job queue depth",
+          "scheduler backlog"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "GpuTemp": {
+        "aliases": [
+          "gpu temperature",
+          "accelerator temp"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "CacheHitRate": {
+        "aliases": [
+          "cache hit rate",
+          "cache efficiency"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "ContainerCount": {
+        "aliases": [
+          "container count",
+          "pod count"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "FanSpeed": {
+        "aliases": [
+          "fan speed",
+          "cooling fan rpm"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      }
+    },
+    "actuators": {
+      "CoolingAggressiveness": {
+        "aliases": [
+          "cooling aggressiveness",
+          "how hard cooling runs"
+        ],
+        "target": "CoolingAggressiveness",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 40,
+        "description": "controller for CoolingAggressiveness"
+      },
+      "TelemetrySmoothing": {
+        "aliases": [
+          "telemetry smoothing",
+          "rolling-average reporting"
+        ],
+        "target": "JobThroughput",
+        "op": "mask",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 0,
+        "expr": "transient_boost(d)",
+        "description": "a control that adjusts the JobThroughput readout"
+      },
+      "set_CpuClock": {
+        "aliases": [
+          "set cpu clock",
+          "set processor frequency",
+          "adjust CpuClock"
+        ],
+        "target": "CpuClock",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for CpuClock"
+      },
+      "set_AmbientRoomHumidity": {
+        "aliases": [
+          "set room humidity",
+          "set ambient humidity",
+          "adjust AmbientRoomHumidity"
+        ],
+        "target": "AmbientRoomHumidity",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for AmbientRoomHumidity"
+      },
+      "set_DiskIoWait": {
+        "aliases": [
+          "set disk io wait",
+          "set storage latency",
+          "adjust DiskIoWait"
+        ],
+        "target": "DiskIoWait",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for DiskIoWait"
+      },
+      "set_JobQueueDepth": {
+        "aliases": [
+          "set job queue depth",
+          "set scheduler backlog",
+          "adjust JobQueueDepth"
+        ],
+        "target": "JobQueueDepth",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for JobQueueDepth"
+      },
+      "set_GpuTemp": {
+        "aliases": [
+          "set gpu temperature",
+          "set accelerator temp",
+          "adjust GpuTemp"
+        ],
+        "target": "GpuTemp",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for GpuTemp"
+      }
+    },
+    "outcome": "JobThroughput",
+    "higher_is_better": true
+  },
+  "ground_truth": {
+    "true_root": "CoilCondensation",
+    "true_mechanism_proxy": "DewPointMargin",
+    "confounded_decoys": [
+      "RackInletTemp",
+      "PduLoad"
+    ],
+    "targeted_actuator": "CoolingAggressiveness",
+    "symptom_trap_actuator": "TelemetrySmoothing",
+    "co_actuators": null,
+    "selection_decoy": null,
+    "_selection_nodes": [],
+    "subtype_policy": null,
+    "surrogate_node": null,
+    "latent_plain_name": "a hidden coil condensation that propagates through interface errors, effective bandwidth, packet retransmits to the outcome",
+    "naive_interventions": [
+      {
+        "set_CpuClock": 100
+      },
+      {
+        "set_AmbientRoomHumidity": 100
+      },
+      {
+        "CoolingAggressiveness": 100
+      }
+    ],
+    "_features": [
+      "symptom_trap"
+    ],
+    "_skin": "datacenter",
+    "_depth": 3,
+    "_archetype": "confounded_reversal",
+    "_seed": 492011
+  },
+  "oracle": {
+    "gold": {
+      "intervention": {
+        "CoolingAggressiveness": 0.0
+      },
+      "expected_utility": 46.04113914736616,
+      "baseline_utility": 6.122091741377115,
+      "active_actuators": [
+        "CoolingAggressiveness"
+      ]
+    },
+    "counterfactual_battery": {
+      "true_mechanism_proxy": "DewPointMargin",
+      "valid_mechanism_proxies": [
+        "CoolingAggressiveness",
+        "DewPointMargin"
+      ],
+      "lenient_mechanism_proxies": [
+        "CoolingAggressiveness",
+        "DewPointMargin"
+      ],
+      "confounded_decoys": [
+        "PduLoad",
+        "RackInletTemp"
+      ],
+      "actuator_sign_predictions": {
+        "CoolingAggressiveness": "-",
+        "TelemetrySmoothing": "0",
+        "set_CpuClock": "0",
+        "set_AmbientRoomHumidity": "0",
+        "set_DiskIoWait": "0",
+        "set_JobQueueDepth": "0",
+        "set_GpuTemp": "0"
+      },
+      "targeted_actuator": "CoolingAggressiveness",
+      "symptom_trap_actuator": "TelemetrySmoothing"
+    },
+    "calibration": {
+      "proxy_assay_noise": 0.5,
+      "proxy_corr": 0.416,
+      "decoy_corr": 0.298
+    },
+    "audits": {
+      "decoy": {
+        "passed": true,
+        "decoys": {
+          "RackInletTemp": {
+            "obs_corr": 0.298,
+            "clamp_do_effect": 0.0,
+            "ok": true
+          },
+          "PduLoad": {
+            "obs_corr": 0.301,
+            "clamp_do_effect": 0.0,
+            "ok": true
+          }
+        }
+      },
+      "proxy_signal": {
+        "passed": true,
+        "proxy_outcome_corr": -0.409,
+        "obs_ok": true,
+        "interventional_shift_sd": 0.66,
+        "interv_ok": false,
+        "band": [
+          0.2,
+          0.85
+        ]
+      },
+      "distractor_inertness": {
+        "passed": true,
+        "n_inert_checked": 6,
+        "violations": []
+      },
+      "gold_selfconsistency": {
+        "passed": true,
+        "gold_utility": 46.04,
+        "beating_perturbations": []
+      },
+      "counterintuitiveness": {
+        "passed": true,
+        "baseline_utility": 6.14,
+        "gold_utility": 46.04,
+        "naive_results": [
+          {
+            "naive": {
+              "set_CpuClock": 100
+            },
+            "utility": 6.14,
+            "gain_over_baseline": 0.0,
+            "fraction_of_gold_benefit": 0.0,
+            "helps": false
+          },
+          {
+            "naive": {
+              "set_AmbientRoomHumidity": 100
+            },
+            "utility": 6.14,
+            "gain_over_baseline": 0.0,
+            "fraction_of_gold_benefit": 0.0,
+            "helps": false
+          },
+          {
+            "naive": {
+              "CoolingAggressiveness": 100
+            },
+            "utility": -0.16,
+            "gain_over_baseline": -6.3,
+            "fraction_of_gold_benefit": -0.158,
+            "helps": false
+          }
+        ],
+        "note": "obvious first move must not meaningfully help"
+      }
+    }
+  }
+}

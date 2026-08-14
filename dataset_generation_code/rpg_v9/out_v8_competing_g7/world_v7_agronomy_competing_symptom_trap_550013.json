@@ -1,0 +1,728 @@
+{
+  "schema_version": "rpg_scm_v7",
+  "world_id": "v7_agronomy_competing_symptom_trap_550013",
+  "domain": "agronomy",
+  "meta": {
+    "seed": 550013,
+    "features": [
+      "symptom_trap"
+    ],
+    "skin": "agronomy",
+    "depth": 4
+  },
+  "scenario": "A commercial greenhouse tomato operation growing vine tomatoes has seen marketable yield fall about 30% over two growing cycles, and the shortfall has repeated across successive plantings. The decline set in after a switch to a new irrigation-water source following a well upgrade. The agronomists' leading theories are under-watering or a nitrogen shortfall, so they are considering more water and feed. New leaves have looked paler than usual between the veins. Routine soil and tissue panels read broadly within range. The irrigation, fertigation, and amendment dosing are all adjustable, and dosing and amendment equipment is available. You have a limited number of experiments; you may measure quantities and apply available controls or amendments, alone or in combination. Determine what is really driving the loss and what to do about it.",
+  "scm": {
+    "variables": {
+      "SoilbornePathogenSusceptibility": {
+        "aliases": [
+          "susceptibility",
+          "batch susceptibility"
+        ],
+        "kind": "latent",
+        "dist": {
+          "normal": [
+            55,
+            20
+          ]
+        }
+      },
+      "SeasonalLight": {
+        "aliases": [
+          "seasonal light",
+          "solar radiation",
+          "daylight hours"
+        ],
+        "kind": "latent",
+        "dist": {
+          "normal": [
+            50,
+            16
+          ]
+        }
+      },
+      "FertigationRate": {
+        "aliases": [
+          "fertigation rate",
+          "nutrient feed rate"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            40,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "SoilbornePathogen": {
+        "aliases": [
+          "soilborne pathogen",
+          "root pathogen load",
+          "root rot pressure"
+        ],
+        "kind": "latent",
+        "parents": [
+          "FertigationRate",
+          "SoilbornePathogenSusceptibility"
+        ],
+        "mech": {
+          "form": "interaction",
+          "a": "FertigationRate",
+          "b": "SoilbornePathogenSusceptibility",
+          "gain": 260.0,
+          "scale": 100.0,
+          "intercept": 3.0
+        },
+        "noise": {
+          "normal": [
+            0,
+            1.5
+          ]
+        }
+      },
+      "ChlorophyllSynthesis": {
+        "aliases": [
+          "chlorophyll synthesis",
+          "greening capacity"
+        ],
+        "kind": "latent",
+        "parents": [
+          "SoilbornePathogen"
+        ],
+        "mech": {
+          "form": "hill",
+          "of": "SoilbornePathogen",
+          "vmax": 70,
+          "k": 35,
+          "n": 2
+        }
+      },
+      "PhotosyntheticEfficiency": {
+        "aliases": [
+          "photosynthetic efficiency",
+          "carbon assimilation"
+        ],
+        "kind": "latent",
+        "parents": [
+          "ChlorophyllSynthesis"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "ChlorophyllSynthesis": 0.9
+          },
+          "intercept": 5
+        }
+      },
+      "RootVigor": {
+        "aliases": [
+          "root vigor",
+          "root mass index"
+        ],
+        "kind": "latent",
+        "parents": [
+          "PhotosyntheticEfficiency"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "PhotosyntheticEfficiency": 0.9
+          },
+          "intercept": 5
+        }
+      },
+      "StomatalConductance": {
+        "aliases": [
+          "stomatal conductance",
+          "gas exchange"
+        ],
+        "kind": "latent",
+        "parents": [
+          "RootVigor"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "RootVigor": 0.9
+          },
+          "intercept": 5
+        }
+      },
+      "RootZoneSalinity": {
+        "aliases": [
+          "root-zone salinity",
+          "salt accumulation",
+          "salinity stress"
+        ],
+        "kind": "latent",
+        "dist": {
+          "normal": [
+            55,
+            18
+          ]
+        }
+      },
+      "CropYield": {
+        "aliases": [
+          "crop yield",
+          "marketable yield",
+          "harvest yield",
+          "yield"
+        ],
+        "kind": "outcome",
+        "parents": [
+          "StomatalConductance",
+          "SeasonalLight",
+          "RootZoneSalinity"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "StomatalConductance": -0.9,
+            "SeasonalLight": 0.2,
+            "RootZoneSalinity": -0.4
+          },
+          "intercept": 15
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "LeafGreenness": {
+        "aliases": [
+          "leaf greenness",
+          "spad reading",
+          "chlorophyll index"
+        ],
+        "kind": "observable",
+        "parents": [
+          "PhotosyntheticEfficiency"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "PhotosyntheticEfficiency": 0.8
+          },
+          "intercept": 5
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            9.88
+          ]
+        }
+      },
+      "SoilMoisture": {
+        "aliases": [
+          "soil moisture",
+          "root-zone moisture"
+        ],
+        "kind": "observable",
+        "parents": [
+          "SeasonalLight"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "SeasonalLight": 0.7
+          },
+          "intercept": 40
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            4
+          ]
+        }
+      },
+      "CanopyTemp": {
+        "aliases": [
+          "canopy temperature",
+          "leaf surface temp"
+        ],
+        "kind": "observable",
+        "parents": [
+          "SeasonalLight"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "SeasonalLight": 0.7
+          },
+          "intercept": 40
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            4
+          ]
+        }
+      },
+      "PollinatorActivity": {
+        "aliases": [
+          "pollinator activity",
+          "bee visits"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "SoilOrganicMatter": {
+        "aliases": [
+          "soil organic matter",
+          "humus content"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "SoilPotassium": {
+        "aliases": [
+          "soil potassium",
+          "potash level"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "SoilPhosphorus": {
+        "aliases": [
+          "soil phosphorus",
+          "phosphate level"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "NightTemperature": {
+        "aliases": [
+          "night temperature",
+          "nocturnal temp"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "PruningIntensity": {
+        "aliases": [
+          "pruning intensity",
+          "canopy pruning"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "WindExposure": {
+        "aliases": [
+          "wind exposure",
+          "shelter index"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "SeedTreatment": {
+        "aliases": [
+          "seed treatment",
+          "seed coating"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      }
+    },
+    "actuators": {
+      "FixRootZoneSalinity": {
+        "aliases": [
+          "reduce root-zone salinity",
+          "dosing for root-zone salinity"
+        ],
+        "target": "RootZoneSalinity",
+        "op": "scale",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 0,
+        "expr": "1-sat(d;k=0.66)",
+        "description": "dosing to reduce RootZoneSalinity"
+      },
+      "SoilAcidifier": {
+        "aliases": [
+          "soil acidifier",
+          "ph correction",
+          "elemental sulfur"
+        ],
+        "target": "SoilbornePathogen",
+        "op": "scale",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 0,
+        "expr": "1-sat(d;k=0.66)",
+        "description": "dosing to reduce SoilbornePathogen"
+      },
+      "FoliarGreeningSpray": {
+        "aliases": [
+          "foliar greening spray",
+          "cosmetic greening agent"
+        ],
+        "target": "CropYield",
+        "op": "mask",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 0,
+        "expr": "transient_boost(d)",
+        "description": "a control that adjusts the CropYield readout"
+      },
+      "set_PollinatorActivity": {
+        "aliases": [
+          "set pollinator activity",
+          "set bee visits",
+          "adjust PollinatorActivity"
+        ],
+        "target": "PollinatorActivity",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for PollinatorActivity"
+      },
+      "set_SoilOrganicMatter": {
+        "aliases": [
+          "set soil organic matter",
+          "set humus content",
+          "adjust SoilOrganicMatter"
+        ],
+        "target": "SoilOrganicMatter",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for SoilOrganicMatter"
+      },
+      "set_SoilPotassium": {
+        "aliases": [
+          "set soil potassium",
+          "set potash level",
+          "adjust SoilPotassium"
+        ],
+        "target": "SoilPotassium",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for SoilPotassium"
+      },
+      "set_SoilPhosphorus": {
+        "aliases": [
+          "set soil phosphorus",
+          "set phosphate level",
+          "adjust SoilPhosphorus"
+        ],
+        "target": "SoilPhosphorus",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for SoilPhosphorus"
+      },
+      "set_NightTemperature": {
+        "aliases": [
+          "set night temperature",
+          "set nocturnal temp",
+          "adjust NightTemperature"
+        ],
+        "target": "NightTemperature",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for NightTemperature"
+      },
+      "set_PruningIntensity": {
+        "aliases": [
+          "set pruning intensity",
+          "set canopy pruning",
+          "adjust PruningIntensity"
+        ],
+        "target": "PruningIntensity",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for PruningIntensity"
+      }
+    },
+    "outcome": "CropYield",
+    "higher_is_better": true
+  },
+  "ground_truth": {
+    "true_root": "SoilbornePathogen",
+    "true_mechanism_proxy": "LeafGreenness",
+    "confounded_decoys": [
+      "SoilMoisture",
+      "CanopyTemp"
+    ],
+    "targeted_actuator": "SoilAcidifier",
+    "symptom_trap_actuator": "FoliarGreeningSpray",
+    "co_actuators": [
+      "SoilAcidifier",
+      "FixRootZoneSalinity"
+    ],
+    "selection_decoy": null,
+    "_selection_nodes": [],
+    "subtype_policy": null,
+    "surrogate_node": null,
+    "latent_plain_name": "a hidden soilborne pathogen that propagates through chlorophyll synthesis, photosynthetic efficiency, root vigor, stomatal conductance to the outcome",
+    "naive_interventions": [
+      {
+        "set_PollinatorActivity": 100
+      },
+      {
+        "set_SoilOrganicMatter": 100
+      }
+    ],
+    "_features": [
+      "symptom_trap"
+    ],
+    "_skin": "agronomy",
+    "_depth": 4,
+    "_archetype": "competing_causes",
+    "_seed": 550013
+  },
+  "oracle": {
+    "gold": {
+      "intervention": {
+        "FixRootZoneSalinity": 100.0,
+        "SoilAcidifier": 100.0
+      },
+      "expected_utility": 12.800444262135386,
+      "baseline_utility": -40.23252735357462,
+      "active_actuators": [
+        "FixRootZoneSalinity",
+        "SoilAcidifier"
+      ]
+    },
+    "counterfactual_battery": {
+      "true_mechanism_proxy": "LeafGreenness",
+      "valid_mechanism_proxies": [
+        "LeafGreenness"
+      ],
+      "lenient_mechanism_proxies": [
+        "LeafGreenness"
+      ],
+      "confounded_decoys": [
+        "CanopyTemp",
+        "SoilMoisture"
+      ],
+      "actuator_sign_predictions": {
+        "FixRootZoneSalinity": "+",
+        "SoilAcidifier": "+",
+        "FoliarGreeningSpray": "0",
+        "set_PollinatorActivity": "0",
+        "set_SoilOrganicMatter": "0",
+        "set_SoilPotassium": "0",
+        "set_SoilPhosphorus": "0",
+        "set_NightTemperature": "0",
+        "set_PruningIntensity": "0"
+      },
+      "targeted_actuator": "SoilAcidifier",
+      "symptom_trap_actuator": "FoliarGreeningSpray"
+    },
+    "calibration": {
+      "proxy_assay_noise": 9.88,
+      "proxy_corr": 0.536,
+      "decoy_corr": 0.239
+    },
+    "audits": {
+      "decoy": {
+        "passed": true,
+        "decoys": {
+          "SoilMoisture": {
+            "obs_corr": 0.239,
+            "clamp_do_effect": 0.0,
+            "ok": true
+          },
+          "CanopyTemp": {
+            "obs_corr": 0.245,
+            "clamp_do_effect": 0.0,
+            "ok": true
+          }
+        }
+      },
+      "proxy_signal": {
+        "passed": true,
+        "proxy_outcome_corr": -0.534,
+        "obs_ok": true,
+        "interventional_shift_sd": 2.39,
+        "interv_ok": true,
+        "band": [
+          0.35,
+          0.75
+        ]
+      },
+      "distractor_inertness": {
+        "passed": true,
+        "n_inert_checked": 7,
+        "violations": []
+      },
+      "gold_selfconsistency": {
+        "passed": true,
+        "gold_utility": 12.8,
+        "beating_perturbations": []
+      },
+      "counterintuitiveness": {
+        "passed": true,
+        "baseline_utility": -40.2,
+        "gold_utility": 12.8,
+        "naive_results": [
+          {
+            "naive": {
+              "set_PollinatorActivity": 100
+            },
+            "utility": -40.2,
+            "gain_over_baseline": 0.0,
+            "fraction_of_gold_benefit": 0.0,
+            "helps": false
+          },
+          {
+            "naive": {
+              "set_SoilOrganicMatter": 100
+            },
+            "utility": -40.2,
+            "gain_over_baseline": 0.0,
+            "fraction_of_gold_benefit": 0.0,
+            "helps": false
+          }
+        ],
+        "note": "obvious first move must not meaningfully help"
+      }
+    }
+  }
+}
