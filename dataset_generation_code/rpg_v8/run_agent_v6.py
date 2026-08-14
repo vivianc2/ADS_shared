@@ -301,9 +301,22 @@ def build_resolver_llm(agent_backend, agent_llm, no_resolver_llm):
     if os.environ.get("AWS_BEARER_TOKEN_BEDROCK"):
         try:
             from bedrock_llm import BedrockLLM
-            return BedrockLLM(model_id="us.anthropic.claude-opus-4-8", max_new_tokens=200)
-        except Exception:
-            pass
+            resolver = BedrockLLM(model_id="us.anthropic.claude-opus-4-8", max_new_tokens=200)
+            logger.info("Resolver LLM = Bedrock Opus 4.8 (fixed strong resolver).")
+            return resolver
+        except Exception as e:
+            # LOUD: we WANTED a fixed strong resolver but couldn't load it (e.g. boto3
+            # missing in this env). Degrading to the agent's own model as resolver
+            # measurably deflates scores (thinking models make poor JSON resolvers) and
+            # must never happen unnoticed. Fix the env (install boto3) rather than accept this.
+            logger.error("!!! RESOLVER LLM (Bedrock Opus) FAILED TO LOAD: %s: %s. "
+                         "FALLING BACK TO THE AGENT'S OWN MODEL AS RESOLVER — resolution "
+                         "quality WILL degrade and Part-A scores will be deflated. "
+                         "Install boto3 / fix Bedrock creds to restore the intended resolver.",
+                         type(e).__name__, e)
+    else:
+        logger.warning("AWS_BEARER_TOKEN_BEDROCK not set — using the agent's own model as "
+                       "resolver (not the fixed strong resolver); resolution quality may degrade.")
     # fallback: reuse the agent's own LLM as the resolver
     return agent_llm
 

@@ -25,11 +25,14 @@ request it says so, rather than guessing.
 from __future__ import annotations
 
 import json
+import logging
 import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
 from engine import WorldSCM
+
+logger = logging.getLogger("resolver")
 
 
 def _norm(s: str) -> str:
@@ -484,9 +487,21 @@ class Resolver:
                 prompt, max_new_tokens=120)
             m = re.search(r"\{.*\}", raw, re.DOTALL)
             obj = json.loads(m.group(0)) if m else {}
-        except Exception:
+        except Exception as e:
+            # LOUD: the LLM resolver call errored — we are about to fall back to
+            # brittle lexical handling, which we never want to happen silently.
+            logger.error("RESOLVER LLM CALL FAILED for %r (%s: %s) -> LEXICAL FALLBACK. "
+                         "Scores will be deflated by unresolved actions.",
+                         request, type(e).__name__, e)
             return None
-        tid, outcome = obj.get("target", ""), obj.get("outcome", "")
+        tid, outcome = str(obj.get("target", "")).strip(), obj.get("outcome", "")
+        # The catalog is presented to the LLM with A:/M:/H: id prefixes, so the model
+        # returns e.g. "A:FixMicronutrientLockout". Strip the prefix before the
+        # membership check — otherwise a CORRECT llm resolution is silently dropped.
+        for pfx in ("A:", "M:", "H:", "a:", "m:", "h:"):
+            if tid.startswith(pfx):
+                tid = tid[len(pfx):].strip()
+                break
         if outcome == "measure" and tid in self.var_aliases:
             return Resolution("measure", True, f"measure '{tid}' (llm)", target_id=tid, method="llm")
         if outcome == "intervene" and tid in self.scm.actuators:
@@ -500,4 +515,8 @@ class Resolver:
         if outcome == "not_in_world":
             return Resolution("reject", False, "not present (llm)",
                               reason="That is not part of this system.", method="llm")
+        # LOUD: the LLM answered but we couldn't use it (empty/unparseable/target not
+        # in catalog). Caller reverts to lexical — warn so this never passes unnoticed.
+        logger.warning("RESOLVER LLM returned unusable output for %r (target=%r outcome=%r raw=%r) "
+                       "-> LEXICAL FALLBACK.", request, tid, outcome, (raw or "")[:200])
         return None  # unparseable -> caller keeps its lexical decision
