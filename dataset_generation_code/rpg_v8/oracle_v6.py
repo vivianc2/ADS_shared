@@ -608,7 +608,17 @@ def calibrate(world, *, n=20000, seed=333, proxy_band=(0.35, 0.75), decoy_min_co
     scm.variables[proxy]["assay_noise"] = {"normal": [0, pnoise]}
 
     conf = scm.variables[decoy]["parents"][0]
-    ow = scm.variables[scm.outcome]["mech"]["weights"]
+    # The confounder loads the LATENT GOAL, not the observed surrogate. Post-redesign the
+    # causal chain terminates in `goal` and the surrogate `outcome` is only a readout
+    # (mech.weights == {goal: 1.0}), so the confounder is NEVER a key in the surrogate's
+    # weights. Boosting it must target the goal's linear mech (confounders are always
+    # direct weighted parents of the goal, sampler.py), which raises corr(decoy, surrogate)
+    # through conf -> goal -> surrogate. Before this fix `ow` pointed at the surrogate and
+    # the `if conf in ow` guard was always False, so the decoy-loading boost silently
+    # no-op'd and worlds whose base confounder weight fell below the band failed decoy_audit
+    # en masse. Falls back to `outcome` for legacy un-split worlds (goal is None).
+    loading_node = scm.goal or scm.outcome
+    ow = scm.variables[loading_node]["mech"]["weights"]
     # competing_causes dilutes the confounder's outcome share, so allow a stronger
     # confounder loading to still land the decoy correlation in (the relaxed) band.
     # Safe for the benefit structure: the confounder is exogenous (no do-effect) and

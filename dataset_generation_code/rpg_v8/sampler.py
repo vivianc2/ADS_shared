@@ -205,12 +205,10 @@ def sample_world(seed: int, skin: Optional[str] = None,
         _col = _take(rng, S["inert_var_pool"], 1, used)
         if _sd and _col:
             sel_decoy, col_node = _sd[0], _col[0]
-    # surrogate_trap no longer builds a SEPARATE controllable metric. Post-split the
+    # NB: surrogate_trap no longer builds a SEPARATE controllable metric. Post-split the
     # PRIMARY observed metric (`outcome`) is itself a surrogate readout of the latent goal,
     # and the universal symptom trap moves it with a real edge -> that IS the
     # surrogate-endpoint challenge. Merging avoids a world with two surrogates.
-    surr_node = None
-    surr_actuator = None
     # reserve the reversal confounder up-front (confounded_reversal archetype)
     rev_conf = None
     if arche == "confounded_reversal":
@@ -620,8 +618,6 @@ def sample_world(seed: int, skin: Optional[str] = None,
     # (added above) carry the counterintuitiveness check.
 
     all_decoys = [d["name"] for d in decoys]
-    if surr_node is not None:
-        all_decoys.append(surr_node["name"])   # surrogate is a confounded decoy w/ a handle
     selection_nodes = []
     if sel_decoy is not None:
         # the selection decoy is causally inert on the outcome -> it is a decoy the
@@ -650,7 +646,6 @@ def sample_world(seed: int, skin: Optional[str] = None,
         "selection_decoy": sel_decoy["name"] if sel_decoy is not None else None,
         "_selection_nodes": selection_nodes,   # selection apparatus: excluded from proxy scan
         "subtype_policy": sub_info,   # None unless hidden_subtype archetype
-        "surrogate_node": surr_node["name"] if surr_node is not None else None,
         "latent_plain_name": f"a hidden {root['aliases'][0]} that propagates through "
                              f"{', '.join(m['aliases'][0] for m in mediators)} to the outcome",
         "naive_interventions": naive or [{f"set_{inert_vars[0]['name']}": 100}],

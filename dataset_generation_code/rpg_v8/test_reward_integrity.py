@@ -163,6 +163,33 @@ def run():
                   f"[{tag}] single knob on a two_cause world fails part A "
                   f"(benefit={g.get('benefit_recovered')})")
 
+        # ---- SURROGATE-ENDPOINT TRAP: the headline invariant of the redesign ----
+        # In a surrogate_trap world the trap actuator adds a REAL structural edge to the
+        # OBSERVED surrogate S (= scm.outcome) but has ZERO path to the LATENT goal G
+        # (scm.goal, what utility() scores). So dosing the trap must: (1) move S, (2) leave
+        # utility(G) unchanged, (3) leave the mechanism proxy P flat, and therefore (4) earn
+        # ~0 reward. This is the entire point of the surrogate-endpoint redesign (it replaces
+        # the old op="mask" reading-bias model); assert it hard so no future edit silently
+        # reconnects the trap to the goal and reopens the Goodhart shortcut.
+        if "symptom_trap" in world["ground_truth"].get("_features", []):
+            trap_id = world["ground_truth"]["symptom_trap_actuator"]
+            proxy_name = battery["true_mechanism_proxy"]
+            N = 6000
+            base = scm.sample(N, seed=seed + 4242)
+            dosed = scm.sample(N, intervention={trap_id: 100}, seed=seed + 4242)
+            dS = float(np.mean(dosed[scm.outcome])) - float(np.mean(base[scm.outcome]))
+            dU = float(np.mean(scm.utility(dosed))) - float(np.mean(scm.utility(base)))
+            dP = float(np.mean(dosed[proxy_name])) - float(np.mean(base[proxy_name]))
+            check(abs(dS) > 1.0, f"[{tag}] trap moves the observed surrogate S (dS={dS:+.2f})")
+            check(abs(dU) < 0.05, f"[{tag}] trap leaves utility(latent goal G) unchanged (dU={dU:+.3f})")
+            check(abs(dP) < 0.05, f"[{tag}] trap leaves mechanism proxy P flat (dP={dP:+.3f})")
+            trap_answer = {"recommended_intervention_text": [{"request": _alias(scm, trap_id), "value": 100}],
+                           "structured": {}}
+            g = _grade(sim, trap_answer)
+            check(not g["part_a_utility_ok"] and (g.get("benefit_recovered") or 0) < 0.1,
+                  f"[{tag}] dosing the trap earns ~0 reward "
+                  f"(part_a={g['part_a_utility_ok']}, benefit={g.get('benefit_recovered')})")
+
         # ---- ARTICULATE-CORRECT: a verbose but correct answer must score high ----
         # Gold answer phrased the way a strong model writes: verbose proxy (acronym +
         # gloss), actions + signs by alias. Goes through the real translate->grade path.
