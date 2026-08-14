@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
@@ -53,11 +54,20 @@ class OpenAILLM:
     capture_reasoning: bool = True
 
     client: Any = field(default=None, init=False, repr=False)
-    last_reasoning: Optional[str] = field(default=None, init=False, repr=False)
-    # finish_reason of the most recent completion ("stop" = clean; "length" = the
-    # output cap truncated the turn). Surfaced so callers can enforce the "no
-    # truncation" rule — a thinking turn cut at "length" produces no valid action.
-    last_finish_reason: Optional[str] = field(default=None, init=False, repr=False)
+    # Per-call state (reasoning + finish_reason) is stored THREAD-LOCALLY: one OpenAILLM object
+    # is shared across run_batch worker threads (and reused as the resolver), so a plain attribute
+    # would be clobbered by a concurrent call between generate() and the caller's read, mis-attributing
+    # finish_reason to the wrong turn. threading.local keeps each worker's last-call state private.
+    _tls: Any = field(default_factory=threading.local, init=False, repr=False)
+
+    @property
+    def last_reasoning(self) -> Optional[str]:
+        return getattr(self._tls, "reasoning", None)
+
+    @property
+    def last_finish_reason(self) -> Optional[str]:
+        # "stop" = clean; "length" = the output cap truncated the turn (enforce the no-truncation rule).
+        return getattr(self._tls, "finish_reason", None)
 
     def __post_init__(self):
         from openai import OpenAI
@@ -100,11 +110,11 @@ class OpenAILLM:
         if self.extra_body:
             kwargs["extra_body"] = self.extra_body
         response = self.client.chat.completions.create(**kwargs)
-        self.last_finish_reason = response.choices[0].finish_reason
+        self._tls.finish_reason = response.choices[0].finish_reason
         msg = response.choices[0].message
         reasoning = getattr(msg, "reasoning_content", None)
         if self.capture_reasoning:
-            self.last_reasoning = reasoning
+            self._tls.reasoning = reasoning
         content = msg.content or ""
         if not content.strip() and reasoning:
             logger.warning("empty content, using reasoning_content (%d chars)", len(reasoning))

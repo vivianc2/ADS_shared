@@ -486,10 +486,15 @@ class Resolver:
             '"measure|intervene|no_assay|no_actuator|not_in_world"}'
         )
         try:
+            # 120 tokens is enough for the tiny JSON reply from a NON-thinking resolver (e.g. Opus),
+            # but a THINKING resolver spends its budget on reasoning first and returns EMPTY at 120
+            # (finish_reason=length) -> _llm_pick yields nothing -> silent lexical fallback on EVERY
+            # request. Give generous headroom so a thinking resolver can still emit the JSON. The
+            # loud-warning-on-unusable-output below still flags any residual truncation.
             raw = self.llm.generate(
                 "You map a scientist's free-text request to a fixed catalog of a "
                 "hidden world. Be precise; never invent equipment. JSON only.",
-                prompt, max_new_tokens=120)
+                prompt, max_new_tokens=2048)
             m = re.search(r"\{.*\}", raw, re.DOTALL)
             obj = json.loads(m.group(0)) if m else {}
         except Exception as e:

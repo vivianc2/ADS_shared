@@ -228,6 +228,27 @@ def run():
         check((g.get("benefit_recovered") or 0) >= 0.85,
               f"[{tag}] gold-equivalent answer recovers benefit (got {g.get('benefit_recovered')})")
 
+        # ---- ANTI-PADDING (v9): sign-battery must NOT be inflatable by inert-"0" padding ----
+        # Regression guard for the Part-B hole where the sign denominator was agent-controllable:
+        # predicting "0" for every inert distractor while STAYING SILENT on the real active levers
+        # used to score high. v9 scores ALL active levers, so omitting them is wrong. Build the
+        # padded answer (correct proxy+decoys, inert-0 padding, NO active-lever signs) and assert it
+        # scores STRICTLY LESS on the battery than the full-sign articulate answer. Only meaningful
+        # when the world actually has active levers whose signs the padded answer omits.
+        if signs:
+            inert_signs = {_alias(scm, aid): "0"
+                           for aid, s in battery["actuator_sign_predictions"].items() if s == "0"}
+            padded = {"recommended_intervention_text": rec_text,
+                      "structured": {"true_mechanism_proxy": verbose_proxy,
+                                     "confounded_decoys": decoy_aliases,
+                                     "actuator_sign_predictions": inert_signs}}
+            if "recommended_policy_text" in articulate:
+                padded["recommended_policy_text"] = articulate["recommended_policy_text"]
+            gp = _grade(sim, padded)
+            check(gp["battery_fraction"] < g["battery_fraction"] - 1e-9,
+                  f"[{tag}] inert-0 padding while OMITTING active-lever signs must score LOWER than a "
+                  f"full-sign answer (padded B={gp['battery_fraction']} vs full B={g['battery_fraction']})")
+
         # ---- V3: reward has within-group VARIANCE on a realistic quality spread ----
         # GRPO needs the group's rewards to differ, else advantage=0 -> no gradient.
         # Build 8 escalating-quality answers and confirm reward std > 0. (A SATURATED

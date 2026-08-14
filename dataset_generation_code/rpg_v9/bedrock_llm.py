@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
@@ -46,6 +47,14 @@ class BedrockLLM:
     top_p: float = 0.9
 
     client: Any = field(default=None, init=False, repr=False)
+    # Thread-local finish_reason so truncation is visible (and not raced under concurrency /
+    # when this object is shared as the resolver). Normalized to the OpenAI vocabulary:
+    # "length" when Bedrock's Converse stopReason == "max_tokens", else "stop".
+    _tls: Any = field(default_factory=threading.local, init=False, repr=False)
+
+    @property
+    def last_finish_reason(self) -> Optional[str]:
+        return getattr(self._tls, "finish_reason", None)
 
     def __post_init__(self):
         region = self.region_name or os.environ.get("AWS_DEFAULT_REGION", "us-west-2")
@@ -137,6 +146,7 @@ class BedrockLLM:
             kwargs["system"] = system_blocks
 
         response = self.client.converse(**kwargs)
+        self._tls.finish_reason = "length" if response.get("stopReason") == "max_tokens" else "stop"
         return response["output"]["message"]["content"][0]["text"].strip()
 
     def _supports_temperature(self) -> bool:

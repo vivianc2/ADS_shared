@@ -390,12 +390,18 @@ def grade(world: Dict[str, Any], answer: Dict[str, Any], gold: Dict[str, Any],
     valid = _normalize_policy_answer(scm, answer, valid)
     u = expected_utility(scm, valid, n=n, seed=seed)
     gold_u = gold["expected_utility"]
-    # judge part A by fraction of achievable benefit recovered (consistent bar
-    # across topologies whatever the utility scale), with a small absolute floor.
+    # judge part A by FRACTION of achievable benefit recovered (a consistent 90% bar across
+    # topologies whatever the utility scale). NOTE: the old code also passed on an ABSOLUTE
+    # `u >= gold_u - tolerance` (tolerance=2.0) floor, which silently softened the bar on
+    # low-achievable-benefit worlds (benefit<20, ~15% of worlds): e.g. at achievable benefit 5,
+    # the 2.0 floor accepted only 60% recovery. That inflated `accepted`/`partA%`. The fraction
+    # already IS the scale-invariant bar, so we drop the absolute escape (a truly-gold answer
+    # recovers ~1.0; MC noise at n=30000 cannot drag it below 0.90). The absolute tolerance is
+    # kept ONLY for the degenerate case where achievable benefit is ~0 (no fraction to take).
     base_u = gold.get("baseline_utility")
     if base_u is not None and (gold_u - base_u) > 1e-6:
         benefit = (u - base_u) / (gold_u - base_u)
-        part_a = bool(benefit >= 0.90 or u >= gold_u - tolerance)
+        part_a = bool(benefit >= 0.90)
     else:
         benefit = None
         part_a = bool(u >= gold_u - tolerance)
@@ -643,7 +649,12 @@ def calibrate(world, *, n=20000, seed=333, proxy_band=(0.35, 0.75), decoy_min_co
 
 def audit_world(world) -> Dict[str, Any]:
     calib = calibrate(world)
-    gold = optimal_intervention(world["scm"])
+    # Use the POLICY-AWARE gold (optimal_gold), not the scalar-only optimal_intervention:
+    # for hidden_subtype the gold is a conditional policy that single doses cannot express, so
+    # optimal_intervention understates it by ~20+ utility units and sets a too-easy bar in this
+    # re-verification path. (The production generator generate_v7.audit already uses optimal_gold,
+    # so shipped records are correct — this only aligns verify_worlds/audit_world with it.)
+    gold = optimal_gold(world)
     battery = counterfactual_battery(world)
     return {
         "calibration": calib,

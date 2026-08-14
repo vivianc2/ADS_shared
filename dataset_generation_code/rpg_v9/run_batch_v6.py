@@ -39,6 +39,9 @@ def summarize_result(res: Dict[str, Any], world: Dict[str, Any]) -> Dict[str, An
     for t in res.get("turns", []):
         if t.get("artifact_check"):
             art = t["artifact_check"]
+    # truncation surfacing: count turns whose generation hit the output cap. Any >0 means the
+    # max-length rule was violated for this world and its result should be treated with suspicion.
+    n_length = sum(1 for t in res.get("turns", []) if t.get("finish_reason") == "length")
     return {
         "world_id": world["world_id"], "template": world.get("domain"),
         "archetype": (world.get("ground_truth") or {}).get("_archetype"),
@@ -49,6 +52,7 @@ def summarize_result(res: Dict[str, Any], world: Dict[str, Any]) -> Dict[str, An
         "interventions": res.get("interventions_run"),
         "queries": res.get("queries_used"),
         "hit_cap": bool(res.get("hit_turn_cap")),
+        "n_length_truncated_turns": n_length,
         "artifact_suspect": bool(art.get("suspect")),
         "artifact_reasons": art.get("reasons", []),
         "wall_s": res.get("wall_seconds"),
