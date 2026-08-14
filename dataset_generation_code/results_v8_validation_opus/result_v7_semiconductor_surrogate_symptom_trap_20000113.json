@@ -1,0 +1,874 @@
+{
+  "world_id": "v7_semiconductor_surrogate_symptom_trap_20000113",
+  "domain": "semiconductor",
+  "queries_used": 8,
+  "interventions_run": 4,
+  "answered": true,
+  "hit_turn_cap": false,
+  "grade": {
+    "accepted": false,
+    "part_a_utility_ok": true,
+    "part_b_battery_ok": false,
+    "recommended_intervention": {
+      "FilterUpgrade": 75.0
+    },
+    "recommended_utility": 30.514,
+    "gold_intervention": {
+      "FilterUpgrade": 100.0
+    },
+    "gold_utility": 30.491,
+    "baseline_utility": -7.821,
+    "benefit_recovered": 1.001,
+    "is_conditional_policy": false,
+    "utility_gap": -0.023,
+    "battery_fraction": 0.6,
+    "battery_items": [
+      [
+        "true_mechanism_proxy",
+        false
+      ],
+      [
+        "confounded_decoys",
+        false
+      ],
+      [
+        "sign:adjust bake temperature",
+        true
+      ],
+      [
+        "sign:FilterUpgrade",
+        true
+      ],
+      [
+        "sign:set_ChamberFlowUniformity",
+        true
+      ]
+    ]
+  },
+  "gold": {
+    "intervention": {
+      "FilterUpgrade": 100.0
+    },
+    "expected_utility": 30.49
+  },
+  "turns": [
+    {
+      "turn": 0,
+      "latency_s": 6.77,
+      "reasoning": "Let me start by gathering baseline data. The report mentions defects on a mid-line layer, PM window on etch/deposition tools, and suspicion of setpoint drift. But PM windows often disturb filtration/clean systems (particles, contamination). Let me measure key candidate signals: wafer yield, defect counts, and possible contamination sources like particle counts and filtration integrity.",
+      "memory": "Hypotheses:\n- Setpoint drift (etch pressure/dep temp) \u2014 engineers' theory\n- Contamination/particles from PM disturbing filtration or clean\nRuled out:\nConfirmed:\nNext: baseline measure of yield, defects, particles, pressure, temp, clean",
+      "raw": "<reasoning>Let me start by gathering baseline data. The report mentions defects on a mid-line layer, PM window on etch/deposition tools, and suspicion of setpoint drift. But PM windows often disturb filtration/clean systems (particles, contamination). Let me measure key candidate signals: wafer yield, defect counts, and possible contamination sources like particle counts and filtration integrity.</reasoning>\n<action type=\"measure\">{\"requests\":[\"wafer yield\",\"inline defect count on mid-line layer\",\"particle count in process fluids\",\"etch chamber pressure\",\"deposition temperature\",\"clean bath contamination level\"]}</action>\n<memory>\nHypotheses:\n- Setpoint drift (etch pressure/dep temp) \u2014 engineers' theory\n- Contamination/particles from PM disturbing filtration or clean\nRuled out:\nConfirmed:\nNext: baseline measure of yield, defects, particles, pressure, temp, clean\n</memory>",
+      "action_type": "measure",
+      "result": {
+        "mode": "measure",
+        "experiment_id": 1,
+        "n_units": 400,
+        "resolutions": [
+          {
+            "request": "wafer yield",
+            "kind": "measure",
+            "ok": true,
+            "interpretation": "measure 'WaferYield'",
+            "target_id": "WaferYield",
+            "value": null,
+            "reason": "",
+            "candidates": [],
+            "method": "alias"
+          },
+          {
+            "request": "inline defect count on mid-line layer",
+            "kind": "reject",
+            "ok": false,
+            "interpretation": "no assay (llm)",
+            "target_id": null,
+            "value": null,
+            "reason": "That quantity is not directly measurable on this rig.",
+            "candidates": [],
+            "method": "llm"
+          },
+          {
+            "request": "particle count in process fluids",
+            "kind": "reject",
+            "ok": false,
+            "interpretation": "no assay (llm)",
+            "target_id": null,
+            "value": null,
+            "reason": "That quantity is not directly measurable on this rig.",
+            "candidates": [],
+            "method": "llm"
+          },
+          {
+            "request": "etch chamber pressure",
+            "kind": "measure",
+            "ok": true,
+            "interpretation": "measure 'ChamberPressure'",
+            "target_id": "ChamberPressure",
+            "value": null,
+            "reason": "",
+            "candidates": [],
+            "method": "alias"
+          },
+          {
+            "request": "deposition temperature",
+            "kind": "measure",
+            "ok": true,
+            "interpretation": "measure 'BakeTemperature'",
+            "target_id": "BakeTemperature",
+            "value": null,
+            "reason": "",
+            "candidates": [],
+            "method": "alias"
+          },
+          {
+            "request": "clean bath contamination level",
+            "kind": "reject",
+            "ok": false,
+            "interpretation": "no assay (llm)",
+            "target_id": null,
+            "value": null,
+            "reason": "That quantity is not directly measurable on this rig.",
+            "candidates": [],
+            "method": "llm"
+          }
+        ],
+        "readings": {
+          "WaferYield": {
+            "mean": -8.816,
+            "sd": 12.43,
+            "se": 0.621
+          },
+          "ChamberPressure": {
+            "mean": 74.177,
+            "sd": 12.238,
+            "se": 0.612
+          },
+          "BakeTemperature": {
+            "mean": 50.74,
+            "sd": 12.24,
+            "se": 0.612
+          },
+          "_correlations": {
+            "WaferYield~ChamberPressure": 0.471,
+            "WaferYield~BakeTemperature": -0.027,
+            "ChamberPressure~BakeTemperature": 0.058
+          }
+        },
+        "raw_csv": "results_v8_validation_opus/v7_semiconductor_surrogate_symptom_trap_20000113_data/experiment_1.csv"
+      }
+    },
+    {
+      "turn": 1,
+      "latency_s": 6.29,
+      "reasoning": "Baseline shows ChamberPressure correlates with yield (r=0.47), BakeTemperature does not (r=-0.03). But correlation isn't cause. The PM window touched etch/deposition; filtration/clean also adjustable. Defect count and particle count aren't measurable. Let me first probe what other signals exist \u2014 filtration-related measurements. Let me measure things related to filtration and clean modules, and check for a contamination proxy that IS available.",
+      "memory": "Hypotheses:\n- Setpoint drift (etch pressure/dep temp)\n- Contamination/particles from PM disturbing filtration/clean\nRuled out:\nConfirmed:\n- ChamberPressure~Yield corr=0.47; BakeTemp~Yield ~0 (baseline)\nNext: find available filtration/clean signals; then intervene on pressure vs filtration to test causation",
+      "raw": "<reasoning>Baseline shows ChamberPressure correlates with yield (r=0.47), BakeTemperature does not (r=-0.03). But correlation isn't cause. The PM window touched etch/deposition; filtration/clean also adjustable. Defect count and particle count aren't measurable. Let me first probe what other signals exist \u2014 filtration-related measurements. Let me measure things related to filtration and clean modules, and check for a contamination proxy that IS available.</reasoning>\n<action type=\"measure\">{\"requests\":[\"filter differential pressure\",\"coolant flow rate\",\"clean module flow\",\"filtration efficiency\",\"water resistivity\",\"dissolved metals\"]}</action>\n<memory>\nHypotheses:\n- Setpoint drift (etch pressure/dep temp)\n- Contamination/particles from PM disturbing filtration/clean\nRuled out:\nConfirmed:\n- ChamberPressure~Yield corr=0.47; BakeTemp~Yield ~0 (baseline)\nNext: find available filtration/clean signals; then intervene on pressure vs filtration to test causation\n</memory>",
+      "action_type": "measure",
+      "result": {
+        "mode": "measure",
+        "experiment_id": 2,
+        "n_units": 400,
+        "resolutions": [
+          {
+            "request": "filter differential pressure",
+            "kind": "reject",
+            "ok": false,
+            "interpretation": "not present (llm)",
+            "target_id": null,
+            "value": null,
+            "reason": "That is not part of this system.",
+            "candidates": [],
+            "method": "llm"
+          },
+          {
+            "request": "coolant flow rate",
+            "kind": "reject",
+            "ok": false,
+            "interpretation": "not present (llm)",
+            "target_id": null,
+            "value": null,
+            "reason": "That is not part of this system.",
+            "candidates": [],
+            "method": "llm"
+          },
+          {
+            "request": "clean module flow",
+            "kind": "reject",
+            "ok": false,
+            "interpretation": "unrecognized measurement",
+            "target_id": null,
+            "value": null,
+            "reason": "No instrument on this system measures that; it is not part of the available signals.",
+            "candidates": [],
+            "method": "alias"
+          },
+          {
+            "request": "filtration efficiency",
+            "kind": "reject",
+            "ok": false,
+            "interpretation": "not present (llm)",
+            "target_id": null,
+            "value": null,
+            "reason": "That is not part of this system.",
+            "candidates": [],
+            "method": "llm"
+          },
+          {
+            "request": "water resistivity",
+            "kind": "reject",
+            "ok": false,
+            "interpretation": "not present (llm)",
+            "target_id": null,
+            "value": null,
+            "reason": "That is not part of this system.",
+            "candidates": [],
+            "method": "llm"
+          },
+          {
+            "request": "dissolved metals",
+            "kind": "reject",
+            "ok": false,
+            "interpretation": "not present (llm)",
+            "target_id": null,
+            "value": null,
+            "reason": "That is not part of this system.",
+            "candidates": [],
+            "method": "llm"
+          }
+        ],
+        "readings": {},
+        "raw_csv": null
+      }
+    },
+    {
+      "turn": 2,
+      "latency_s": 9.24,
+      "reasoning": "My last measure batch was almost all rejected. I need to discover what signals actually exist. Let me probe a broad set of plausible fab signals in one measure call: defect/particle counts, deposition thickness, etch rate/depth, chamber pressure, temperatures, and yield. This maps the observable space cheaply.",
+      "memory": "Hypotheses:\n- Setpoint drift (etch pressure/dep temp)\n- Contamination/particles from PM disturbing filtration/clean\nRuled out:\n- No signals for filtration/clean/water/dissolved metals (not present)\nConfirmed:\n- ChamberPressure~Yield corr=0.47; BakeTemp~Yield ~0 (baseline)\nNext: map available signals; then intervene pressure vs particle/defect to test causation",
+      "raw": "<reasoning>My last measure batch was almost all rejected. I need to discover what signals actually exist. Let me probe a broad set of plausible fab signals in one measure call: defect/particle counts, deposition thickness, etch rate/depth, chamber pressure, temperatures, and yield. This maps the observable space cheaply.</reasoning>\n<action type=\"measure\">{\"requests\":[\"wafer yield\",\"inline defect count\",\"particle count on wafer\",\"film thickness\",\"etch depth\",\"chamber pressure\",\"chamber temperature\",\"deposition rate\"]}</action>\n<memory>\nHypotheses:\n- Setpoint drift (etch pressure/dep temp)\n- Contamination/particles from PM disturbing filtration/clean\nRuled out:\n- No signals for filtration/clean/water/dissolved metals (not present)\nConfirmed:\n- ChamberPressure~Yield corr=0.47; BakeTemp~Yield ~0 (baseline)\nNext: map available signals; then intervene pressure vs particle/defect to test causation\n</memory>",
+      "action_type": "measure",
+      "result": {
+        "mode": "measure",
+        "experiment_id": 3,
+        "n_units": 400,
+        "resolutions": [
+          {
+            "request": "wafer yield",
+            "kind": "measure",
+            "ok": true,
+            "interpretation": "measure 'WaferYield'",
+            "target_id": "WaferYield",
+            "value": null,
+            "reason": "",
+            "candidates": [],
+            "method": "alias"
+          },
+          {
+            "request": "inline defect count",
+            "kind": "reject",
+            "ok": false,
+            "interpretation": "no assay (llm)",
+            "target_id": null,
+            "value": null,
+            "reason": "That quantity is not directly measurable on this rig.",
+            "candidates": [],
+            "method": "llm"
+          },
+          {
+            "request": "particle count on wafer",
+            "kind": "reject",
+            "ok": false,
+            "interpretation": "no assay (llm)",
+            "target_id": null,
+            "value": null,
+            "reason": "That quantity is not directly measurable on this rig.",
+            "candidates": [],
+            "method": "llm"
+          },
+          {
+            "request": "film thickness",
+            "kind": "reject",
+            "ok": false,
+            "interpretation": "not present (llm)",
+            "target_id": null,
+            "value": null,
+            "reason": "That is not part of this system.",
+            "candidates": [],
+            "method": "llm"
+          },
+          {
+            "request": "etch depth",
+            "kind": "measure",
+            "ok": true,
+            "interpretation": "measure 'EtchPower'",
+            "target_id": "EtchPower",
+            "value": null,
+            "reason": "",
+            "candidates": [],
+            "method": "alias"
+          },
+          {
+            "request": "chamber pressure",
+            "kind": "measure",
+            "ok": true,
+            "interpretation": "measure 'ChamberPressure'",
+            "target_id": "ChamberPressure",
+            "value": null,
+            "reason": "",
+            "candidates": [],
+            "method": "alias"
+          },
+          {
+            "request": "chamber temperature",
+            "kind": "reject",
+            "ok": false,
+            "interpretation": "no assay for 'ChamberAge'",
+            "target_id": null,
+            "value": null,
+            "reason": "That quantity is not directly measurable on this rig; there is no assay for it.",
+            "candidates": [],
+            "method": "alias"
+          },
+          {
+            "request": "deposition rate",
+            "kind": "reject",
+            "ok": false,
+            "interpretation": "not present (llm)",
+            "target_id": null,
+            "value": null,
+            "reason": "That is not part of this system.",
+            "candidates": [],
+            "method": "llm"
+          }
+        ],
+        "readings": {
+          "WaferYield": {
+            "mean": -7.549,
+            "sd": 13.059,
+            "se": 0.653
+          },
+          "EtchPower": {
+            "mean": 39.476,
+            "sd": 12.086,
+            "se": 0.604
+          },
+          "ChamberPressure": {
+            "mean": 74.64,
+            "sd": 11.276,
+            "se": 0.564
+          },
+          "_correlations": {
+            "WaferYield~EtchPower": -0.426,
+            "WaferYield~ChamberPressure": 0.45,
+            "EtchPower~ChamberPressure": 0.057
+          }
+        },
+        "raw_csv": "results_v8_validation_opus/v7_semiconductor_surrogate_symptom_trap_20000113_data/experiment_3.csv"
+      }
+    },
+    {
+      "turn": 3,
+      "latency_s": 9.14,
+      "reasoning": "I have WaferYield, EtchPower, ChamberPressure as measurable. Both correlate with yield (EtchPower -0.43, ChamberPressure +0.45), but they don't correlate with each other. The situation warns of a \"symptom trap\" \u2014 a signal that reads like the cause but isn't. Since PM was on etch/deposition tools and clean/filtration modules exist and are adjustable, contamination is plausible. But I couldn't measure particles/defects directly.\n\nI need to find what actuators exist. The correlations might be confounds. Let me first probe what I can actually intervene on before spending too much. Let me try interventions on the two candidate signals and also on clean/filtration to see which actually moves yield. Start by testing ChamberPressure adjustment (the engineers' favored setpoint retune) to see if it's causal or a bystander.\n\nLet me intervene on chamber pressure and etch power to see if adjusting them actually moves yield, and also try a clean/filtration intervention. But one action per turn. Let me test the setpoint theory first: adjust chamber pressure to a higher level and measure yield.",
+      "memory": "Hypotheses:\n- Setpoint drift (etch pressure) \u2014 engineers favor; may be bystander/trap\n- Contamination/particles from PM disturbing filtration/clean\nRuled out:\n- No signals for filtration/clean/water/dissolved metals, film thickness, defect/particle counts, dep rate, chamber temp\nConfirmed:\n- ChamberPressure~Yield corr=+0.45; EtchPower~Yield corr=-0.43; EtchPower~ChamberPressure ~0\nNext: test if chamber pressure is causal (this intervene); then test clean/filtration actuator",
+      "raw": "<reasoning>\nI have WaferYield, EtchPower, ChamberPressure as measurable. Both correlate with yield (EtchPower -0.43, ChamberPressure +0.45), but they don't correlate with each other. The situation warns of a \"symptom trap\" \u2014 a signal that reads like the cause but isn't. Since PM was on etch/deposition tools and clean/filtration modules exist and are adjustable, contamination is plausible. But I couldn't measure particles/defects directly.\n\nI need to find what actuators exist. The correlations might be confounds. Let me first probe what I can actually intervene on before spending too much. Let me try interventions on the two candidate signals and also on clean/filtration to see which actually moves yield. Start by testing ChamberPressure adjustment (the engineers' favored setpoint retune) to see if it's causal or a bystander.\n\nLet me intervene on chamber pressure and etch power to see if adjusting them actually moves yield, and also try a clean/filtration intervention. But one action per turn. Let me test the setpoint theory first: adjust chamber pressure to a higher level and measure yield.\n</reasoning>\n\n<action type=\"intervene\">{\"actions\":[{\"request\":\"increase chamber pressure setpoint\",\"value\":\"high\"}],\"measure\":[\"wafer yield\",\"chamber pressure\",\"etch power\"]}</action>\n\n<memory>\nHypotheses:\n- Setpoint drift (etch pressure) \u2014 engineers favor; may be bystander/trap\n- Contamination/particles from PM disturbing filtration/clean\nRuled out:\n- No signals for filtration/clean/water/dissolved metals, film thickness, defect/particle counts, dep rate, chamber temp\nConfirmed:\n- ChamberPressure~Yield corr=+0.45; EtchPower~Yield corr=-0.43; EtchPower~ChamberPressure ~0\nNext: test if chamber pressure is causal (this intervene); then test clean/filtration actuator\n</memory>",
+      "action_type": "intervene",
+      "result": {
+        "mode": "intervene",
+        "experiment_id": 4,
+        "n_units": 400,
+        "applied_intervention": {},
+        "action_resolutions": [
+          {
+            "request": "increase chamber pressure setpoint",
+            "kind": "reject",
+            "ok": false,
+            "interpretation": "no actuator (llm)",
+            "target_id": null,
+            "value": null,
+            "reason": "There is no actuator connected to that on this system.",
+            "candidates": [],
+            "method": "llm"
+          }
+        ],
+        "measurement_resolutions": [
+          {
+            "request": "wafer yield",
+            "kind": "measure",
+            "ok": true,
+            "interpretation": "measure 'WaferYield'",
+            "target_id": "WaferYield",
+            "value": null,
+            "reason": "",
+            "candidates": [],
+            "method": "alias"
+          },
+          {
+            "request": "chamber pressure",
+            "kind": "measure",
+            "ok": true,
+            "interpretation": "measure 'ChamberPressure'",
+            "target_id": "ChamberPressure",
+            "value": null,
+            "reason": "",
+            "candidates": [],
+            "method": "alias"
+          },
+          {
+            "request": "etch power",
+            "kind": "measure",
+            "ok": true,
+            "interpretation": "measure 'EtchPower'",
+            "target_id": "EtchPower",
+            "value": null,
+            "reason": "",
+            "candidates": [],
+            "method": "alias"
+          }
+        ],
+        "readings": {},
+        "raw_csv": null
+      }
+    },
+    {
+      "turn": 4,
+      "latency_s": 7.46,
+      "reasoning": "The pressure setpoint actuator was rejected (\"no actuator\"). So chamber pressure cannot be intervened despite correlating with yield \u2014 likely a bystander/trap. Engineers favor retuning setpoints, but I can't even actuate pressure here. The PM window touched etch AND deposition tools; the defect flag is on a mid-line layer. Contamination from filtration/clean is a strong alternative hypothesis. Let me probe what actuators actually exist by attempting a clean/filtration intervention. I'll try adjusting the filtration module (e.g., replace/tighten filter) and measure yield plus pressure and etch power to see what moves.",
+      "memory": "Hypotheses:\n- Contamination/particles from PM disturbing filtration/clean (now primary)\n- Setpoint drift \u2014 pressure NOT actuatable (trap/bystander)\nRuled out:\n- Pressure actuator does not exist; EtchPower actuator unknown yet\nConfirmed:\n- ChamberPressure~Yield corr=+0.45; EtchPower~Yield corr=-0.43; EtchPower~ChamberPressure ~0\n- No pressure actuator connected\nNext: test filtration actuator existence & effect; then clean module; then etch power actuator",
+      "raw": "<reasoning>\nThe pressure setpoint actuator was rejected (\"no actuator\"). So chamber pressure cannot be intervened despite correlating with yield \u2014 likely a bystander/trap. Engineers favor retuning setpoints, but I can't even actuate pressure here. The PM window touched etch AND deposition tools; the defect flag is on a mid-line layer. Contamination from filtration/clean is a strong alternative hypothesis. Let me probe what actuators actually exist by attempting a clean/filtration intervention. I'll try adjusting the filtration module (e.g., replace/tighten filter) and measure yield plus pressure and etch power to see what moves.\n</reasoning>\n<action type=\"intervene\">{\"actions\":[{\"request\":\"increase filtration / replace particle filter on the line\",\"value\":\"high\"}],\"measure\":[\"wafer yield\",\"chamber pressure\",\"etch power\"]}</action>\n<memory>\nHypotheses:\n- Contamination/particles from PM disturbing filtration/clean (now primary)\n- Setpoint drift \u2014 pressure NOT actuatable (trap/bystander)\nRuled out:\n- Pressure actuator does not exist; EtchPower actuator unknown yet\nConfirmed:\n- ChamberPressure~Yield corr=+0.45; EtchPower~Yield corr=-0.43; EtchPower~ChamberPressure ~0\n- No pressure actuator connected\nNext: test filtration actuator existence & effect; then clean module; then etch power actuator\n</memory>",
+      "action_type": "intervene",
+      "result": {
+        "mode": "intervene",
+        "experiment_id": 5,
+        "n_units": 400,
+        "applied_intervention": {
+          "FilterUpgrade": 75.0
+        },
+        "action_resolutions": [
+          {
+            "request": "increase filtration / replace particle filter on the line",
+            "kind": "intervene",
+            "ok": true,
+            "interpretation": "apply 'FilterUpgrade' (dosing to reduce ParticleContamination) at 75.0",
+            "target_id": "FilterUpgrade",
+            "value": 75.0,
+            "reason": "",
+            "candidates": [],
+            "method": "alias"
+          }
+        ],
+        "measurement_resolutions": [
+          {
+            "request": "wafer yield",
+            "kind": "measure",
+            "ok": true,
+            "interpretation": "measure 'WaferYield'",
+            "target_id": "WaferYield",
+            "value": null,
+            "reason": "",
+            "candidates": [],
+            "method": "alias"
+          },
+          {
+            "request": "chamber pressure",
+            "kind": "measure",
+            "ok": true,
+            "interpretation": "measure 'ChamberPressure'",
+            "target_id": "ChamberPressure",
+            "value": null,
+            "reason": "",
+            "candidates": [],
+            "method": "alias"
+          },
+          {
+            "request": "etch power",
+            "kind": "measure",
+            "ok": true,
+            "interpretation": "measure 'EtchPower'",
+            "target_id": "EtchPower",
+            "value": null,
+            "reason": "",
+            "candidates": [],
+            "method": "alias"
+          }
+        ],
+        "readings": {
+          "WaferYield": 30.915,
+          "ChamberPressure": 75.559,
+          "EtchPower": 41.071
+        },
+        "raw_csv": "results_v8_validation_opus/v7_semiconductor_surrogate_symptom_trap_20000113_data/experiment_5.csv"
+      }
+    },
+    {
+      "turn": 5,
+      "latency_s": 10.18,
+      "reasoning": "My last intervention applied FilterUpgrade at 75. I need to compare its effect on yield. Let me look at the data across my experiments. First, let me analyze what I have \u2014 the baseline yield and the FilterUpgrade result. I should check if FilterUpgrade at 75 improved yield vs baseline. Let me run code on the CSVs I have.",
+      "memory": "Hypotheses:\n- Contamination/particles from PM disturbing filtration/clean (now primary)\n- Setpoint drift \u2014 pressure NOT actuatable (trap/bystander)\nRuled out:\n- Pressure actuator does not exist\nConfirmed:\n- ChamberPressure~Yield corr=+0.45; EtchPower~Yield corr=-0.43\nNext: compare FilterUpgrade(exp5) yield vs baseline; test clean module; dose-response filter",
+      "raw": "<reasoning>My last intervention applied FilterUpgrade at 75. I need to compare its effect on yield. Let me look at the data across my experiments. First, let me analyze what I have \u2014 the baseline yield and the FilterUpgrade result. I should check if FilterUpgrade at 75 improved yield vs baseline. Let me run code on the CSVs I have.</reasoning>\n<action type=\"code\">\nimport pandas as pd\nfor eid in [1,3,5]:\n    df = pd.read_csv(eval(f\"experiment_{eid}_csv\"))\n    print(f\"--- experiment {eid} ---\")\n    print(df.columns.tolist())\n    print(df.mean(numeric_only=True).round(3))\n    print()\n</action>\n<memory>\nHypotheses:\n- Contamination/particles from PM disturbing filtration/clean (now primary)\n- Setpoint drift \u2014 pressure NOT actuatable (trap/bystander)\nRuled out:\n- Pressure actuator does not exist\nConfirmed:\n- ChamberPressure~Yield corr=+0.45; EtchPower~Yield corr=-0.43\nNext: compare FilterUpgrade(exp5) yield vs baseline; test clean module; dose-response filter\n</memory>",
+      "action_type": "code",
+      "code": "import pandas as pd\nfor eid in [1,3,5]:\n    df = pd.read_csv(eval(f\"experiment_{eid}_csv\"))\n    print(f\"--- experiment {eid} ---\")\n    print(df.columns.tolist())\n    print(df.mean(numeric_only=True).round(3))\n    print()",
+      "code_output": "--- experiment 1 ---\n['unit_id', 'WaferYield', 'ChamberPressure', 'BakeTemperature']\nunit_id            199.500\nWaferYield          -8.816\nChamberPressure     74.177\nBakeTemperature     50.740\ndtype: float64\n\n--- experiment 3 ---\n['unit_id', 'WaferYield', 'EtchPower', 'ChamberPressure']\nunit_id            199.500\nWaferYield          -7.549\nEtchPower           39.476\nChamberPressure     74.640\ndtype: float64\n\n--- experiment 5 ---\n['unit_id', 'WaferYield', 'ChamberPressure', 'EtchPower', 'do_FilterUpgrade']\nunit_id             199.500\nWaferYield           30.915\nChamberPressure      75.559\nEtchPower            41.071\ndo_FilterUpgrade     75.000\ndtype: float64\n\n"
+    },
+    {
+      "turn": 6,
+      "latency_s": 7.99,
+      "reasoning": "Experiment 5 had FilterUpgrade applied and shows WaferYield mean ~+30.9 vs baseline ~-8 in experiments 1/3. That's a strong signal that the filter upgrade improves yield dramatically. Let me analyze exp5 more carefully to confirm the filter effect and check whether pressure/etch correlations hold within it.",
+      "memory": "Hypotheses:\n- Contamination/particles from PM; FilterUpgrade appears to strongly raise yield\nRuled out:\n- Pressure actuator does not exist\nConfirmed:\n- ChamberPressure~Yield corr=+0.45; EtchPower~Yield corr=-0.43\n- exp5 (filter upgrade) yield mean ~+31 vs ~-8 baseline\nNext: confirm filter is the driver; dose-response; check pressure/etch are bystanders",
+      "raw": "<reasoning>Experiment 5 had FilterUpgrade applied and shows WaferYield mean ~+30.9 vs baseline ~-8 in experiments 1/3. That's a strong signal that the filter upgrade improves yield dramatically. Let me analyze exp5 more carefully to confirm the filter effect and check whether pressure/etch correlations hold within it.</reasoning>\n\n<action type=\"code\">\nimport pandas as pd\nimport numpy as np\nfrom scipy import stats\ndf1 = pd.read_csv(experiment_1_csv)\ndf5 = pd.read_csv(experiment_5_csv)\nprint(\"exp1 yield mean/sd:\", df1.WaferYield.mean().round(2), df1.WaferYield.std().round(2))\nprint(\"exp5 yield mean/sd:\", df5.WaferYield.mean().round(2), df5.WaferYield.std().round(2))\n# In exp5 do_FilterUpgrade is 75 for all? check\nprint(\"filter unique:\", df5.do_FilterUpgrade.unique())\n# correlations in exp5\nprint(df5.corr(numeric_only=True).round(3))\n# if filter varies, group\nif df5.do_FilterUpgrade.nunique()>1:\n    print(df5.groupby('do_FilterUpgrade').WaferYield.mean())\n</action>\n\n<memory>\nHypotheses:\n- Contamination/particles from PM; FilterUpgrade appears to strongly raise yield\nRuled out:\n- Pressure actuator does not exist\nConfirmed:\n- ChamberPressure~Yield corr=+0.45; EtchPower~Yield corr=-0.43\n- exp5 (filter upgrade) yield mean ~+31 vs ~-8 baseline\nNext: confirm filter is the driver; dose-response; check pressure/etch are bystanders\n</memory>",
+      "action_type": "code",
+      "code": "import pandas as pd\nimport numpy as np\nfrom scipy import stats\ndf1 = pd.read_csv(experiment_1_csv)\ndf5 = pd.read_csv(experiment_5_csv)\nprint(\"exp1 yield mean/sd:\", df1.WaferYield.mean().round(2), df1.WaferYield.std().round(2))\nprint(\"exp5 yield mean/sd:\", df5.WaferYield.mean().round(2), df5.WaferYield.std().round(2))\n# In exp5 do_FilterUpgrade is 75 for all? check\nprint(\"filter unique:\", df5.do_FilterUpgrade.unique())\n# correlations in exp5\nprint(df5.corr(numeric_only=True).round(3))\n# if filter varies, group\nif df5.do_FilterUpgrade.nunique()>1:\n    print(df5.groupby('do_FilterUpgrade').WaferYield.mean())",
+      "code_output": "exp1 yield mean/sd: -8.82 12.45\nexp5 yield mean/sd: 30.91 7.31\nfilter unique: [75.]\n                  unit_id  WaferYield  ChamberPressure  EtchPower  do_FilterUpgrade\nunit_id             1.000      -0.007           -0.018      0.024               NaN\nWaferYield         -0.007       1.000            0.871      0.022               NaN\nChamberPressure    -0.018       0.871            1.000      0.015               NaN\nEtchPower           0.024       0.022            0.015      1.000               NaN\ndo_FilterUpgrade      NaN         NaN              NaN        NaN               NaN\n"
+    },
+    {
+      "turn": 7,
+      "latency_s": 16.44,
+      "reasoning": "Prior data: exp5 (filter upgrade to 75) gave much higher yield (~31 vs -8 baseline). ChamberPressure correlates strongly with yield (0.871 in exp5 data) but that may be a bystander driven by filtration. The situation report says engineers want to retune pressure/temperature setpoints \u2014 likely a decoy. My hypothesis: PM introduced contamination (particles) and the filtration module is the true fix. ChamberPressure is a correlate but not causal.\n\nI need to test whether ChamberPressure is causal or a bystander. I should hold the filter fixed and vary pressure-related... but pressure actuator doesn't exist. Instead, let me test the filter dose-response and confirm ChamberPressure moves WITH filtration (bystander) rather than independently.\n\nActually the key decisive test: apply filter upgrade at varying doses and see if yield follows, and check whether ChamberPressure is just tracking. Let me run a filter dose-response.",
+      "memory": "Hypotheses:\n- Contamination/particles from PM; FilterUpgrade raises yield; pressure is bystander/decoy\nRuled out:\n- Pressure actuator does not exist\nConfirmed:\n- ChamberPressure~Yield strong corr; EtchPower weak; filter upgrade big yield gain\nNext: filter dose-response (low/mid/high), confirm pressure tracks filter (bystander)",
+      "raw": "<reasoning>\nPrior data: exp5 (filter upgrade to 75) gave much higher yield (~31 vs -8 baseline). ChamberPressure correlates strongly with yield (0.871 in exp5 data) but that may be a bystander driven by filtration. The situation report says engineers want to retune pressure/temperature setpoints \u2014 likely a decoy. My hypothesis: PM introduced contamination (particles) and the filtration module is the true fix. ChamberPressure is a correlate but not causal.\n\nI need to test whether ChamberPressure is causal or a bystander. I should hold the filter fixed and vary pressure-related... but pressure actuator doesn't exist. Instead, let me test the filter dose-response and confirm ChamberPressure moves WITH filtration (bystander) rather than independently.\n\nActually the key decisive test: apply filter upgrade at varying doses and see if yield follows, and check whether ChamberPressure is just tracking. Let me run a filter dose-response.\n</reasoning>\n<action type=\"intervene\">{\"actions\":[{\"request\":\"upgrade/improve the filtration module\",\"value\":25}],\"measure\":[\"WaferYield\",\"ChamberPressure\",\"particle contamination in broth\"]}</action>\n<memory>\nHypotheses:\n- Contamination/particles from PM; FilterUpgrade raises yield; pressure is bystander/decoy\nRuled out:\n- Pressure actuator does not exist\nConfirmed:\n- ChamberPressure~Yield strong corr; EtchPower weak; filter upgrade big yield gain\nNext: filter dose-response (low/mid/high), confirm pressure tracks filter (bystander)\n</memory>",
+      "action_type": "intervene",
+      "result": {
+        "mode": "intervene",
+        "experiment_id": 6,
+        "n_units": 400,
+        "applied_intervention": {
+          "FilterUpgrade": 25.0
+        },
+        "action_resolutions": [
+          {
+            "request": "upgrade/improve the filtration module",
+            "kind": "intervene",
+            "ok": true,
+            "interpretation": "apply 'FilterUpgrade' (dosing to reduce ParticleContamination) at 25.0",
+            "target_id": "FilterUpgrade",
+            "value": 25.0,
+            "reason": "",
+            "candidates": [],
+            "method": "alias"
+          }
+        ],
+        "measurement_resolutions": [
+          {
+            "request": "WaferYield",
+            "kind": "measure",
+            "ok": true,
+            "interpretation": "measure 'WaferYield'",
+            "target_id": "WaferYield",
+            "value": null,
+            "reason": "",
+            "candidates": [],
+            "method": "alias"
+          },
+          {
+            "request": "ChamberPressure",
+            "kind": "measure",
+            "ok": true,
+            "interpretation": "measure 'ChamberPressure'",
+            "target_id": "ChamberPressure",
+            "value": null,
+            "reason": "",
+            "candidates": [],
+            "method": "alias"
+          },
+          {
+            "request": "particle contamination in broth",
+            "kind": "reject",
+            "ok": false,
+            "interpretation": "no assay for 'ParticleContamination'",
+            "target_id": null,
+            "value": null,
+            "reason": "That quantity is not directly measurable on this rig; there is no assay for it.",
+            "candidates": [],
+            "method": "alias"
+          }
+        ],
+        "readings": {
+          "WaferYield": 3.453,
+          "ChamberPressure": 74.847
+        },
+        "raw_csv": "results_v8_validation_opus/v7_semiconductor_surrogate_symptom_trap_20000113_data/experiment_6.csv"
+      }
+    },
+    {
+      "turn": 8,
+      "latency_s": 6.43,
+      "reasoning": "I've already found FilterUpgrade at 25 gives a big yield gain. Let me analyze the data I have to confirm the pressure-yield correlation is a bystander (driven by particle contamination), and check filter effect. Code is free \u2014 let me look at what I have before spending more budget.",
+      "memory": "Hypotheses:\n- Contamination/particles from PM; FilterUpgrade raises yield; pressure is bystander/decoy\nRuled out:\n- Pressure actuator does not exist\nConfirmed:\n- ChamberPressure~Yield strong corr; EtchPower weak; filter upgrade big yield gain\nNext: filter dose-response (low/mid/high), confirm pressure tracks filter (bystander)",
+      "raw": "<reasoning>I've already found FilterUpgrade at 25 gives a big yield gain. Let me analyze the data I have to confirm the pressure-yield correlation is a bystander (driven by particle contamination), and check filter effect. Code is free \u2014 let me look at what I have before spending more budget.</reasoning>\n<action type=\"code\">\nimport pandas as pd, numpy as np\nfor eid in [\"experiment_1_csv\",\"experiment_3_csv\",\"experiment_5_csv\",\"experiment_6_csv\"]:\n    path = eval(eid)\n    df = pd.read_csv(path)\n    print(\"===\", eid, \"cols:\", list(df.columns))\n    print(df.describe().round(3).T[[\"mean\",\"std\"]])\n    num = df.select_dtypes(\"number\")\n    if \"WaferYield\" in num:\n        print(\"corr w/ yield:\\n\", num.corr()[\"WaferYield\"].round(3))\n    print()\n</action>\n<memory>\nHypotheses:\n- Contamination/particles from PM; FilterUpgrade raises yield; pressure is bystander/decoy\nRuled out:\n- Pressure actuator does not exist\nConfirmed:\n- ChamberPressure~Yield strong corr; EtchPower weak; filter upgrade big yield gain\nNext: filter dose-response (low/mid/high), confirm pressure tracks filter (bystander)\n</memory>",
+      "action_type": "code",
+      "code": "import pandas as pd, numpy as np\nfor eid in [\"experiment_1_csv\",\"experiment_3_csv\",\"experiment_5_csv\",\"experiment_6_csv\"]:\n    path = eval(eid)\n    df = pd.read_csv(path)\n    print(\"===\", eid, \"cols:\", list(df.columns))\n    print(df.describe().round(3).T[[\"mean\",\"std\"]])\n    num = df.select_dtypes(\"number\")\n    if \"WaferYield\" in num:\n        print(\"corr w/ yield:\\n\", num.corr()[\"WaferYield\"].round(3))\n    print()",
+      "code_output": "=== experiment_1_csv cols: ['unit_id', 'WaferYield', 'ChamberPressure', 'BakeTemperature']\n                    mean      std\nunit_id          199.500  115.614\nWaferYield        -8.816   12.446\nChamberPressure   74.177   12.254\nBakeTemperature   50.740   12.256\ncorr w/ yield:\n unit_id            0.017\nWaferYield         1.000\nChamberPressure    0.471\nBakeTemperature   -0.027\nName: WaferYield, dtype: float64\n\n=== experiment_3_csv cols: ['unit_id', 'WaferYield', 'EtchPower', 'ChamberPressure']\n                    mean      std\nunit_id          199.500  115.614\nWaferYield        -7.549   13.076\nEtchPower         39.476   12.101\nChamberPressure   74.640   11.291\ncorr w/ yield:\n unit_id            0.004\nWaferYield         1.000\nEtchPower         -0.426\nChamberPressure    0.450\nName: WaferYield, dtype: float64\n\n=== experiment_5_csv cols: ['unit_id', 'WaferYield', 'ChamberPressure', 'EtchPower', 'do_FilterUpgrade']\n                     mean      std\nunit_id           199.500  115.614\nWaferYield         30.915    7.311\nChamberPressure    75.559   12.308\nEtchPower          41.071   11.776\ndo_FilterUpgrade   75.000    0.000\ncorr w/ yield:\n unit_id            -0.007\nWaferYield          1.000\nChamberPressure     0.871\nEtchPower           0.022\ndo_FilterUpgrade      NaN\nName: WaferYield, dtype: float64\n\n=== experiment_6_csv cols: ['unit_id', 'WaferYield', 'ChamberPressure', 'do_FilterUpgrade']\n                     mean      std\nunit_id           199.500  115.614\nWaferYield          3.453   13.271\nChamberPressure    74.847   11.707\ndo_FilterUpgrade   25.000    0.000\ncorr w/ yield:\n unit_id            -0.016\nWaferYield          1.000\nChamberPressure     0.431\ndo_FilterUpgrade      NaN\nName: WaferYield, dtype: float64\n\n"
+    },
+    {
+      "turn": 9,
+      "latency_s": 24.45,
+      "reasoning": "Filter upgrade at 75 gave big yield gain (mean +30.9) vs at 25 (mean +3.5) and no-filter baselines (negative). Pressure correlates with yield but there's no pressure actuator, so it's likely a bystander driven by the real cause (filtration/contamination). Let me first check if pressure is still a strong predictor *within* the filter-upgrade experiments \u2014 if filter upgrade drives both yield and pressure, pressure is a downstream marker.\n\nLet me analyze the existing data more carefully before spending budget: does ChamberPressure predict yield independently of filter upgrade, or is its correlation just an artifact? In exp5 (all filter=75) pressure corr is 0.871 \u2014 very high. In exp6 (all filter=25) it's 0.431. Interesting. Let me compare whether pressure's relationship to yield is consistent and whether filter shifts the intercept.",
+      "memory": "Hypotheses:\n- Contamination/particles from PM; FilterUpgrade raises yield; pressure is bystander/decoy\nRuled out:\n- Pressure actuator does not exist\nConfirmed:\n- Filter upgrade big yield gain (75 vs 25 vs none); pressure corr with yield\nNext: check if pressure effect is independent of filter or just a marker; then filter dose-response",
+      "raw": "<reasoning>\nFilter upgrade at 75 gave big yield gain (mean +30.9) vs at 25 (mean +3.5) and no-filter baselines (negative). Pressure correlates with yield but there's no pressure actuator, so it's likely a bystander driven by the real cause (filtration/contamination). Let me first check if pressure is still a strong predictor *within* the filter-upgrade experiments \u2014 if filter upgrade drives both yield and pressure, pressure is a downstream marker.\n\nLet me analyze the existing data more carefully before spending budget: does ChamberPressure predict yield independently of filter upgrade, or is its correlation just an artifact? In exp5 (all filter=75) pressure corr is 0.871 \u2014 very high. In exp6 (all filter=25) it's 0.431. Interesting. Let me compare whether pressure's relationship to yield is consistent and whether filter shifts the intercept.\n</reasoning>\n<action type=\"code\">\nimport pandas as pd, numpy as np\nfrom scipy import stats\nd5=pd.read_csv(experiment_5_csv); d6=pd.read_csv(experiment_6_csv)\nd5['filt']=75; d6['filt']=25\nd=pd.concat([d5[['WaferYield','ChamberPressure','filt']],d6[['WaferYield','ChamberPressure','filt']]])\nprint(\"mean yield by filt:\\n\", d.groupby('filt')['WaferYield'].mean())\n# regression yield ~ pressure + filt\nimport numpy as np\nX=np.column_stack([d['ChamberPressure'],d['filt'],np.ones(len(d))])\nb,res,_,_=np.linalg.lstsq(X,d['WaferYield'],rcond=None)\nprint(\"coef pressure,filt,intercept:\",b.round(4))\n# pressure effect within each filt group\nfor f in [25,75]:\n    sub=d[d.filt==f]\n    s,i,r,p,se=stats.linregress(sub['ChamberPressure'],sub['WaferYield'])\n    print(f\"filt={f}: pressure slope={s:.3f} r={r:.3f} p={p:.1e}\")\n</action>\n<memory>\nHypotheses:\n- Contamination/particles from PM; FilterUpgrade raises yield; pressure is bystander/decoy\nRuled out:\n- Pressure actuator does not exist\nConfirmed:\n- Filter upgrade big yield gain (75 vs 25 vs none); pressure corr with yield\nNext: check if pressure effect is independent of filter or just a marker; then filter dose-response\n</memory>",
+      "action_type": "code",
+      "code": "import pandas as pd, numpy as np\nfrom scipy import stats\nd5=pd.read_csv(experiment_5_csv); d6=pd.read_csv(experiment_6_csv)\nd5['filt']=75; d6['filt']=25\nd=pd.concat([d5[['WaferYield','ChamberPressure','filt']],d6[['WaferYield','ChamberPressure','filt']]])\nprint(\"mean yield by filt:\\n\", d.groupby('filt')['WaferYield'].mean())\n# regression yield ~ pressure + filt\nimport numpy as np\nX=np.column_stack([d['ChamberPressure'],d['filt'],np.ones(len(d))])\nb,res,_,_=np.linalg.lstsq(X,d['WaferYield'],rcond=None)\nprint(\"coef pressure,filt,intercept:\",b.round(4))\n# pressure effect within each filt group\nfor f in [25,75]:\n    sub=d[d.filt==f]\n    s,i,r,p,se=stats.linregress(sub['ChamberPressure'],sub['WaferYield'])\n    print(f\"filt={f}: pressure slope={s:.3f} r={r:.3f} p={p:.1e}\")",
+      "code_output": "mean yield by filt:\n filt\n25     3.452688\n75    30.914524\nName: WaferYield, dtype: float64\ncoef pressure,filt,intercept: [  0.5034   0.5421 -47.7801]\nfilt=25: pressure slope=0.488 r=0.431 p=1.7e-19\nfilt=75: pressure slope=0.517 r=0.871 p=1.3e-124\n"
+    },
+    {
+      "turn": 10,
+      "latency_s": 7.97,
+      "reasoning": "The situation points to contamination after PM. My filter data shows filt=75 gives ~31% yield vs filt=25 giving ~3.5%. Pressure correlates with yield but there's no pressure actuator, so it's a decoy/bystander. I need to confirm the true mechanism: is defect count / particles the real driver, and is pressure just riding along with filtration?\n\nLet me check what measurements I have. I want to verify that pressure is confounded by filtration and not causal. But pressure isn't an actuator I can set. The key test: does filtration reduce defects (the inline-flagged defects), and does yield track defects rather than pressure independently?\n\nLet me measure particle/defect count under a filtration intervention to confirm the mechanism. First, let me look at the existing data to see what columns I have.",
+      "memory": "Hypotheses:\n- Contamination/particles from PM; Filtration raises yield; pressure is bystander/decoy\nRuled out:\n- Pressure actuator does not exist\nConfirmed:\n- Filter upgrade big yield gain (filt75~31% vs filt25~3.5%); pressure corr with yield but no actuator\nNext: identify particle/defect measurement column; confirm defects mediate yield; test filter dose-response and whether pressure is confound",
+      "raw": "<reasoning>\nThe situation points to contamination after PM. My filter data shows filt=75 gives ~31% yield vs filt=25 giving ~3.5%. Pressure correlates with yield but there's no pressure actuator, so it's a decoy/bystander. I need to confirm the true mechanism: is defect count / particles the real driver, and is pressure just riding along with filtration?\n\nLet me check what measurements I have. I want to verify that pressure is confounded by filtration and not causal. But pressure isn't an actuator I can set. The key test: does filtration reduce defects (the inline-flagged defects), and does yield track defects rather than pressure independently?\n\nLet me measure particle/defect count under a filtration intervention to confirm the mechanism. First, let me look at the existing data to see what columns I have.\n</reasoning>\n<action type=\"code\">\nimport pandas as pd\nfor f in [\"experiment_1_csv\",\"experiment_3_csv\",\"experiment_5_csv\",\"experiment_6_csv\"]:\n    try:\n        df = pd.read_csv(eval(f))\n        print(f, df.columns.tolist())\n        print(df.head(2))\n        print()\n    except Exception as e:\n        print(f, \"err\", e)\n</action>\n<memory>\nHypotheses:\n- Contamination/particles from PM; Filtration raises yield; pressure is bystander/decoy\nRuled out:\n- Pressure actuator does not exist\nConfirmed:\n- Filter upgrade big yield gain (filt75~31% vs filt25~3.5%); pressure corr with yield but no actuator\nNext: identify particle/defect measurement column; confirm defects mediate yield; test filter dose-response and whether pressure is confound\n</memory>",
+      "action_type": "code",
+      "code": "import pandas as pd\nfor f in [\"experiment_1_csv\",\"experiment_3_csv\",\"experiment_5_csv\",\"experiment_6_csv\"]:\n    try:\n        df = pd.read_csv(eval(f))\n        print(f, df.columns.tolist())\n        print(df.head(2))\n        print()\n    except Exception as e:\n        print(f, \"err\", e)",
+      "code_output": "experiment_1_csv ['unit_id', 'WaferYield', 'ChamberPressure', 'BakeTemperature']\n   unit_id  WaferYield  ChamberPressure  BakeTemperature\n0        0  -16.006638        84.456967        57.395161\n1        1   -7.036710        87.603033        44.607338\n\nexperiment_3_csv ['unit_id', 'WaferYield', 'EtchPower', 'ChamberPressure']\n   unit_id  WaferYield  EtchPower  ChamberPressure\n0        0  -13.556807  67.657411        83.108212\n1        1   -4.797247  14.761626        55.937342\n\nexperiment_5_csv ['unit_id', 'WaferYield', 'ChamberPressure', 'EtchPower', 'do_FilterUpgrade']\n   unit_id  WaferYield  ChamberPressure  EtchPower  do_FilterUpgrade\n0        0   25.877175        73.455263  55.824963              75.0\n1        1   26.455988        58.532438  43.008369              75.0\n\nexperiment_6_csv ['unit_id', 'WaferYield', 'ChamberPressure', 'do_FilterUpgrade']\n   unit_id  WaferYield  ChamberPressure  do_FilterUpgrade\n0        0  -28.383162        59.622536              25.0\n1        1   34.625527        90.295184              25.0\n\n"
+    },
+    {
+      "turn": 11,
+      "latency_s": 9.46,
+      "reasoning": "I've established a filter upgrade helps. Let me analyze existing data to check whether pressure is a real driver or a bystander, and confirm the filter effect statistically. Let me run code on experiments 5 and 6 to quantify filter effect controlling for pressure.",
+      "memory": "Hypotheses:\n- Contamination/particles from PM; Filtration raises yield; pressure is bystander/decoy\nRuled out:\n- Pressure actuator does not exist\nConfirmed:\n- Filter upgrade big yield gain\nNext: check pressure causal within fixed filter; test filter dose-response; find defect/particle proxy",
+      "raw": "<reasoning>\nI've established a filter upgrade helps. Let me analyze existing data to check whether pressure is a real driver or a bystander, and confirm the filter effect statistically. Let me run code on experiments 5 and 6 to quantify filter effect controlling for pressure.\n</reasoning>\n<action type=\"code\">\nimport pandas as pd, numpy as np\nfrom scipy import stats\n\ndf5 = pd.read_csv(experiment_5_csv)\ndf6 = pd.read_csv(experiment_6_csv)\n\nprint(\"=== exp5 (filter=75) ===\")\nprint(df5[['WaferYield','ChamberPressure','EtchPower','do_FilterUpgrade']].describe().round(2))\nprint(\"=== exp6 (filter=25) ===\")\nprint(df6[['WaferYield','ChamberPressure','do_FilterUpgrade']].describe().round(2))\n\n# combine 5 & 6 for regression: yield ~ filter + pressure\nc = pd.concat([df5[['WaferYield','ChamberPressure','do_FilterUpgrade']],\n               df6[['WaferYield','ChamberPressure','do_FilterUpgrade']]])\nprint(\"\\ncorr combined:\\n\", c.corr(numeric_only=True).round(3))\n\n# multiple regression manual\nX = np.column_stack([np.ones(len(c)), c['do_FilterUpgrade'], c['ChamberPressure']])\ny = c['WaferYield'].values\nbeta, *_ = np.linalg.lstsq(X, y, rcond=None)\nprint(\"\\nyield = %.3f + %.4f*filter + %.4f*pressure\" % (beta[0],beta[1],beta[2]))\n\n# pressure alone within exp5 (filter held fixed)\ns,i,r,p,se = stats.linregress(df5['ChamberPressure'], df5['WaferYield'])\nprint(\"within exp5 (filter fixed): pressure slope=%.4f r=%.3f p=%.2e\"%(s,r,p))\ns,i,r,p,se = stats.linregress(df6['ChamberPressure'], df6['WaferYield'])\nprint(\"within exp6 (filter fixed): pressure slope=%.4f r=%.3f p=%.2e\"%(s,r,p))\n</action>\n<memory>\nHypotheses:\n- Contamination/particles from PM; Filtration raises yield; pressure is bystander/decoy\nRuled out:\n- Pressure actuator does not exist\nConfirmed:\n- Filter upgrade big yield gain\nNext: check pressure causal within fixed filter; test filter dose-response; find defect/particle proxy\n</memory>",
+      "action_type": "code",
+      "code": "import pandas as pd, numpy as np\nfrom scipy import stats\n\ndf5 = pd.read_csv(experiment_5_csv)\ndf6 = pd.read_csv(experiment_6_csv)\n\nprint(\"=== exp5 (filter=75) ===\")\nprint(df5[['WaferYield','ChamberPressure','EtchPower','do_FilterUpgrade']].describe().round(2))\nprint(\"=== exp6 (filter=25) ===\")\nprint(df6[['WaferYield','ChamberPressure','do_FilterUpgrade']].describe().round(2))\n\n# combine 5 & 6 for regression: yield ~ filter + pressure\nc = pd.concat([df5[['WaferYield','ChamberPressure','do_FilterUpgrade']],\n               df6[['WaferYield','ChamberPressure','do_FilterUpgrade']]])\nprint(\"\\ncorr combined:\\n\", c.corr(numeric_only=True).round(3))\n\n# multiple regression manual\nX = np.column_stack([np.ones(len(c)), c['do_FilterUpgrade'], c['ChamberPressure']])\ny = c['WaferYield'].values\nbeta, *_ = np.linalg.lstsq(X, y, rcond=None)\nprint(\"\\nyield = %.3f + %.4f*filter + %.4f*pressure\" % (beta[0],beta[1],beta[2]))\n\n# pressure alone within exp5 (filter held fixed)\ns,i,r,p,se = stats.linregress(df5['ChamberPressure'], df5['WaferYield'])\nprint(\"within exp5 (filter fixed): pressure slope=%.4f r=%.3f p=%.2e\"%(s,r,p))\ns,i,r,p,se = stats.linregress(df6['ChamberPressure'], df6['WaferYield'])\nprint(\"within exp6 (filter fixed): pressure slope=%.4f r=%.3f p=%.2e\"%(s,r,p))",
+      "code_output": "=== exp5 (filter=75) ===\n       WaferYield  ChamberPressure  EtchPower  do_FilterUpgrade\ncount      400.00           400.00     400.00             400.0\nmean        30.91            75.56      41.07              75.0\nstd          7.31            12.31      11.78               0.0\nmin          9.64            32.84       7.20              75.0\n25%         25.66            66.56      33.31              75.0\n50%         31.10            75.78      40.91              75.0\n75%         36.20            84.55      47.77              75.0\nmax         49.55           109.00      82.09              75.0\n=== exp6 (filter=25) ===\n       WaferYield  ChamberPressure  do_FilterUpgrade\ncount      400.00           400.00             400.0\nmean         3.45            74.85              25.0\nstd         13.27            11.71               0.0\nmin        -29.19            49.07              25.0\n25%         -6.00            66.23              25.0\n50%          3.68            74.15              25.0\n75%         11.97            82.82              25.0\nmax         36.72           109.66              25.0\n\ncorr combined:\n                   WaferYield  ChamberPressure  do_FilterUpgrade\nWaferYield             1.000             0.37             0.789\nChamberPressure        0.370             1.00             0.030\ndo_FilterUpgrade       0.789             0.03             1.000\n\nyield = -47.780 + 0.5421*filter + 0.5034*pressure\nwithin exp5 (filter fixed): pressure slope=0.5171 r=0.871 p=1.31e-124\nwithin exp6 (filter fixed): pressure slope=0.4884 r=0.431 p=1.66e-19\n"
+    },
+    {
+      "turn": 12,
+      "latency_s": 11.9,
+      "reasoning": "The regression shows filter upgrade has a strong causal effect (from 3.45 to 30.91 yield going from filter=25 to filter=75). But within fixed filter, pressure still correlates with yield (slope ~0.5, strong p-values). This could mean pressure is genuinely causal too, OR pressure is a bystander correlated with yield via a common cause. However, the report said the pressure actuator does not exist (I ruled it out). So pressure is likely a bystander/observational correlate.\n\nThe key question: is filter the real fix, and what's the optimal dose? Filter=75 gives yield ~31, filter=25 gives ~3.45. I should test a higher filter dose to check whether more is better or if there's an optimum. Also I want a particle/defect proxy to confirm the mechanism (contamination).\n\nLet me measure a particle/contamination signal to confirm the mechanism, and try a higher filter dose to find optimum. Since I have 9 budget left, let me do a filter dose sweep at a higher level (e.g., 100) with a contamination measure to nail mechanism + optimal dose.",
+      "memory": "Hypotheses:\n- Contamination/particles from PM; Filtration raises yield; pressure is bystander/decoy\nRuled out:\n- Pressure actuator does not exist\nConfirmed:\n- Filter upgrade big yield gain (filter25->3.45, filter75->30.91)\nNext: test filter=100 for optimum, get contamination proxy to confirm mechanism",
+      "raw": "<reasoning>\nThe regression shows filter upgrade has a strong causal effect (from 3.45 to 30.91 yield going from filter=25 to filter=75). But within fixed filter, pressure still correlates with yield (slope ~0.5, strong p-values). This could mean pressure is genuinely causal too, OR pressure is a bystander correlated with yield via a common cause. However, the report said the pressure actuator does not exist (I ruled it out). So pressure is likely a bystander/observational correlate.\n\nThe key question: is filter the real fix, and what's the optimal dose? Filter=75 gives yield ~31, filter=25 gives ~3.45. I should test a higher filter dose to check whether more is better or if there's an optimum. Also I want a particle/defect proxy to confirm the mechanism (contamination).\n\nLet me measure a particle/contamination signal to confirm the mechanism, and try a higher filter dose to find optimum. Since I have 9 budget left, let me do a filter dose sweep at a higher level (e.g., 100) with a contamination measure to nail mechanism + optimal dose.\n</reasoning>\n<action type=\"intervene\">{\"actions\":[{\"request\":\"increase filtration / filter upgrade\",\"value\":100}],\"measure\":[\"WaferYield\",\"particle contamination count\",\"ChamberPressure\"]}</action>\n<memory>\nHypotheses:\n- Contamination/particles from PM; Filtration raises yield; pressure is bystander/decoy\nRuled out:\n- Pressure actuator does not exist\nConfirmed:\n- Filter upgrade big yield gain (filter25->3.45, filter75->30.91)\nNext: test filter=100 for optimum, get contamination proxy to confirm mechanism\n</memory>",
+      "action_type": "intervene",
+      "result": {
+        "mode": "intervene",
+        "experiment_id": 7,
+        "n_units": 400,
+        "applied_intervention": {
+          "FilterUpgrade": 100.0
+        },
+        "action_resolutions": [
+          {
+            "request": "increase filtration / filter upgrade",
+            "kind": "intervene",
+            "ok": true,
+            "interpretation": "apply 'FilterUpgrade' (dosing to reduce ParticleContamination) at 100.0",
+            "target_id": "FilterUpgrade",
+            "value": 100.0,
+            "reason": "",
+            "candidates": [],
+            "method": "alias"
+          }
+        ],
+        "measurement_resolutions": [
+          {
+            "request": "WaferYield",
+            "kind": "measure",
+            "ok": true,
+            "interpretation": "measure 'WaferYield'",
+            "target_id": "WaferYield",
+            "value": null,
+            "reason": "",
+            "candidates": [],
+            "method": "alias"
+          },
+          {
+            "request": "particle contamination count",
+            "kind": "reject",
+            "ok": false,
+            "interpretation": "no assay for 'ParticleContamination'",
+            "target_id": null,
+            "value": null,
+            "reason": "That quantity is not directly measurable on this rig; there is no assay for it.",
+            "candidates": [],
+            "method": "alias"
+          },
+          {
+            "request": "ChamberPressure",
+            "kind": "measure",
+            "ok": true,
+            "interpretation": "measure 'ChamberPressure'",
+            "target_id": "ChamberPressure",
+            "value": null,
+            "reason": "",
+            "candidates": [],
+            "method": "alias"
+          }
+        ],
+        "readings": {
+          "WaferYield": 30.402,
+          "ChamberPressure": 75.209
+        },
+        "raw_csv": "results_v8_validation_opus/v7_semiconductor_surrogate_symptom_trap_20000113_data/experiment_7.csv"
+      }
+    },
+    {
+      "turn": 13,
+      "latency_s": 5.7,
+      "reasoning": "Let me review all the data I've collected. FilterUpgrade appears to strongly increase yield (filter25\u21923.45?, filter75\u219230.91, filter100\u219230.4). Let me analyze the CSVs to understand dose-response and find the true mechanism proxy, and check whether pressure is a decoy.",
+      "memory": "Hypotheses:\n- Contamination/particles from PM; Filtration raises yield; pressure is bystander/decoy\nRuled out:\n- Pressure actuator does not exist\nConfirmed:\n- Filter upgrade big yield gain (filter25->3.45, filter75->30.91, filter100->30.4)\nNext: analyze CSVs, find true proxy, confirm pressure decoy",
+      "raw": "<reasoning>Let me review all the data I've collected. FilterUpgrade appears to strongly increase yield (filter25\u21923.45?, filter75\u219230.91, filter100\u219230.4). Let me analyze the CSVs to understand dose-response and find the true mechanism proxy, and check whether pressure is a decoy.</reasoning>\n<action type=\"code\">\nimport pandas as pd, numpy as np\nfor i in [1,3,5,6,7]:\n    try:\n        df=pd.read_csv(eval(f\"experiment_{i}_csv\"))\n        print(f\"=== exp {i} cols:\", list(df.columns))\n        print(df.describe().round(3).to_string())\n        print(\"corr:\\n\", df.corr(numeric_only=True).round(3).to_string())\n    except Exception as e:\n        print(i,\"err\",e)\n</action>\n<memory>\nHypotheses:\n- Contamination/particles from PM; Filtration raises yield; pressure is bystander/decoy\nRuled out:\n- Pressure actuator does not exist\nConfirmed:\n- Filter upgrade big yield gain (filter25->3.45, filter75->30.91, filter100->30.4)\nNext: analyze CSVs, find true proxy, confirm pressure decoy\n</memory>",
+      "action_type": "code",
+      "code": "import pandas as pd, numpy as np\nfor i in [1,3,5,6,7]:\n    try:\n        df=pd.read_csv(eval(f\"experiment_{i}_csv\"))\n        print(f\"=== exp {i} cols:\", list(df.columns))\n        print(df.describe().round(3).to_string())\n        print(\"corr:\\n\", df.corr(numeric_only=True).round(3).to_string())\n    except Exception as e:\n        print(i,\"err\",e)",
+      "code_output": "=== exp 1 cols: ['unit_id', 'WaferYield', 'ChamberPressure', 'BakeTemperature']\n       unit_id  WaferYield  ChamberPressure  BakeTemperature\ncount  400.000     400.000          400.000          400.000\nmean   199.500      -8.816           74.177           50.740\nstd    115.614      12.446           12.254           12.256\nmin      0.000     -40.378           40.614           12.998\n25%     99.750     -17.179           65.733           42.422\n50%    199.500      -9.796           74.344           50.429\n75%    299.250      -0.870           83.064           59.127\nmax    399.000      29.409          107.479           80.675\ncorr:\n                  unit_id  WaferYield  ChamberPressure  BakeTemperature\nunit_id            1.000       0.017           -0.091           -0.054\nWaferYield         0.017       1.000            0.471           -0.027\nChamberPressure   -0.091       0.471            1.000            0.058\nBakeTemperature   -0.054      -0.027            0.058            1.000\n=== exp 3 cols: ['unit_id', 'WaferYield', 'EtchPower', 'ChamberPressure']\n       unit_id  WaferYield  EtchPower  ChamberPressure\ncount  400.000     400.000    400.000          400.000\nmean   199.500      -7.549     39.476           74.640\nstd    115.614      13.076     12.101           11.291\nmin      0.000     -38.372     10.573           38.985\n25%     99.750     -17.153     31.113           67.146\n50%    199.500      -9.263     39.506           75.093\n75%    299.250       0.473     48.149           82.812\nmax    399.000      34.046     70.850          103.109\ncorr:\n                  unit_id  WaferYield  EtchPower  ChamberPressure\nunit_id            1.000       0.004      0.033            0.056\nWaferYield         0.004       1.000     -0.426            0.450\nEtchPower          0.033      -0.426      1.000            0.057\nChamberPressure    0.056       0.450      0.057            1.000\n=== exp 5 cols: ['unit_id', 'WaferYield', 'ChamberPressure', 'EtchPower', 'do_FilterUpgrade']\n       unit_id  WaferYield  ChamberPressure  EtchPower  do_FilterUpgrade\ncount  400.000     400.000          400.000    400.000             400.0\nmean   199.500      30.915           75.559     41.071              75.0\nstd    115.614       7.311           12.308     11.776               0.0\nmin      0.000       9.643           32.840      7.205              75.0\n25%     99.750      25.661           66.558     33.312              75.0\n50%    199.500      31.098           75.778     40.912              75.0\n75%    299.250      36.202           84.545     47.775              75.0\nmax    399.000      49.550          108.999     82.091              75.0\ncorr:\n                   unit_id  WaferYield  ChamberPressure  EtchPower  do_FilterUpgrade\nunit_id             1.000      -0.007           -0.018      0.024               NaN\nWaferYield         -0.007       1.000            0.871      0.022               NaN\nChamberPressure    -0.018       0.871            1.000      0.015               NaN\nEtchPower           0.024       0.022            0.015      1.000               NaN\ndo_FilterUpgrade      NaN         NaN              NaN        NaN               NaN\n=== exp 6 cols: ['unit_id', 'WaferYield', 'ChamberPressure', 'do_FilterUpgrade']\n       unit_id  WaferYield  ChamberPressure  do_FilterUpgrade\ncount  400.000     400.000          400.000             400.0\nmean   199.500       3.453           74.847              25.0\nstd    115.614      13.271           11.707               0.0\nmin      0.000     -29.194           49.066              25.0\n25%     99.750      -5.997           66.227              25.0\n50%    199.500       3.677           74.152              25.0\n75%    299.250      11.972           82.825              25.0\nmax    399.000      36.716          109.658              25.0\ncorr:\n                   unit_id  WaferYield  ChamberPressure  do_FilterUpgrade\nunit_id             1.000      -0.016           -0.051               NaN\nWaferYield         -0.016       1.000            0.431               NaN\nChamberPressure    -0.051       0.431            1.000               NaN\ndo_FilterUpgrade      NaN         NaN              NaN               NaN\n=== exp 7 cols: ['unit_id', 'WaferYield', 'ChamberPressure', 'do_FilterUpgrade']\n       unit_id  WaferYield  ChamberPressure  do_FilterUpgrade\ncount  400.000     400.000          400.000             400.0\nmean   199.500      30.402           75.209             100.0\nstd    115.614       7.326           11.796               0.0\nmin      0.000      11.332           40.960             100.0\n25%     99.750      25.257           66.594             100.0\n50%    199.500      30.511           74.815             100.0\n75%    299.250      34.820           82.811             100.0\nmax    399.000      54.569          109.010             100.0\ncorr:\n                   unit_id  WaferYield  ChamberPressure  do_FilterUpgrade\nunit_id             1.000      -0.024           -0.028               NaN\nWaferYield         -0.024       1.000            0.846               NaN\nChamberPressure    -0.028       0.846            1.000               NaN\ndo_FilterUpgrade      NaN         NaN              NaN               NaN\n"
+    },
+    {
+      "turn": 14,
+      "latency_s": 9.73,
+      "reasoning": "Let me interpret the data. FilterUpgrade dramatically raises yield: at 25\u21923.45 mean, at 75\u219230.91, at 100\u219230.40. So filtration is the key lever, and returns diminish beyond ~75 (75 and 100 essentially equal). The optimal filter level is around 75.\n\nChamberPressure correlates strongly with yield (r=0.47 baseline, r=0.87 under filter upgrade), but pressure has no actuator \u2014 so it's a bystander/decoy driven by whatever filtration also affects. EtchPower had a negative correlation (r=-0.426) in exp3 but under filter upgrade it dropped to ~0 correlation \u2014 suggesting EtchPower correlation was spurious/confounded and not causal.\n\nThe situation report favored pressure/temperature retuning; my data show pressure is not an actuator and BakeTemperature has ~0 correlation. Filtration is the real fix.\n\nLet me confirm the dose-response for filter and check whether pressure remains a confound. I should test an intermediate filter level (e.g., 50) to nail the optimal dose, and verify diminishing returns. Actually I have 25, 75, 100. 75 and 100 give nearly identical yields (~30.5), 25 gives 3.45. So somewhere between 25 and 75 the benefit saturates. Let me test 50 to find the knee.",
+      "memory": "Hypotheses:\n- Contamination/particles from PM; Filtration raises yield; pressure & etchpower are bystanders/decoys\nRuled out:\n- Pressure actuator does not exist; BakeTemp ~0 corr; EtchPower corr spurious (drops to 0 under filter upgrade)\nConfirmed:\n- Filter upgrade big yield gain: 25->3.45, 75->30.91, 100->30.40 (saturates ~75)\nNext: test filter=50 to find knee; then answer with filter~75 fix",
+      "raw": "<reasoning>\nLet me interpret the data. FilterUpgrade dramatically raises yield: at 25\u21923.45 mean, at 75\u219230.91, at 100\u219230.40. So filtration is the key lever, and returns diminish beyond ~75 (75 and 100 essentially equal). The optimal filter level is around 75.\n\nChamberPressure correlates strongly with yield (r=0.47 baseline, r=0.87 under filter upgrade), but pressure has no actuator \u2014 so it's a bystander/decoy driven by whatever filtration also affects. EtchPower had a negative correlation (r=-0.426) in exp3 but under filter upgrade it dropped to ~0 correlation \u2014 suggesting EtchPower correlation was spurious/confounded and not causal.\n\nThe situation report favored pressure/temperature retuning; my data show pressure is not an actuator and BakeTemperature has ~0 correlation. Filtration is the real fix.\n\nLet me confirm the dose-response for filter and check whether pressure remains a confound. I should test an intermediate filter level (e.g., 50) to nail the optimal dose, and verify diminishing returns. Actually I have 25, 75, 100. 75 and 100 give nearly identical yields (~30.5), 25 gives 3.45. So somewhere between 25 and 75 the benefit saturates. Let me test 50 to find the knee.\n</reasoning>\n\n<action type=\"intervene\">{\"actions\":[{\"request\":\"upgrade/increase the filtration module cleanliness\",\"value\":50}],\"measure\":[\"WaferYield\",\"ChamberPressure\"]}</action>\n\n<memory>\nHypotheses:\n- Contamination/particles from PM; Filtration raises yield; pressure & etchpower are bystanders/decoys\nRuled out:\n- Pressure actuator does not exist; BakeTemp ~0 corr; EtchPower corr spurious (drops to 0 under filter upgrade)\nConfirmed:\n- Filter upgrade big yield gain: 25->3.45, 75->30.91, 100->30.40 (saturates ~75)\nNext: test filter=50 to find knee; then answer with filter~75 fix\n</memory>",
+      "action_type": "intervene",
+      "result": {
+        "mode": "intervene",
+        "experiment_id": 8,
+        "n_units": 400,
+        "applied_intervention": {
+          "FilterUpgrade": 50.0
+        },
+        "action_resolutions": [
+          {
+            "request": "upgrade/increase the filtration module cleanliness",
+            "kind": "intervene",
+            "ok": true,
+            "interpretation": "apply 'FilterUpgrade' (dosing to reduce ParticleContamination) at 50.0",
+            "target_id": "FilterUpgrade",
+            "value": 50.0,
+            "reason": "",
+            "candidates": [],
+            "method": "alias"
+          }
+        ],
+        "measurement_resolutions": [
+          {
+            "request": "WaferYield",
+            "kind": "measure",
+            "ok": true,
+            "interpretation": "measure 'WaferYield'",
+            "target_id": "WaferYield",
+            "value": null,
+            "reason": "",
+            "candidates": [],
+            "method": "alias"
+          },
+          {
+            "request": "ChamberPressure",
+            "kind": "measure",
+            "ok": true,
+            "interpretation": "measure 'ChamberPressure'",
+            "target_id": "ChamberPressure",
+            "value": null,
+            "reason": "",
+            "candidates": [],
+            "method": "alias"
+          }
+        ],
+        "readings": {
+          "WaferYield": 22.494,
+          "ChamberPressure": 75.643
+        },
+        "raw_csv": "results_v8_validation_opus/v7_semiconductor_surrogate_symptom_trap_20000113_data/experiment_8.csv"
+      }
+    },
+    {
+      "turn": 15,
+      "latency_s": 6.49,
+      "reasoning": "I've established filtration is the key driver. Let me check the dose-response across all filter levels I've collected to pick the optimal dose. From memory: 25->3.45, 50->22.49, 75->30.91, 100->30.40. So it saturates around 75. Let me verify with the data and confirm the knee. No new experiment needed\u2014just analyze what I have.",
+      "memory": "Hypotheses:\n- Contamination/particles from PM; Filtration raises yield; pressure & etchpower are bystanders/decoys\nRuled out:\n- Pressure actuator does not exist; BakeTemp ~0 corr; EtchPower corr spurious (drops to 0 under filter upgrade)\nConfirmed:\n- Filter upgrade big yield gain: 25->3.45, 50->22.49, 75->30.91, 100->30.40 (saturates ~75)\nNext: answer with filter~75 fix",
+      "raw": "<reasoning>\nI've established filtration is the key driver. Let me check the dose-response across all filter levels I've collected to pick the optimal dose. From memory: 25->3.45, 50->22.49, 75->30.91, 100->30.40. So it saturates around 75. Let me verify with the data and confirm the knee. No new experiment needed\u2014just analyze what I have.\n</reasoning>\n\n<action type=\"code\">\nimport pandas as pd, numpy as np\n# summarize filter dose-response from memory readings\ndoses = [25,50,75,100]\nyields = [3.45,22.49,30.91,30.40]\nfor d,y in zip(doses,yields):\n    print(f\"Filter={d}: Yield={y}\")\n# knee is between 50 and 75; 75 saturates. Confirm EtchPower not causal\ndf8 = pd.read_csv(experiment_8_csv)\nprint(df8.columns.tolist())\nprint(df8.corr(numeric_only=True).round(3))\n</action>\n\n<memory>\nHypotheses:\n- Contamination/particles from PM; Filtration raises yield; pressure & etchpower are bystanders/decoys\nRuled out:\n- Pressure actuator does not exist; BakeTemp ~0 corr; EtchPower corr spurious (drops to 0 under filter upgrade)\nConfirmed:\n- Filter upgrade big yield gain: 25->3.45, 50->22.49, 75->30.91, 100->30.40 (saturates ~75)\nNext: answer with filter~75 fix\n</memory>",
+      "action_type": "code",
+      "code": "import pandas as pd, numpy as np\n# summarize filter dose-response from memory readings\ndoses = [25,50,75,100]\nyields = [3.45,22.49,30.91,30.40]\nfor d,y in zip(doses,yields):\n    print(f\"Filter={d}: Yield={y}\")\n# knee is between 50 and 75; 75 saturates. Confirm EtchPower not causal\ndf8 = pd.read_csv(experiment_8_csv)\nprint(df8.columns.tolist())\nprint(df8.corr(numeric_only=True).round(3))",
+      "code_output": "Filter=25: Yield=3.45\nFilter=50: Yield=22.49\nFilter=75: Yield=30.91\nFilter=100: Yield=30.4\n['unit_id', 'WaferYield', 'ChamberPressure', 'do_FilterUpgrade']\n                  unit_id  WaferYield  ChamberPressure  do_FilterUpgrade\nunit_id             1.000      -0.088           -0.089               NaN\nWaferYield         -0.088       1.000            0.663               NaN\nChamberPressure    -0.089       0.663            1.000               NaN\ndo_FilterUpgrade      NaN         NaN              NaN               NaN\n"
+    },
+    {
+      "turn": 16,
+      "latency_s": 10.67,
+      "reasoning": "I have strong evidence. Filter upgrade shows dose-response: yield rises from 3.45 at filter=25 to ~30.9 at 75, saturating at 75 (100 gives no more benefit, 30.4). This points to contamination/particulates from the PM window as the true cause, filtered out by the filtration module. ChamberPressure correlates with yield (0.663) but pressure actuator does not exist and it's a bystander. EtchPower correlation dropped to zero under filter upgrade \u2014 a confounded decoy. The engineers' favored setpoint retuning (pressure/temp) is a trap. Recommended fix: filter upgrade at ~75.",
+      "memory": "Confirmed: Filtration upgrade is causal fix; saturates ~75. Pressure/EtchPower decoys. Answer submitted.",
+      "raw": "<reasoning>\nI have strong evidence. Filter upgrade shows dose-response: yield rises from 3.45 at filter=25 to ~30.9 at 75, saturating at 75 (100 gives no more benefit, 30.4). This points to contamination/particulates from the PM window as the true cause, filtered out by the filtration module. ChamberPressure correlates with yield (0.663) but pressure actuator does not exist and it's a bystander. EtchPower correlation dropped to zero under filter upgrade \u2014 a confounded decoy. The engineers' favored setpoint retuning (pressure/temp) is a trap. Recommended fix: filter upgrade at ~75.\n</reasoning>\n<action type=\"answer\">{\n  \"recommended_intervention_text\":[{\"request\":\"upgrade/increase filtration module capacity\",\"value\":75}],\n  \"structured\":{\n     \"true_mechanism_proxy\":\"Particulate/contamination load removed by the filtration module (FilterUpgrade dose-response drives yield)\",\n     \"confounded_decoys\":[\"ChamberPressure\",\"EtchPower\"],\n     \"actuator_sign_predictions\":{\"upgrade/increase filtration module capacity\":\"+\",\"retune chamber pressure setpoint\":\"0\",\"adjust bake temperature\":\"0\"}\n  },\n  \"explanation\":\"The yield drop began right after the PM window on etch/deposition tools, and inline inspection flagged more defects on a mid-line layer \u2014 classic signature of particulate contamination introduced during maintenance, not a setpoint drift. Filtration is the decisive lever: increasing filter capacity produced a clean monotonic dose-response in WaferYield (25->3.45, 50->22.49, 75->30.91, 100->30.40), saturating around 75. ChamberPressure correlates with yield (r=0.663) but no pressure actuator exists and it is a passive bystander; EtchPower's apparent correlation collapsed to zero once the filter upgrade was held, marking it as a confounded decoy. The engineers' plan to retune pressure/temperature setpoints would not address the real cause. Recommendation: raise filtration to ~75 (more than that adds cost without extra yield).\"\n}</action>\n<memory>\nConfirmed: Filtration upgrade is causal fix; saturates ~75. Pressure/EtchPower decoys. Answer submitted.\n</memory>",
+      "action_type": "answer",
+      "policy_resolution": null,
+      "answer_raw": {
+        "recommended_intervention_text": [
+          {
+            "request": "upgrade/increase filtration module capacity",
+            "value": 75
+          }
+        ],
+        "structured": {
+          "true_mechanism_proxy": "Particulate/contamination load removed by the filtration module (FilterUpgrade dose-response drives yield)",
+          "confounded_decoys": [
+            "ChamberPressure",
+            "EtchPower"
+          ],
+          "actuator_sign_predictions": {
+            "upgrade/increase filtration module capacity": "+",
+            "retune chamber pressure setpoint": "0",
+            "adjust bake temperature": "0"
+          }
+        },
+        "explanation": "The yield drop began right after the PM window on etch/deposition tools, and inline inspection flagged more defects on a mid-line layer \u2014 classic signature of particulate contamination introduced during maintenance, not a setpoint drift. Filtration is the decisive lever: increasing filter capacity produced a clean monotonic dose-response in WaferYield (25->3.45, 50->22.49, 75->30.91, 100->30.40), saturating around 75. ChamberPressure correlates with yield (r=0.663) but no pressure actuator exists and it is a passive bystander; EtchPower's apparent correlation collapsed to zero once the filter upgrade was held, marking it as a confounded decoy. The engineers' plan to retune pressure/temperature setpoints would not address the real cause. Recommendation: raise filtration to ~75 (more than that adds cost without extra yield)."
+      },
+      "resolved_intervention": {
+        "FilterUpgrade": 75.0
+      },
+      "answer_resolution_echo": [
+        {
+          "request": "upgrade/increase filtration module capacity",
+          "kind": "intervene",
+          "ok": true,
+          "interpretation": "apply 'FilterUpgrade' (dosing to reduce ParticleContamination) at 75.0",
+          "target_id": "FilterUpgrade",
+          "value": 75.0,
+          "reason": "",
+          "candidates": [],
+          "method": "alias"
+        }
+      ],
+      "grade": {
+        "accepted": false,
+        "part_a_utility_ok": true,
+        "part_b_battery_ok": false,
+        "recommended_intervention": {
+          "FilterUpgrade": 75.0
+        },
+        "recommended_utility": 30.514,
+        "gold_intervention": {
+          "FilterUpgrade": 100.0
+        },
+        "gold_utility": 30.491,
+        "baseline_utility": -7.821,
+        "benefit_recovered": 1.001,
+        "is_conditional_policy": false,
+        "utility_gap": -0.023,
+        "battery_fraction": 0.6,
+        "battery_items": [
+          [
+            "true_mechanism_proxy",
+            false
+          ],
+          [
+            "confounded_decoys",
+            false
+          ],
+          [
+            "sign:adjust bake temperature",
+            true
+          ],
+          [
+            "sign:FilterUpgrade",
+            true
+          ],
+          [
+            "sign:set_ChamberFlowUniformity",
+            true
+          ]
+        ]
+      },
+      "artifact_check": {
+        "suspect": true,
+        "reasons": [
+          "part A (utility) passed but part B (battery) failed \u2014 verify battery credited a correct answer"
+        ]
+      }
+    }
+  ],
+  "wall_seconds": 259.5,
+  "model": "us.anthropic.claude-opus-4-8",
+  "world_file": "/home/ec2-user/SageMaker/vivian/data/rpg_v8_fast_worlds/world_v7_semiconductor_surrogate_symptom_trap_20000113.json"
+}

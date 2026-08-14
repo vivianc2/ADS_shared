@@ -81,6 +81,7 @@ class WorldStream:
     split: str = "train"                 # "train" | "heldout"
     seed0: int = 1_000_000
     require_feature: Optional[str] = None
+    archetypes: Optional[List[str]] = None  # restrict to these archetypes (e.g. curriculum start)
     rng_seed: int = 0                    # controls cell-selection order only
 
     # runtime counters (useful for the acceptance-rate health check)
@@ -98,7 +99,9 @@ class WorldStream:
             assert self.require_feature in FEATURES, self.require_feature
         self._seed = self.seed0
         self._cells = _cells_for(self.split)
-        assert self._cells, f"no cells for split={self.split}"
+        if self.archetypes:                       # optional archetype restriction
+            self._cells = [(s, a) for (s, a) in self._cells if a in self.archetypes]
+        assert self._cells, f"no cells for split={self.split} archetypes={self.archetypes}"
         self._rng = random.Random(self.rng_seed)
 
     def acceptance(self) -> float:

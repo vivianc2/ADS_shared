@@ -1,0 +1,1013 @@
+{
+  "world_id": "v7_catalysis_dosewin_interior_dose_sympto_10001512",
+  "domain": "catalysis",
+  "queries_used": 12,
+  "interventions_run": 4,
+  "answered": true,
+  "hit_turn_cap": false,
+  "grade": {
+    "accepted": true,
+    "part_a_utility_ok": true,
+    "part_b_battery_ok": true,
+    "recommended_intervention": {
+      "RegenerationCycle": 70.0
+    },
+    "recommended_utility": 21.619,
+    "gold_intervention": {
+      "FeedFlowRate": 0.0,
+      "RegenerationCycle": 66.0
+    },
+    "gold_utility": 22.796,
+    "baseline_utility": -8.236,
+    "benefit_recovered": 0.962,
+    "is_conditional_policy": false,
+    "utility_gap": 1.177,
+    "battery_fraction": 0.833,
+    "battery_items": [
+      [
+        "true_mechanism_proxy",
+        true
+      ],
+      [
+        "confounded_decoys",
+        false
+      ],
+      [
+        "sign:add feed purification/guard bed",
+        true
+      ],
+      [
+        "sign:retune temperature",
+        true
+      ],
+      [
+        "sign:retune pressure",
+        true
+      ],
+      [
+        "sign:RegenerationCycle",
+        true
+      ]
+    ]
+  },
+  "gold": {
+    "intervention": {
+      "FeedFlowRate": 0.0,
+      "RegenerationCycle": 66.0
+    },
+    "expected_utility": 22.8
+  },
+  "turns": [
+    {
+      "turn": 0,
+      "latency_s": 14.63,
+      "reasoning": "The decline followed a new feedstock supplier switch. Classic catalyst poisoning by trace contaminants (e.g. sulfur) in new feed. Temperature/pressure are the team's theory but likely decoys. Let me start by measuring the outcome and candidate signals: conversion, feed contaminant levels (sulfur), temperature, pressure, byproduct fraction, catalyst activity indicators.",
+      "memory": "Hypotheses: new feed carries catalyst poison (sulfur/trace metal); temp/pressure are decoys.\nRuled out:\nConfirmed:\nNext: measure baseline signals, then test intervention (feed polishing / regeneration).",
+      "raw": "<reasoning>The decline followed a new feedstock supplier switch. Classic catalyst poisoning by trace contaminants (e.g. sulfur) in new feed. Temperature/pressure are the team's theory but likely decoys. Let me start by measuring the outcome and candidate signals: conversion, feed contaminant levels (sulfur), temperature, pressure, byproduct fraction, catalyst activity indicators.</reasoning>\n<action type=\"measure\">{\"requests\":[\"reactor conversion efficiency\",\"feed sulfur or contaminant level\",\"reactor temperature\",\"reactor pressure\",\"byproduct fraction\",\"catalyst active site availability\"]}</action>\n<memory>\nHypotheses: new feed carries catalyst poison (sulfur/trace metal); temp/pressure are decoys.\nRuled out:\nConfirmed:\nNext: measure baseline signals, then test intervention (feed polishing / regeneration).\n</memory>",
+      "action_type": "measure",
+      "result": {
+        "mode": "measure",
+        "experiment_id": 1,
+        "n_units": 400,
+        "resolutions": [
+          {
+            "request": "reactor conversion efficiency",
+            "kind": "measure",
+            "ok": true,
+            "interpretation": "measure 'ConversionEfficiency'",
+            "target_id": "ConversionEfficiency",
+            "value": null,
+            "reason": "",
+            "candidates": [],
+            "method": "alias"
+          },
+          {
+            "request": "feed sulfur or contaminant level",
+            "kind": "reject",
+            "ok": false,
+            "interpretation": "not present (llm)",
+            "target_id": null,
+            "value": null,
+            "reason": "That is not part of this system.",
+            "candidates": [],
+            "method": "llm"
+          },
+          {
+            "request": "reactor temperature",
+            "kind": "reject",
+            "ok": false,
+            "interpretation": "not present (llm)",
+            "target_id": null,
+            "value": null,
+            "reason": "That is not part of this system.",
+            "candidates": [],
+            "method": "llm"
+          },
+          {
+            "request": "reactor pressure",
+            "kind": "measure",
+            "ok": true,
+            "interpretation": "measure 'PressureDropBed'",
+            "target_id": "PressureDropBed",
+            "value": null,
+            "reason": "",
+            "candidates": [],
+            "method": "alias"
+          },
+          {
+            "request": "byproduct fraction",
+            "kind": "measure",
+            "ok": true,
+            "interpretation": "measure 'EffluentByproduct'",
+            "target_id": "EffluentByproduct",
+            "value": null,
+            "reason": "",
+            "candidates": [],
+            "method": "alias"
+          },
+          {
+            "request": "catalyst active site availability",
+            "kind": "reject",
+            "ok": false,
+            "interpretation": "no assay for 'ActiveSiteBlocking'",
+            "target_id": null,
+            "value": null,
+            "reason": "That quantity is not directly measurable on this rig; there is no assay for it.",
+            "candidates": [],
+            "method": "alias"
+          }
+        ],
+        "readings": {
+          "ConversionEfficiency": {
+            "mean": -9.152,
+            "sd": 10.836,
+            "se": 0.542
+          },
+          "PressureDropBed": {
+            "mean": 50.266,
+            "sd": 12.692,
+            "se": 0.635
+          },
+          "EffluentByproduct": {
+            "mean": 42.686,
+            "sd": 16.822,
+            "se": 0.841
+          },
+          "_correlations": {
+            "ConversionEfficiency~PressureDropBed": -0.006,
+            "ConversionEfficiency~EffluentByproduct": -0.422,
+            "PressureDropBed~EffluentByproduct": -0.001
+          }
+        },
+        "raw_csv": "results_v8_validation_opus/v7_catalysis_dosewin_interior_dose_sympto_10001512_data/experiment_1.csv"
+      }
+    },
+    {
+      "turn": 1,
+      "latency_s": 8.91,
+      "reasoning": "Baseline: Conversion correlates with EffluentByproduct (r=-0.42), not with PressureDropBed (r=-0.006). So pressure drop is a likely decoy; byproduct is a candidate marker. Temperature and feed contaminant aren't measurable directly. The story points to catalyst poisoning from new feed. Available levers: feed polishing, regeneration, purification. Let me explore what measurable signals exist and test feed polishing as an intervention. First, let me try intervening with feed polishing (removes contaminants) and regeneration to see which restores conversion.\n\nLet me start by testing feed polishing alone.",
+      "memory": "Hypotheses: new feed carries catalyst poison; byproduct is downstream marker; pressure drop is decoy.\nRuled out: pressure drop not correlated with conversion (r=-0.006).\nConfirmed: Conversion~Byproduct r=-0.42 (candidate marker).\nNext: test feed polishing effect; then regeneration; find best dose.",
+      "raw": "<reasoning>\nBaseline: Conversion correlates with EffluentByproduct (r=-0.42), not with PressureDropBed (r=-0.006). So pressure drop is a likely decoy; byproduct is a candidate marker. Temperature and feed contaminant aren't measurable directly. The story points to catalyst poisoning from new feed. Available levers: feed polishing, regeneration, purification. Let me explore what measurable signals exist and test feed polishing as an intervention. First, let me try intervening with feed polishing (removes contaminants) and regeneration to see which restores conversion.\n\nLet me start by testing feed polishing alone.\n</reasoning>\n<action type=\"intervene\">{\"actions\":[{\"request\":\"polish the feed to remove contaminants\",\"value\":\"high\"}],\"measure\":[\"reactor conversion efficiency\",\"byproduct fraction\",\"reactor pressure\"]}</action>\n<memory>\nHypotheses: new feed carries catalyst poison; byproduct is downstream marker; pressure drop is decoy.\nRuled out: pressure drop not correlated with conversion (r=-0.006).\nConfirmed: Conversion~Byproduct r=-0.42 (candidate marker).\nNext: test feed polishing effect; then regeneration; find best dose.\n</memory>",
+      "action_type": "intervene",
+      "result": {
+        "mode": "intervene",
+        "experiment_id": 2,
+        "n_units": 400,
+        "applied_intervention": {},
+        "action_resolutions": [
+          {
+            "request": "polish the feed to remove contaminants",
+            "kind": "reject",
+            "ok": false,
+            "interpretation": "not present (llm)",
+            "target_id": null,
+            "value": null,
+            "reason": "That is not part of this system.",
+            "candidates": [],
+            "method": "llm"
+          }
+        ],
+        "measurement_resolutions": [
+          {
+            "request": "reactor conversion efficiency",
+            "kind": "measure",
+            "ok": true,
+            "interpretation": "measure 'ConversionEfficiency'",
+            "target_id": "ConversionEfficiency",
+            "value": null,
+            "reason": "",
+            "candidates": [],
+            "method": "alias"
+          },
+          {
+            "request": "byproduct fraction",
+            "kind": "measure",
+            "ok": true,
+            "interpretation": "measure 'EffluentByproduct'",
+            "target_id": "EffluentByproduct",
+            "value": null,
+            "reason": "",
+            "candidates": [],
+            "method": "alias"
+          },
+          {
+            "request": "reactor pressure",
+            "kind": "measure",
+            "ok": true,
+            "interpretation": "measure 'PressureDropBed'",
+            "target_id": "PressureDropBed",
+            "value": null,
+            "reason": "",
+            "candidates": [],
+            "method": "alias"
+          }
+        ],
+        "readings": {},
+        "raw_csv": null
+      }
+    },
+    {
+      "turn": 2,
+      "latency_s": 9.03,
+      "reasoning": "My feed-polishing request was rejected. The report mentions feed, temperature, purification, and regeneration systems are adjustable, plus polishing and regeneration options. The poison hypothesis fits: new feedstock supplier introduced a contaminant that poisons the fresh catalyst. Let me first measure more broadly to understand what signals exist \u2014 particularly a contaminant/poison level in the feed and catalyst activity. Let me measure feed contaminant level, catalyst activity/temperature, and conversion together to establish correlations before intervening.",
+      "memory": "Hypotheses: new feed carries catalyst poison; byproduct is downstream marker; pressure drop decoy.\nRuled out: pressure drop not correlated with conversion (r=-0.006); \"polish the feed\" NOT an available action.\nConfirmed: Conversion~Byproduct r=-0.42 (candidate marker).\nNext: identify feed contaminant signal; test regeneration & purification actuators.",
+      "raw": "<reasoning>My feed-polishing request was rejected. The report mentions feed, temperature, purification, and regeneration systems are adjustable, plus polishing and regeneration options. The poison hypothesis fits: new feedstock supplier introduced a contaminant that poisons the fresh catalyst. Let me first measure more broadly to understand what signals exist \u2014 particularly a contaminant/poison level in the feed and catalyst activity. Let me measure feed contaminant level, catalyst activity/temperature, and conversion together to establish correlations before intervening.</reasoning>\n<action type=\"measure\">{\"requests\":[\"feed contaminant or poison level\",\"catalyst activity\",\"reactor temperature\",\"dissolved sulfur or metals in feed\",\"conversion efficiency\"]}</action>\n<memory>\nHypotheses: new feed carries catalyst poison; byproduct is downstream marker; pressure drop decoy.\nRuled out: pressure drop not correlated with conversion (r=-0.006); \"polish the feed\" NOT an available action.\nConfirmed: Conversion~Byproduct r=-0.42 (candidate marker).\nNext: identify feed contaminant signal; test regeneration & purification actuators.\n</memory>",
+      "action_type": "measure",
+      "result": {
+        "mode": "measure",
+        "experiment_id": 3,
+        "n_units": 400,
+        "resolutions": [
+          {
+            "request": "feed contaminant or poison level",
+            "kind": "reject",
+            "ok": false,
+            "interpretation": "not present (llm)",
+            "target_id": null,
+            "value": null,
+            "reason": "That is not part of this system.",
+            "candidates": [],
+            "method": "llm"
+          },
+          {
+            "request": "catalyst activity",
+            "kind": "reject",
+            "ok": false,
+            "interpretation": "no assay for 'ActiveSiteBlocking'",
+            "target_id": null,
+            "value": null,
+            "reason": "That quantity is not directly measurable on this rig; there is no assay for it.",
+            "candidates": [],
+            "method": "alias"
+          },
+          {
+            "request": "reactor temperature",
+            "kind": "reject",
+            "ok": false,
+            "interpretation": "not present (llm)",
+            "target_id": null,
+            "value": null,
+            "reason": "That is not part of this system.",
+            "candidates": [],
+            "method": "llm"
+          },
+          {
+            "request": "dissolved sulfur or metals in feed",
+            "kind": "reject",
+            "ok": false,
+            "interpretation": "not present (llm)",
+            "target_id": null,
+            "value": null,
+            "reason": "That is not part of this system.",
+            "candidates": [],
+            "method": "llm"
+          },
+          {
+            "request": "conversion efficiency",
+            "kind": "measure",
+            "ok": true,
+            "interpretation": "measure 'ConversionEfficiency'",
+            "target_id": "ConversionEfficiency",
+            "value": null,
+            "reason": "",
+            "candidates": [],
+            "method": "alias"
+          }
+        ],
+        "readings": {
+          "ConversionEfficiency": {
+            "mean": -8.121,
+            "sd": 11.283,
+            "se": 0.564
+          },
+          "_correlations": {}
+        },
+        "raw_csv": "results_v8_validation_opus/v7_catalysis_dosewin_interior_dose_sympto_10001512_data/experiment_3.csv"
+      }
+    },
+    {
+      "turn": 3,
+      "latency_s": 14.53,
+      "reasoning": "Many of my probe requests were rejected. Let me see what signals actually exist. The measure at experiment_1 presumably returned some readings. Let me inspect the CSVs I have to learn the available column names before spending more budget.",
+      "memory": "Hypotheses: new feed carries catalyst poison; byproduct is downstream marker; pressure drop decoy.\nRuled out: pressure drop not correlated (r=-0.006); \"polish the feed\" NOT available.\nConfirmed: Conversion~Byproduct r=-0.42.\nNext: learn available columns from CSVs, then test purification/regeneration actuators.",
+      "raw": "<reasoning>Many of my probe requests were rejected. Let me see what signals actually exist. The measure at experiment_1 presumably returned some readings. Let me inspect the CSVs I have to learn the available column names before spending more budget.</reasoning>\n<action type=\"code\">\nimport pandas as pd\ndf1 = pd.read_csv(experiment_1_csv)\nprint(\"EXP1 cols:\", list(df1.columns))\nprint(df1.describe().round(3))\ndf3 = pd.read_csv(experiment_3_csv)\nprint(\"EXP3 cols:\", list(df3.columns))\nprint(\"corr exp1:\\n\", df1.corr(numeric_only=True).round(3))\n</action>\n<memory>\nHypotheses: new feed carries catalyst poison; byproduct is downstream marker; pressure drop decoy.\nRuled out: pressure drop not correlated (r=-0.006); \"polish the feed\" NOT available.\nConfirmed: Conversion~Byproduct r=-0.42.\nNext: learn available columns from CSVs, then test purification/regeneration actuators.\n</memory>",
+      "action_type": "code",
+      "code": "import pandas as pd\ndf1 = pd.read_csv(experiment_1_csv)\nprint(\"EXP1 cols:\", list(df1.columns))\nprint(df1.describe().round(3))\ndf3 = pd.read_csv(experiment_3_csv)\nprint(\"EXP3 cols:\", list(df3.columns))\nprint(\"corr exp1:\\n\", df1.corr(numeric_only=True).round(3))",
+      "code_output": "EXP1 cols: ['unit_id', 'ConversionEfficiency', 'PressureDropBed', 'EffluentByproduct']\n       unit_id  ConversionEfficiency  PressureDropBed  EffluentByproduct\ncount  400.000               400.000          400.000            400.000\nmean   199.500                -9.152           50.266             42.686\nstd    115.614                10.850           12.708             16.843\nmin      0.000               -38.358            8.217             -3.381\n25%     99.750               -16.402           40.651             30.916\n50%    199.500                -9.965           50.176             42.023\n75%    299.250                -2.164           59.076             54.634\nmax    399.000                23.763           89.994             87.653\nEXP3 cols: ['unit_id', 'ConversionEfficiency']\ncorr exp1:\n                       unit_id  ConversionEfficiency  PressureDropBed  EffluentByproduct\nunit_id                 1.000                 0.005            0.001             -0.019\nConversionEfficiency    0.005                 1.000           -0.006             -0.422\nPressureDropBed         0.001                -0.006            1.000             -0.001\nEffluentByproduct      -0.019                -0.422           -0.001              1.000\n"
+    },
+    {
+      "turn": 4,
+      "latency_s": 7.0,
+      "reasoning": "The story points to a new feedstock introducing something (likely a catalyst poison such as sulfur/metals) that lowers conversion. Byproduct correlates negatively with conversion (r=-0.42) \u2014 a candidate downstream marker but could be a bystander. Pressure drop is uncorrelated (decoy for fouling). The team's temperature/pressure theory is likely a distractor.\n\nI need to run an intervention. The most direct test of the poison hypothesis is feed purification (guard bed / adsorbent) and catalyst regeneration. Let me try a feed purification/treatment intervention and see if conversion recovers. I'll also measure byproduct to see if the marker tracks.",
+      "memory": "Hypotheses: new feed carries catalyst poison; byproduct is downstream marker; pressure drop & temp/pressure are decoys.\nRuled out: pressure drop not correlated; \"polish the feed\" phrasing not available.\nConfirmed: Conversion~Byproduct r=-0.42.\nNext: test feed purification (this turn), then regeneration; check if byproduct tracks recovery.",
+      "raw": "<reasoning>\nThe story points to a new feedstock introducing something (likely a catalyst poison such as sulfur/metals) that lowers conversion. Byproduct correlates negatively with conversion (r=-0.42) \u2014 a candidate downstream marker but could be a bystander. Pressure drop is uncorrelated (decoy for fouling). The team's temperature/pressure theory is likely a distractor.\n\nI need to run an intervention. The most direct test of the poison hypothesis is feed purification (guard bed / adsorbent) and catalyst regeneration. Let me try a feed purification/treatment intervention and see if conversion recovers. I'll also measure byproduct to see if the marker tracks.\n</reasoning>\n<action type=\"intervene\">{\"actions\":[{\"request\":\"purify or treat the incoming feed to remove contaminants (guard bed/adsorbent)\",\"value\":\"high\"}],\"measure\":[\"ConversionEfficiency\",\"EffluentByproduct\"]}</action>\n<memory>\nHypotheses: new feed carries catalyst poison; byproduct is downstream marker; pressure drop & temp/pressure are decoys.\nRuled out: pressure drop not correlated; \"polish the feed\" phrasing not available.\nConfirmed: Conversion~Byproduct r=-0.42.\nNext: test feed purification (this turn), then regeneration; check if byproduct tracks recovery.\n</memory>",
+      "action_type": "intervene",
+      "result": {
+        "mode": "intervene",
+        "experiment_id": 4,
+        "n_units": 400,
+        "applied_intervention": {},
+        "action_resolutions": [
+          {
+            "request": "purify or treat the incoming feed to remove contaminants (guard bed/adsorbent)",
+            "kind": "reject",
+            "ok": false,
+            "interpretation": "not present (llm)",
+            "target_id": null,
+            "value": null,
+            "reason": "That is not part of this system.",
+            "candidates": [],
+            "method": "llm"
+          }
+        ],
+        "measurement_resolutions": [
+          {
+            "request": "ConversionEfficiency",
+            "kind": "measure",
+            "ok": true,
+            "interpretation": "measure 'ConversionEfficiency'",
+            "target_id": "ConversionEfficiency",
+            "value": null,
+            "reason": "",
+            "candidates": [],
+            "method": "alias"
+          },
+          {
+            "request": "EffluentByproduct",
+            "kind": "measure",
+            "ok": true,
+            "interpretation": "measure 'EffluentByproduct'",
+            "target_id": "EffluentByproduct",
+            "value": null,
+            "reason": "",
+            "candidates": [],
+            "method": "alias"
+          }
+        ],
+        "readings": {},
+        "raw_csv": null
+      }
+    },
+    {
+      "turn": 5,
+      "latency_s": 5.27,
+      "reasoning": "The feed-guard-bed request was rejected. The report mentions feed, temperature, purification, and regeneration systems are adjustable, and polishing/regeneration options available. Since a catalyst poison from new feed is my leading hypothesis, regeneration of the catalyst should restore activity if a poison accumulated. Let me try a regeneration intervention and see if conversion recovers and byproduct falls. This is a real intervention testing causation.",
+      "memory": "Hypotheses: new feed carries catalyst poison; byproduct is downstream marker; pressure drop & temp/pressure are decoys.\nRuled out: pressure drop not correlated; \"polish the feed\" & feed guard-bed phrasing not available.\nConfirmed: Conversion~Byproduct r=-0.42.\nNext: test regeneration (this turn); then purification actuator; check if byproduct tracks recovery.",
+      "raw": "<reasoning>The feed-guard-bed request was rejected. The report mentions feed, temperature, purification, and regeneration systems are adjustable, and polishing/regeneration options available. Since a catalyst poison from new feed is my leading hypothesis, regeneration of the catalyst should restore activity if a poison accumulated. Let me try a regeneration intervention and see if conversion recovers and byproduct falls. This is a real intervention testing causation.</reasoning>\n<action type=\"intervene\">{\"actions\":[{\"request\":\"regenerate the catalyst bed\",\"value\":\"high\"}],\"measure\":[\"ConversionEfficiency\",\"EffluentByproduct\"]}</action>\n<memory>\nHypotheses: new feed carries catalyst poison; byproduct is downstream marker; pressure drop & temp/pressure are decoys.\nRuled out: pressure drop not correlated; \"polish the feed\" & feed guard-bed phrasing not available.\nConfirmed: Conversion~Byproduct r=-0.42.\nNext: test regeneration (this turn); then purification actuator; check if byproduct tracks recovery.\n</memory>",
+      "action_type": "intervene",
+      "result": {
+        "mode": "intervene",
+        "experiment_id": 5,
+        "n_units": 400,
+        "applied_intervention": {
+          "RegenerationCycle": 75.0
+        },
+        "action_resolutions": [
+          {
+            "request": "regenerate the catalyst bed",
+            "kind": "intervene",
+            "ok": true,
+            "interpretation": "apply 'RegenerationCycle' (dosing to reduce HotSpotFormation) at 75.0",
+            "target_id": "RegenerationCycle",
+            "value": 75.0,
+            "reason": "",
+            "candidates": [],
+            "method": "alias"
+          }
+        ],
+        "measurement_resolutions": [
+          {
+            "request": "ConversionEfficiency",
+            "kind": "measure",
+            "ok": true,
+            "interpretation": "measure 'ConversionEfficiency'",
+            "target_id": "ConversionEfficiency",
+            "value": null,
+            "reason": "",
+            "candidates": [],
+            "method": "alias"
+          },
+          {
+            "request": "EffluentByproduct",
+            "kind": "measure",
+            "ok": true,
+            "interpretation": "measure 'EffluentByproduct'",
+            "target_id": "EffluentByproduct",
+            "value": null,
+            "reason": "",
+            "candidates": [],
+            "method": "alias"
+          }
+        ],
+        "readings": {
+          "ConversionEfficiency": 20.52,
+          "EffluentByproduct": 8.575
+        },
+        "raw_csv": "results_v8_validation_opus/v7_catalysis_dosewin_interior_dose_sympto_10001512_data/experiment_5.csv"
+      }
+    },
+    {
+      "turn": 6,
+      "latency_s": 5.74,
+      "reasoning": "I've run regeneration (RegenerationCycle=75) and got Conversion=20.52, Byproduct=8.575. I need baseline to compare. Let me analyze existing data first to understand baselines and correlations before spending more budget. Let me look at experiments 1, 3, 5.",
+      "memory": "Hypotheses: new feed carries catalyst poison; byproduct is downstream marker; pressure drop & temp/pressure are decoys.\nRuled out: pressure drop not correlated; \"polish the feed\" & feed guard-bed phrasing not available.\nConfirmed: Conversion~Byproduct r=-0.42.\nNext: analyze all data; test purification actuator; compare regen result to baseline.",
+      "raw": "<reasoning>I've run regeneration (RegenerationCycle=75) and got Conversion=20.52, Byproduct=8.575. I need baseline to compare. Let me analyze existing data first to understand baselines and correlations before spending more budget. Let me look at experiments 1, 3, 5.</reasoning>\n<action type=\"code\">\nimport pandas as pd, numpy as np\nfor eid in [1,3,5]:\n    df = pd.read_csv(eval(f\"experiment_{eid}_csv\"))\n    print(f\"=== exp {eid} ===\", df.shape)\n    print(df.columns.tolist())\n    print(df.mean(numeric_only=True).round(3).to_dict())\n    print(\"corr with ConversionEfficiency:\")\n    if \"ConversionEfficiency\" in df.columns:\n        print(df.corr(numeric_only=True)[\"ConversionEfficiency\"].round(3).to_dict())\n</action>\n<memory>\nHypotheses: new feed carries catalyst poison; byproduct is downstream marker; pressure drop & temp/pressure are decoys.\nRuled out: pressure drop not correlated; \"polish the feed\" & feed guard-bed phrasing not available.\nConfirmed: Conversion~Byproduct r=-0.42.\nNext: analyze all data; test purification actuator; compare regen result to baseline.\n</memory>",
+      "action_type": "code",
+      "code": "import pandas as pd, numpy as np\nfor eid in [1,3,5]:\n    df = pd.read_csv(eval(f\"experiment_{eid}_csv\"))\n    print(f\"=== exp {eid} ===\", df.shape)\n    print(df.columns.tolist())\n    print(df.mean(numeric_only=True).round(3).to_dict())\n    print(\"corr with ConversionEfficiency:\")\n    if \"ConversionEfficiency\" in df.columns:\n        print(df.corr(numeric_only=True)[\"ConversionEfficiency\"].round(3).to_dict())",
+      "code_output": "=== exp 1 === (400, 4)\n['unit_id', 'ConversionEfficiency', 'PressureDropBed', 'EffluentByproduct']\n{'unit_id': 199.5, 'ConversionEfficiency': -9.152, 'PressureDropBed': 50.266, 'EffluentByproduct': 42.686}\ncorr with ConversionEfficiency:\n{'unit_id': 0.005, 'ConversionEfficiency': 1.0, 'PressureDropBed': -0.006, 'EffluentByproduct': -0.422}\n=== exp 3 === (400, 2)\n['unit_id', 'ConversionEfficiency']\n{'unit_id': 199.5, 'ConversionEfficiency': -8.121}\ncorr with ConversionEfficiency:\n{'unit_id': 0.013, 'ConversionEfficiency': 1.0}\n=== exp 5 === (400, 4)\n['unit_id', 'ConversionEfficiency', 'EffluentByproduct', 'do_RegenerationCycle']\n{'unit_id': 199.5, 'ConversionEfficiency': 20.52, 'EffluentByproduct': 8.575, 'do_RegenerationCycle': 75.0}\ncorr with ConversionEfficiency:\n{'unit_id': -0.007, 'ConversionEfficiency': 1.0, 'EffluentByproduct': 0.048, 'do_RegenerationCycle': nan}\n"
+    },
+    {
+      "turn": 7,
+      "latency_s": 6.82,
+      "reasoning": "Key finding: exp5 (regeneration cycle) raised ConversionEfficiency mean to +20.5 vs baseline ~-9, and dropped byproduct from ~42 to ~8.6. That's a huge improvement \u2014 regeneration reverses the loss. This strongly supports a catalyst poisoning / fouling hypothesis from the new feed, and regeneration restores activity.\n\nBut regeneration is a reactive fix; if the new feed keeps poisoning, we'd want to prevent it (purification of feed). I earlier found \"polish the feed\"/\"guard-bed\" phrasing rejected. Let me test the purification actuator with its actual name. Let me try a feed purification intervention and measure conversion + byproduct to see if prevention works without needing repeated regeneration.",
+      "memory": "Hypotheses: new feed carries catalyst poison; regeneration restores activity; purification may prevent it.\nRuled out: pressure drop not correlated; temp/pressure decoys likely.\nConfirmed: Conversion~Byproduct r=-0.42; regeneration cycle raised Conversion to +20.5 & dropped byproduct to ~8.6.\nNext: test feed purification actuator; compare to regen; check temp/pressure decoys.",
+      "raw": "<reasoning>\nKey finding: exp5 (regeneration cycle) raised ConversionEfficiency mean to +20.5 vs baseline ~-9, and dropped byproduct from ~42 to ~8.6. That's a huge improvement \u2014 regeneration reverses the loss. This strongly supports a catalyst poisoning / fouling hypothesis from the new feed, and regeneration restores activity.\n\nBut regeneration is a reactive fix; if the new feed keeps poisoning, we'd want to prevent it (purification of feed). I earlier found \"polish the feed\"/\"guard-bed\" phrasing rejected. Let me test the purification actuator with its actual name. Let me try a feed purification intervention and measure conversion + byproduct to see if prevention works without needing repeated regeneration.\n</reasoning>\n<action type=\"intervene\">{\"actions\":[{\"request\":\"increase feed purification treatment\",\"value\":\"high\"}],\"measure\":[\"ConversionEfficiency\",\"EffluentByproduct\"]}</action>\n<memory>\nHypotheses: new feed carries catalyst poison; regeneration restores activity; purification may prevent it.\nRuled out: pressure drop not correlated; temp/pressure decoys likely.\nConfirmed: Conversion~Byproduct r=-0.42; regeneration cycle raised Conversion to +20.5 & dropped byproduct to ~8.6.\nNext: test feed purification actuator; compare to regen; check temp/pressure decoys.\n</memory>",
+      "action_type": "intervene",
+      "result": {
+        "mode": "intervene",
+        "experiment_id": 6,
+        "n_units": 400,
+        "applied_intervention": {},
+        "action_resolutions": [
+          {
+            "request": "increase feed purification treatment",
+            "kind": "reject",
+            "ok": false,
+            "interpretation": "unrecognized intervention",
+            "target_id": null,
+            "value": null,
+            "reason": "That equipment/additive is not present on this line.",
+            "candidates": [],
+            "method": "alias"
+          }
+        ],
+        "measurement_resolutions": [
+          {
+            "request": "ConversionEfficiency",
+            "kind": "measure",
+            "ok": true,
+            "interpretation": "measure 'ConversionEfficiency'",
+            "target_id": "ConversionEfficiency",
+            "value": null,
+            "reason": "",
+            "candidates": [],
+            "method": "alias"
+          },
+          {
+            "request": "EffluentByproduct",
+            "kind": "measure",
+            "ok": true,
+            "interpretation": "measure 'EffluentByproduct'",
+            "target_id": "EffluentByproduct",
+            "value": null,
+            "reason": "",
+            "candidates": [],
+            "method": "alias"
+          }
+        ],
+        "readings": {},
+        "raw_csv": null
+      }
+    },
+    {
+      "turn": 8,
+      "latency_s": 22.63,
+      "reasoning": "The feed purification actuator doesn't exist. I've confirmed regeneration restores conversion. The hidden cause is likely a catalyst poison in the new feed. I've used 6/15 experiments. Let me review what data I have and identify the actual available actuators. I know regeneration works. I should test whether there's a feed treatment that exists \u2014 like a polishing/guard-bed option, or a chelating/scavenger additive \u2014 to prevent poisoning at the source. Let me first analyze existing data to understand the poison mechanism and what measurable proxy tracks it.",
+      "memory": "Hypotheses: new feed carries catalyst poison; regeneration restores activity; a polishing/guard actuator may prevent it.\nRuled out: pressure drop not correlated; temp/pressure decoys likely; feed purification actuator NOT present.\nConfirmed: Conversion~Byproduct r=-0.42; regeneration cycle raised Conversion +20.5 & dropped byproduct ~8.6.\nNext: inspect existing CSVs for poison proxy; find a real feed-treatment/polishing actuator; compare to regen.",
+      "raw": "<reasoning>The feed purification actuator doesn't exist. I've confirmed regeneration restores conversion. The hidden cause is likely a catalyst poison in the new feed. I've used 6/15 experiments. Let me review what data I have and identify the actual available actuators. I know regeneration works. I should test whether there's a feed treatment that exists \u2014 like a polishing/guard-bed option, or a chelating/scavenger additive \u2014 to prevent poisoning at the source. Let me first analyze existing data to understand the poison mechanism and what measurable proxy tracks it.</reasoning>\n<action type=\"code\">\nimport pandas as pd, numpy as np\nfor eid in [1,3,5]:\n    df = pd.read_csv(eval(f\"experiment_{eid}_csv\"))\n    print(f\"=== experiment_{eid} ===\")\n    print(df.columns.tolist())\n    print(df.describe().round(3))\n    print(\"corr:\\n\", df.corr(numeric_only=True).round(3))\n    print()\n</action>\n<memory>\nHypotheses: new feed carries catalyst poison; regeneration restores activity; a polishing/guard actuator may prevent it.\nRuled out: pressure drop not correlated; temp/pressure decoys likely; feed purification actuator NOT present.\nConfirmed: Conversion~Byproduct r=-0.42; regeneration cycle raised Conversion +20.5 & dropped byproduct ~8.6.\nNext: inspect existing CSVs for poison proxy; find a real feed-treatment/polishing actuator; compare to regen.\n</memory>",
+      "action_type": "code",
+      "code": "import pandas as pd, numpy as np\nfor eid in [1,3,5]:\n    df = pd.read_csv(eval(f\"experiment_{eid}_csv\"))\n    print(f\"=== experiment_{eid} ===\")\n    print(df.columns.tolist())\n    print(df.describe().round(3))\n    print(\"corr:\\n\", df.corr(numeric_only=True).round(3))\n    print()",
+      "code_output": "=== experiment_1 ===\n['unit_id', 'ConversionEfficiency', 'PressureDropBed', 'EffluentByproduct']\n       unit_id  ConversionEfficiency  PressureDropBed  EffluentByproduct\ncount  400.000               400.000          400.000            400.000\nmean   199.500                -9.152           50.266             42.686\nstd    115.614                10.850           12.708             16.843\nmin      0.000               -38.358            8.217             -3.381\n25%     99.750               -16.402           40.651             30.916\n50%    199.500                -9.965           50.176             42.023\n75%    299.250                -2.164           59.076             54.634\nmax    399.000                23.763           89.994             87.653\ncorr:\n                       unit_id  ConversionEfficiency  PressureDropBed  EffluentByproduct\nunit_id                 1.000                 0.005            0.001             -0.019\nConversionEfficiency    0.005                 1.000           -0.006             -0.422\nPressureDropBed         0.001                -0.006            1.000             -0.001\nEffluentByproduct      -0.019                -0.422           -0.001              1.000\n\n=== experiment_3 ===\n['unit_id', 'ConversionEfficiency']\n       unit_id  ConversionEfficiency\ncount  400.000               400.000\nmean   199.500                -8.121\nstd    115.614                11.298\nmin      0.000               -36.228\n25%     99.750               -16.115\n50%    199.500                -9.236\n75%    299.250                -1.226\nmax    399.000                26.860\ncorr:\n                       unit_id  ConversionEfficiency\nunit_id                 1.000                 0.013\nConversionEfficiency    0.013                 1.000\n\n=== experiment_5 ===\n['unit_id', 'ConversionEfficiency', 'EffluentByproduct', 'do_RegenerationCycle']\n       unit_id  ConversionEfficiency  EffluentByproduct  do_RegenerationCycle\ncount  400.000               400.000            400.000                 400.0\nmean   199.500                20.520              8.575                  75.0\nstd    115.614                 7.311             13.875                   0.0\nmin      0.000                -0.752            -36.373                  75.0\n25%     99.750                15.266             -0.349                  75.0\n50%    199.500                20.703              9.388                  75.0\n75%    299.250                25.807             17.140                  75.0\nmax    399.000                39.155             56.347                  75.0\ncorr:\n                       unit_id  ConversionEfficiency  EffluentByproduct  do_RegenerationCycle\nunit_id                 1.000                -0.007             -0.024                   NaN\nConversionEfficiency   -0.007                 1.000              0.048                   NaN\nEffluentByproduct      -0.024                 0.048              1.000                   NaN\ndo_RegenerationCycle      NaN                   NaN                NaN                   NaN\n\n"
+    },
+    {
+      "turn": 9,
+      "latency_s": 11.31,
+      "reasoning": "Regeneration (experiment_5) clearly raised ConversionEfficiency from ~-8 baseline to +20.5 and dropped EffluentByproduct, consistent with a catalyst poison from new feed that regeneration burns/strips off. But regeneration is reactive; the report mentions polishing options. I should test a feed polishing/guard-bed actuator to see if it prevents the poison from reaching the catalyst \u2014 a preventive fix. Let me try applying a feed polishing / guard treatment and measure conversion and byproduct.",
+      "memory": "Hypotheses: new feed carries catalyst poison; regeneration restores activity; polishing/guard bed may prevent poison reaching catalyst.\nRuled out: pressure drop not correlated; temp/pressure decoys likely; feed purification actuator NOT present.\nConfirmed: Conversion~Byproduct r=-0.42; regeneration raised Conversion to +20.5 & dropped byproduct.\nNext: test feed polishing/guard bed; compare vs regen; check if poison proxy measurable.",
+      "raw": "<reasoning>\nRegeneration (experiment_5) clearly raised ConversionEfficiency from ~-8 baseline to +20.5 and dropped EffluentByproduct, consistent with a catalyst poison from new feed that regeneration burns/strips off. But regeneration is reactive; the report mentions polishing options. I should test a feed polishing/guard-bed actuator to see if it prevents the poison from reaching the catalyst \u2014 a preventive fix. Let me try applying a feed polishing / guard treatment and measure conversion and byproduct.\n</reasoning>\n<action type=\"intervene\">{\"actions\":[{\"request\":\"install a guard bed / feed polishing treatment to remove trace contaminants from the feed\",\"value\":\"high\"}],\"measure\":[\"ConversionEfficiency\",\"EffluentByproduct\"]}</action>\n<memory>\nHypotheses: new feed carries catalyst poison; regeneration restores activity; polishing/guard bed may prevent poison reaching catalyst.\nRuled out: pressure drop not correlated; temp/pressure decoys likely; feed purification actuator NOT present.\nConfirmed: Conversion~Byproduct r=-0.42; regeneration raised Conversion to +20.5 & dropped byproduct.\nNext: test feed polishing/guard bed; compare vs regen; check if poison proxy measurable.\n</memory>",
+      "action_type": "intervene",
+      "result": {
+        "mode": "intervene",
+        "experiment_id": 7,
+        "n_units": 400,
+        "applied_intervention": {},
+        "action_resolutions": [
+          {
+            "request": "install a guard bed / feed polishing treatment to remove trace contaminants from the feed",
+            "kind": "reject",
+            "ok": false,
+            "interpretation": "not present (llm)",
+            "target_id": null,
+            "value": null,
+            "reason": "That is not part of this system.",
+            "candidates": [],
+            "method": "llm"
+          }
+        ],
+        "measurement_resolutions": [
+          {
+            "request": "ConversionEfficiency",
+            "kind": "measure",
+            "ok": true,
+            "interpretation": "measure 'ConversionEfficiency'",
+            "target_id": "ConversionEfficiency",
+            "value": null,
+            "reason": "",
+            "candidates": [],
+            "method": "alias"
+          },
+          {
+            "request": "EffluentByproduct",
+            "kind": "measure",
+            "ok": true,
+            "interpretation": "measure 'EffluentByproduct'",
+            "target_id": "EffluentByproduct",
+            "value": null,
+            "reason": "",
+            "candidates": [],
+            "method": "alias"
+          }
+        ],
+        "readings": {},
+        "raw_csv": null
+      }
+    },
+    {
+      "turn": 10,
+      "latency_s": 9.35,
+      "reasoning": "The guard bed / polishing actuator isn't present. My prior work confirmed regeneration restores conversion and drops byproduct, consistent with catalyst poisoning from the new feed. I should verify whether a poison proxy is measurable (e.g., sulfur/metal on feed or catalyst) to nail the mechanism. Let me measure candidate poison signals in the feed.",
+      "memory": "Hypotheses: new feed carries catalyst poison; regeneration restores activity.\nRuled out: pressure drop not correlated; temp/pressure decoys likely; feed purification/guard bed actuators NOT present.\nConfirmed: Conversion~Byproduct r=-0.42; regeneration raised Conversion +20.5 & dropped byproduct.\nNext: identify measurable poison proxy in feed/catalyst; find working actuator (regeneration; feed change).",
+      "raw": "<reasoning>The guard bed / polishing actuator isn't present. My prior work confirmed regeneration restores conversion and drops byproduct, consistent with catalyst poisoning from the new feed. I should verify whether a poison proxy is measurable (e.g., sulfur/metal on feed or catalyst) to nail the mechanism. Let me measure candidate poison signals in the feed.</reasoning>\n<action type=\"measure\">{\"requests\":[\"feed sulfur content\",\"feed chloride content\",\"catalyst metal contamination\",\"feed trace metals\",\"dissolved oxygen\"]}</action>\n<memory>\nHypotheses: new feed carries catalyst poison; regeneration restores activity.\nRuled out: pressure drop not correlated; temp/pressure decoys likely; feed purification/guard bed actuators NOT present.\nConfirmed: Conversion~Byproduct r=-0.42; regeneration raised Conversion +20.5 & dropped byproduct.\nNext: identify measurable poison proxy in feed/catalyst; find working actuator (regeneration; feed change).\n</memory>",
+      "action_type": "measure",
+      "result": {
+        "mode": "measure",
+        "experiment_id": 8,
+        "n_units": 400,
+        "resolutions": [
+          {
+            "request": "feed sulfur content",
+            "kind": "reject",
+            "ok": false,
+            "interpretation": "not present (llm)",
+            "target_id": null,
+            "value": null,
+            "reason": "That is not part of this system.",
+            "candidates": [],
+            "method": "llm"
+          },
+          {
+            "request": "feed chloride content",
+            "kind": "reject",
+            "ok": false,
+            "interpretation": "not present (llm)",
+            "target_id": null,
+            "value": null,
+            "reason": "That is not part of this system.",
+            "candidates": [],
+            "method": "llm"
+          },
+          {
+            "request": "catalyst metal contamination",
+            "kind": "reject",
+            "ok": false,
+            "interpretation": "not present (llm)",
+            "target_id": null,
+            "value": null,
+            "reason": "That is not part of this system.",
+            "candidates": [],
+            "method": "llm"
+          },
+          {
+            "request": "feed trace metals",
+            "kind": "reject",
+            "ok": false,
+            "interpretation": "not present (llm)",
+            "target_id": null,
+            "value": null,
+            "reason": "That is not part of this system.",
+            "candidates": [],
+            "method": "llm"
+          },
+          {
+            "request": "dissolved oxygen",
+            "kind": "reject",
+            "ok": false,
+            "interpretation": "not present (llm)",
+            "target_id": null,
+            "value": null,
+            "reason": "That is not part of this system.",
+            "candidates": [],
+            "method": "llm"
+          }
+        ],
+        "readings": {},
+        "raw_csv": null
+      }
+    },
+    {
+      "turn": 11,
+      "latency_s": 5.83,
+      "reasoning": "My last several measurement requests for feed contaminants all rejected. I've already confirmed regeneration restores +20.5% conversion and drops byproduct \u2014 strong evidence of a catalyst poison/fouling from the new feed. I need a measurable proxy that exists in this system. Let me probe what feed-quality or catalyst-state signals ARE available before spending more budget. I'll ask for broader terms that might resolve.",
+      "memory": "Hypotheses: new feed carries catalyst poison; regeneration restores activity.\nRuled out: pressure drop not correlated; temp/pressure decoys; feed purification/guard bed actuators NOT present; feed sulfur/chloride/metals & DO measurements NOT present.\nConfirmed: Conversion~Byproduct r=-0.42; regeneration raised Conversion +20.5 & dropped byproduct.\nNext: find a measurable poison/fouling proxy that exists; confirm actuators.",
+      "raw": "<reasoning>My last several measurement requests for feed contaminants all rejected. I've already confirmed regeneration restores +20.5% conversion and drops byproduct \u2014 strong evidence of a catalyst poison/fouling from the new feed. I need a measurable proxy that exists in this system. Let me probe what feed-quality or catalyst-state signals ARE available before spending more budget. I'll ask for broader terms that might resolve.</reasoning>\n<action type=\"measure\">{\"requests\":[\"catalyst activity\",\"feed impurity level\",\"feed contaminant\",\"catalyst site fouling\",\"feed purity\"]}</action>\n<memory>\nHypotheses: new feed carries catalyst poison; regeneration restores activity.\nRuled out: pressure drop not correlated; temp/pressure decoys; feed purification/guard bed actuators NOT present; feed sulfur/chloride/metals & DO measurements NOT present.\nConfirmed: Conversion~Byproduct r=-0.42; regeneration raised Conversion +20.5 & dropped byproduct.\nNext: find a measurable poison/fouling proxy that exists; confirm actuators.\n</memory>",
+      "action_type": "measure",
+      "result": {
+        "mode": "measure",
+        "experiment_id": 9,
+        "n_units": 400,
+        "resolutions": [
+          {
+            "request": "catalyst activity",
+            "kind": "reject",
+            "ok": false,
+            "interpretation": "no assay for 'ActiveSiteBlocking'",
+            "target_id": null,
+            "value": null,
+            "reason": "That quantity is not directly measurable on this rig; there is no assay for it.",
+            "candidates": [],
+            "method": "alias"
+          },
+          {
+            "request": "feed impurity level",
+            "kind": "reject",
+            "ok": false,
+            "interpretation": "not present (llm)",
+            "target_id": null,
+            "value": null,
+            "reason": "That is not part of this system.",
+            "candidates": [],
+            "method": "llm"
+          },
+          {
+            "request": "feed contaminant",
+            "kind": "reject",
+            "ok": false,
+            "interpretation": "not present (llm)",
+            "target_id": null,
+            "value": null,
+            "reason": "That is not part of this system.",
+            "candidates": [],
+            "method": "llm"
+          },
+          {
+            "request": "catalyst site fouling",
+            "kind": "reject",
+            "ok": false,
+            "interpretation": "no assay (llm)",
+            "target_id": null,
+            "value": null,
+            "reason": "That quantity is not directly measurable on this rig.",
+            "candidates": [],
+            "method": "llm"
+          },
+          {
+            "request": "feed purity",
+            "kind": "reject",
+            "ok": false,
+            "interpretation": "not present (llm)",
+            "target_id": null,
+            "value": null,
+            "reason": "That is not part of this system.",
+            "candidates": [],
+            "method": "llm"
+          }
+        ],
+        "readings": {},
+        "raw_csv": null
+      }
+    },
+    {
+      "turn": 12,
+      "latency_s": 6.75,
+      "reasoning": "I've already confirmed regeneration restores conversion (+20.5) and drops byproduct. The story fits catalyst poisoning/fouling from new feed. Poison assays don't exist. Let me check what measurable signals I actually have. I have files experiment_1, 3, 5. Let me examine them via code to identify available columns/measured signals so I know my true mechanism proxy and decoys before spending more budget.",
+      "memory": "Hypotheses: new feed carries catalyst poison; regeneration restores activity.\nRuled out: pressure drop not correlated; temp/pressure decoys; feed purification/guard bed actuators NOT present; feed sulfur/chloride/metals & DO measurements NOT present.\nConfirmed: Conversion~Byproduct r=-0.42; regeneration raised Conversion +20.5 & dropped byproduct.\nNext: identify available columns in data files to pick true proxy & decoys; confirm actuators.",
+      "raw": "<reasoning>\nI've already confirmed regeneration restores conversion (+20.5) and drops byproduct. The story fits catalyst poisoning/fouling from new feed. Poison assays don't exist. Let me check what measurable signals I actually have. I have files experiment_1, 3, 5. Let me examine them via code to identify available columns/measured signals so I know my true mechanism proxy and decoys before spending more budget.\n</reasoning>\n<action type=\"code\">\nimport pandas as pd\nfor f in [experiment_1_csv, experiment_3_csv, experiment_5_csv]:\n    df = pd.read_csv(f)\n    print(\"FILE\", f)\n    print(df.columns.tolist())\n    print(df.describe().round(3).T)\n    print(\"CORR to Conversion:\")\n    if 'ConversionEfficiency' in df.columns:\n        print(df.corr(numeric_only=True)['ConversionEfficiency'].round(3))\n    print(\"=\"*40)\n</action>\n<memory>\nHypotheses: new feed carries catalyst poison; regeneration restores activity.\nRuled out: pressure drop not correlated; temp/pressure decoys; feed purification/guard bed actuators NOT present; feed sulfur/chloride/metals & DO measurements NOT present.\nConfirmed: Conversion~Byproduct r=-0.42; regeneration raised Conversion +20.5 & dropped byproduct.\nNext: identify available columns in data files to pick true proxy & decoys; confirm actuators.\n</memory>",
+      "action_type": "code",
+      "code": "import pandas as pd\nfor f in [experiment_1_csv, experiment_3_csv, experiment_5_csv]:\n    df = pd.read_csv(f)\n    print(\"FILE\", f)\n    print(df.columns.tolist())\n    print(df.describe().round(3).T)\n    print(\"CORR to Conversion:\")\n    if 'ConversionEfficiency' in df.columns:\n        print(df.corr(numeric_only=True)['ConversionEfficiency'].round(3))\n    print(\"=\"*40)",
+      "code_output": "FILE results_v8_validation_opus/v7_catalysis_dosewin_interior_dose_sympto_10001512_data/experiment_1.csv\n['unit_id', 'ConversionEfficiency', 'PressureDropBed', 'EffluentByproduct']\n                      count     mean      std     min     25%      50%      75%      max\nunit_id               400.0  199.500  115.614   0.000  99.750  199.500  299.250  399.000\nConversionEfficiency  400.0   -9.152   10.850 -38.358 -16.402   -9.965   -2.164   23.763\nPressureDropBed       400.0   50.266   12.708   8.217  40.651   50.176   59.076   89.994\nEffluentByproduct     400.0   42.686   16.843  -3.381  30.916   42.023   54.634   87.653\nCORR to Conversion:\nunit_id                 0.005\nConversionEfficiency    1.000\nPressureDropBed        -0.006\nEffluentByproduct      -0.422\nName: ConversionEfficiency, dtype: float64\n========================================\nFILE results_v8_validation_opus/v7_catalysis_dosewin_interior_dose_sympto_10001512_data/experiment_3.csv\n['unit_id', 'ConversionEfficiency']\n                      count     mean      std     min     25%      50%      75%     max\nunit_id               400.0  199.500  115.614   0.000  99.750  199.500  299.250  399.00\nConversionEfficiency  400.0   -8.121   11.298 -36.228 -16.115   -9.236   -1.226   26.86\nCORR to Conversion:\nunit_id                 0.013\nConversionEfficiency    1.000\nName: ConversionEfficiency, dtype: float64\n========================================\nFILE results_v8_validation_opus/v7_catalysis_dosewin_interior_dose_sympto_10001512_data/experiment_5.csv\n['unit_id', 'ConversionEfficiency', 'EffluentByproduct', 'do_RegenerationCycle']\n                      count     mean      std     min     25%      50%      75%      max\nunit_id               400.0  199.500  115.614   0.000  99.750  199.500  299.250  399.000\nConversionEfficiency  400.0   20.520    7.311  -0.752  15.266   20.703   25.807   39.155\nEffluentByproduct     400.0    8.575   13.875 -36.373  -0.349    9.388   17.140   56.347\ndo_RegenerationCycle  400.0   75.000    0.000  75.000  75.000   75.000   75.000   75.000\nCORR to Conversion:\nunit_id                -0.007\nConversionEfficiency    1.000\nEffluentByproduct       0.048\ndo_RegenerationCycle      NaN\nName: ConversionEfficiency, dtype: float64\n========================================\n"
+    },
+    {
+      "turn": 13,
+      "latency_s": 8.8,
+      "reasoning": "Regeneration (experiment_5, dose 75) raised ConversionEfficiency to +20.5 mean (from ~-9 baseline) and dropped byproduct to +8.5. This strongly supports catalyst fouling/poisoning from new feed, reversible by regeneration. I've already run regeneration once. To confirm dose-response and find optimal dose (could be interior optimum), I should test another regeneration level. Let me test a lower regeneration dose to check the dose window \u2014 is 75 optimal or is a middle dose better?\n\nI have 6 experiments left. Let me run regeneration at a moderate dose (e.g., 40) to map the dose-response curve.",
+      "memory": "Hypotheses: new feed carries catalyst poison; regeneration restores activity.\nRuled out: pressure drop not correlated; temp/pressure decoys; feed purification/guard bed actuators NOT present; feed sulfur/chloride/metals & DO measurements NOT present.\nConfirmed: Conversion~Byproduct r=-0.42; regeneration@75 raised Conversion to +20.5 & dropped byproduct to +8.5.\nNext: map regen dose-response (test 40) to find optimum; confirm actuator sign.",
+      "raw": "<reasoning>\nRegeneration (experiment_5, dose 75) raised ConversionEfficiency to +20.5 mean (from ~-9 baseline) and dropped byproduct to +8.5. This strongly supports catalyst fouling/poisoning from new feed, reversible by regeneration. I've already run regeneration once. To confirm dose-response and find optimal dose (could be interior optimum), I should test another regeneration level. Let me test a lower regeneration dose to check the dose window \u2014 is 75 optimal or is a middle dose better?\n\nI have 6 experiments left. Let me run regeneration at a moderate dose (e.g., 40) to map the dose-response curve.\n</reasoning>\n<action type=\"intervene\">{\"actions\":[{\"request\":\"run a catalyst regeneration cycle\",\"value\":40}],\"measure\":[\"ConversionEfficiency\",\"EffluentByproduct\"]}</action>\n<memory>\nHypotheses: new feed carries catalyst poison; regeneration restores activity.\nRuled out: pressure drop not correlated; temp/pressure decoys; feed purification/guard bed actuators NOT present; feed sulfur/chloride/metals & DO measurements NOT present.\nConfirmed: Conversion~Byproduct r=-0.42; regeneration@75 raised Conversion to +20.5 & dropped byproduct to +8.5.\nNext: map regen dose-response (test 40) to find optimum; confirm actuator sign.\n</memory>",
+      "action_type": "intervene",
+      "result": {
+        "mode": "intervene",
+        "experiment_id": 10,
+        "n_units": 400,
+        "applied_intervention": {
+          "RegenerationCycle": 40.0
+        },
+        "action_resolutions": [
+          {
+            "request": "run a catalyst regeneration cycle",
+            "kind": "intervene",
+            "ok": true,
+            "interpretation": "apply 'RegenerationCycle' (dosing to reduce HotSpotFormation) at 40.0",
+            "target_id": "RegenerationCycle",
+            "value": 40.0,
+            "reason": "",
+            "candidates": [],
+            "method": "alias"
+          }
+        ],
+        "measurement_resolutions": [
+          {
+            "request": "ConversionEfficiency",
+            "kind": "measure",
+            "ok": true,
+            "interpretation": "measure 'ConversionEfficiency'",
+            "target_id": "ConversionEfficiency",
+            "value": null,
+            "reason": "",
+            "candidates": [],
+            "method": "alias"
+          },
+          {
+            "request": "EffluentByproduct",
+            "kind": "measure",
+            "ok": true,
+            "interpretation": "measure 'EffluentByproduct'",
+            "target_id": "EffluentByproduct",
+            "value": null,
+            "reason": "",
+            "candidates": [],
+            "method": "alias"
+          }
+        ],
+        "readings": {
+          "ConversionEfficiency": 8.798,
+          "EffluentByproduct": 24.576
+        },
+        "raw_csv": "results_v8_validation_opus/v7_catalysis_dosewin_interior_dose_sympto_10001512_data/experiment_10.csv"
+      }
+    },
+    {
+      "turn": 14,
+      "latency_s": 8.38,
+      "reasoning": "I have two regeneration doses now: 75 (raised conversion to +20.5, byproduct 8.5) and 40 (conversion 8.798, byproduct 24.576). Let me compare across the data files to understand the dose-response. Let me analyze the collected CSVs to determine the optimal regeneration dose and confirm the byproduct relationship.",
+      "memory": "Hypotheses: new feed carries catalyst poison; regeneration restores activity.\nRuled out: pressure drop not correlated; temp/pressure decoys; feed purification/guard bed actuators NOT present; feed sulfur/chloride/metals & DO measurements NOT present.\nConfirmed: Conversion~Byproduct r=-0.42; regen@75 raised Conversion +20.5 & byproduct 8.5; regen@40 conv 8.8 byproduct 24.6.\nNext: map regen dose-response; confirm actuator sign & optimum.",
+      "raw": "<reasoning>I have two regeneration doses now: 75 (raised conversion to +20.5, byproduct 8.5) and 40 (conversion 8.798, byproduct 24.576). Let me compare across the data files to understand the dose-response. Let me analyze the collected CSVs to determine the optimal regeneration dose and confirm the byproduct relationship.</reasoning>\n<action type=\"code\">\nimport pandas as pd, numpy as np\nfor eid in [1,3,5,10]:\n    df = pd.read_csv(eval(f\"experiment_{eid}_csv\"))\n    print(\"=== exp\", eid, \"cols:\", list(df.columns))\n    print(df.mean(numeric_only=True).round(3).to_dict())\n</action>\n<memory>\nHypotheses: new feed carries catalyst poison; regeneration restores activity.\nRuled out: pressure drop not correlated; temp/pressure decoys; feed purification/guard bed actuators NOT present; feed sulfur/chloride/metals & DO measurements NOT present.\nConfirmed: Conversion~Byproduct r=-0.42; regen@75 raised Conversion +20.5 & byproduct 8.5; regen@40 conv 8.8 byproduct 24.6.\nNext: map regen dose-response; confirm actuator sign & optimum.\n</memory>",
+      "action_type": "code",
+      "code": "import pandas as pd, numpy as np\nfor eid in [1,3,5,10]:\n    df = pd.read_csv(eval(f\"experiment_{eid}_csv\"))\n    print(\"=== exp\", eid, \"cols:\", list(df.columns))\n    print(df.mean(numeric_only=True).round(3).to_dict())",
+      "code_output": "=== exp 1 cols: ['unit_id', 'ConversionEfficiency', 'PressureDropBed', 'EffluentByproduct']\n{'unit_id': 199.5, 'ConversionEfficiency': -9.152, 'PressureDropBed': 50.266, 'EffluentByproduct': 42.686}\n=== exp 3 cols: ['unit_id', 'ConversionEfficiency']\n{'unit_id': 199.5, 'ConversionEfficiency': -8.121}\n=== exp 5 cols: ['unit_id', 'ConversionEfficiency', 'EffluentByproduct', 'do_RegenerationCycle']\n{'unit_id': 199.5, 'ConversionEfficiency': 20.52, 'EffluentByproduct': 8.575, 'do_RegenerationCycle': 75.0}\n=== exp 10 cols: ['unit_id', 'ConversionEfficiency', 'EffluentByproduct', 'do_RegenerationCycle']\n{'unit_id': 199.5, 'ConversionEfficiency': 8.798, 'EffluentByproduct': 24.576, 'do_RegenerationCycle': 40.0}\n"
+    },
+    {
+      "turn": 15,
+      "latency_s": 6.58,
+      "reasoning": "Regeneration clearly helps: regen@40 gave conv +8.8, regen@75 gave +20.5. Byproduct falls as conversion rises (poison being burned off). I have 5 experiments left. I should map the dose-response to find the optimum \u2014 too high may hurt (sinter catalyst). Let me test a high dose and an intermediate to bracket the optimum. Test regen at ~90 (high) and ~60 (mid) in one intervention pair isn't possible (one action). Let me test high regen (90) to check if too much hurts.",
+      "memory": "Hypotheses: new feed poisons catalyst; regeneration restores activity; optimal regen dose mid-high.\nRuled out: pressure drop, temp/pressure decoys, feed purification/guard bed absent.\nConfirmed: regen@40 conv 8.8/byprod24.6; regen@75 conv20.5/byprod8.5; monotonic improvement so far.\nNext: test regen@90 for overshoot; if worse than 75, optimum near 75.",
+      "raw": "<reasoning>Regeneration clearly helps: regen@40 gave conv +8.8, regen@75 gave +20.5. Byproduct falls as conversion rises (poison being burned off). I have 5 experiments left. I should map the dose-response to find the optimum \u2014 too high may hurt (sinter catalyst). Let me test a high dose and an intermediate to bracket the optimum. Test regen at ~90 (high) and ~60 (mid) in one intervention pair isn't possible (one action). Let me test high regen (90) to check if too much hurts.</reasoning>\n<action type=\"intervene\">{\"actions\":[{\"request\":\"run a catalyst regeneration cycle\",\"value\":90}],\"measure\":[\"ConversionEfficiency\",\"EffluentByproduct\"]}</action>\n<memory>\nHypotheses: new feed poisons catalyst; regeneration restores activity; optimal regen dose mid-high.\nRuled out: pressure drop, temp/pressure decoys, feed purification/guard bed absent.\nConfirmed: regen@40 conv 8.8/byprod24.6; regen@75 conv20.5/byprod8.5; monotonic improvement so far.\nNext: test regen@90 for overshoot; if worse than 75, optimum near 75.\n</memory>",
+      "action_type": "intervene",
+      "result": {
+        "mode": "intervene",
+        "experiment_id": 11,
+        "n_units": 400,
+        "applied_intervention": {
+          "RegenerationCycle": 90.0
+        },
+        "action_resolutions": [
+          {
+            "request": "run a catalyst regeneration cycle",
+            "kind": "intervene",
+            "ok": true,
+            "interpretation": "apply 'RegenerationCycle' (dosing to reduce HotSpotFormation) at 90.0",
+            "target_id": "RegenerationCycle",
+            "value": 90.0,
+            "reason": "",
+            "candidates": [],
+            "method": "alias"
+          }
+        ],
+        "measurement_resolutions": [
+          {
+            "request": "ConversionEfficiency",
+            "kind": "measure",
+            "ok": true,
+            "interpretation": "measure 'ConversionEfficiency'",
+            "target_id": "ConversionEfficiency",
+            "value": null,
+            "reason": "",
+            "candidates": [],
+            "method": "alias"
+          },
+          {
+            "request": "EffluentByproduct",
+            "kind": "measure",
+            "ok": true,
+            "interpretation": "measure 'EffluentByproduct'",
+            "target_id": "EffluentByproduct",
+            "value": null,
+            "reason": "",
+            "candidates": [],
+            "method": "alias"
+          }
+        ],
+        "readings": {
+          "ConversionEfficiency": 15.722,
+          "EffluentByproduct": 9.276
+        },
+        "raw_csv": "results_v8_validation_opus/v7_catalysis_dosewin_interior_dose_sympto_10001512_data/experiment_11.csv"
+      }
+    },
+    {
+      "turn": 16,
+      "latency_s": 8.46,
+      "reasoning": "Let me analyze the dose-response so far. Regen@40 \u2192 conv 8.8; regen@75 \u2192 conv 20.5; regen@90 \u2192 conv 15.7. So conversion rose then fell \u2014 the optimum is interior, near 75. Let me look at the data to fit the curve and confirm the peak.",
+      "memory": "Hypotheses: new feed poisons catalyst; regeneration restores activity; optimum interior.\nRuled out: pressure drop, temp/pressure decoys, feed purification/guard bed absent.\nConfirmed: regen@40 conv8.8/byprod24.6; regen@75 conv20.5/byprod8.5; regen@90 conv15.7/byprod9.3 \u2014 peak between 75 and 90, likely ~70-78.\nNext: test regen near optimum (~70) to confirm peak; then answer.",
+      "raw": "<reasoning>\nLet me analyze the dose-response so far. Regen@40 \u2192 conv 8.8; regen@75 \u2192 conv 20.5; regen@90 \u2192 conv 15.7. So conversion rose then fell \u2014 the optimum is interior, near 75. Let me look at the data to fit the curve and confirm the peak.\n</reasoning>\n<action type=\"code\">\nimport pandas as pd, numpy as np\n# summarize known dose points\ndoses = {40:8.8, 75:20.5, 90:15.7}\nprint(doses)\n# fit quadratic through 3 points\nx=np.array([40,75,90]); y=np.array([8.8,20.5,15.7])\nc=np.polyfit(x,y,2)\npeak=-c[1]/(2*c[0])\nprint(\"quad coeffs\",c,\"peak at\",round(peak,1))\nfor d in [60,65,70,75,80]:\n    print(d, round(np.polyval(c,d),2))\n</action>\n<memory>\nHypotheses: new feed poisons catalyst; regeneration restores activity; optimum interior.\nRuled out: pressure drop, temp/pressure decoys, feed purification/guard bed absent.\nConfirmed: regen@40 conv8.8/byprod24.6; regen@75 conv20.5/byprod8.5; regen@90 conv15.7/byprod9.3 \u2014 peak between 75 and 90, likely ~70-78.\nNext: test regen near optimum (~70) to confirm peak; then answer.\n</memory>",
+      "action_type": "code",
+      "code": "import pandas as pd, numpy as np\n# summarize known dose points\ndoses = {40:8.8, 75:20.5, 90:15.7}\nprint(doses)\n# fit quadratic through 3 points\nx=np.array([40,75,90]); y=np.array([8.8,20.5,15.7])\nc=np.polyfit(x,y,2)\npeak=-c[1]/(2*c[0])\nprint(\"quad coeffs\",c,\"peak at\",round(peak,1))\nfor d in [60,65,70,75,80]:\n    print(d, round(np.polyval(c,d),2))",
+      "code_output": "{40: 8.8, 75: 20.5, 90: 15.7}\nquad coeffs [-1.30857143e-02  1.83914286e+00 -4.38285714e+01] peak at 70.3\n60 19.41\n65 20.43\n70 20.79\n75 20.5\n80 19.55\n"
+    },
+    {
+      "turn": 17,
+      "latency_s": 11.36,
+      "reasoning": "My prior interventions strongly point to a catalyst poisoning mechanism from the new feed, and regeneration restores activity with an interior optimum. The quadratic fit peaks at ~70, and my discrete test shows 70 gives the best conversion (20.79). I have 4 experiments left. I've already confirmed peak between 75-90 earlier but the finer fit says 70 is the peak. Let me confirm regen at 70 gives the best conversion before answering. This is a good use of one experiment.",
+      "memory": "Hypotheses: new feed poisons catalyst; regeneration restores activity; optimum ~70.\nRuled out: pressure drop, temp/pressure decoys, feed purification/guard bed absent.\nConfirmed: regen@40 conv8.8/byprod24.6; regen@75 conv20.5/byprod8.5; regen@90 conv15.7/byprod9.3; fit peak ~70.\nNext: confirm regen@70; then answer.",
+      "raw": "<reasoning>My prior interventions strongly point to a catalyst poisoning mechanism from the new feed, and regeneration restores activity with an interior optimum. The quadratic fit peaks at ~70, and my discrete test shows 70 gives the best conversion (20.79). I have 4 experiments left. I've already confirmed peak between 75-90 earlier but the finer fit says 70 is the peak. Let me confirm regen at 70 gives the best conversion before answering. This is a good use of one experiment.</reasoning>\n<action type=\"intervene\">{\"actions\":[{\"request\":\"run catalyst regeneration\",\"value\":70}],\"measure\":[\"conversion efficiency\",\"byproduct fraction\"]}</action>\n<memory>\nHypotheses: new feed poisons catalyst; regeneration restores activity; optimum ~70.\nRuled out: pressure drop, temp/pressure decoys, feed purification/guard bed absent.\nConfirmed: regen@40 conv8.8/byprod24.6; regen@75 conv20.5/byprod8.5; regen@90 conv15.7/byprod9.3; fit peak ~70.\nNext: confirm regen@70; then answer.\n</memory>",
+      "action_type": "intervene",
+      "result": {
+        "mode": "intervene",
+        "experiment_id": 12,
+        "n_units": 400,
+        "applied_intervention": {
+          "RegenerationCycle": 70.0
+        },
+        "action_resolutions": [
+          {
+            "request": "run catalyst regeneration",
+            "kind": "intervene",
+            "ok": true,
+            "interpretation": "apply 'RegenerationCycle' (dosing to reduce HotSpotFormation) at 70.0",
+            "target_id": "RegenerationCycle",
+            "value": 70.0,
+            "reason": "",
+            "candidates": [],
+            "method": "alias"
+          }
+        ],
+        "measurement_resolutions": [
+          {
+            "request": "conversion efficiency",
+            "kind": "measure",
+            "ok": true,
+            "interpretation": "measure 'ConversionEfficiency'",
+            "target_id": "ConversionEfficiency",
+            "value": null,
+            "reason": "",
+            "candidates": [],
+            "method": "alias"
+          },
+          {
+            "request": "byproduct fraction",
+            "kind": "measure",
+            "ok": true,
+            "interpretation": "measure 'EffluentByproduct'",
+            "target_id": "EffluentByproduct",
+            "value": null,
+            "reason": "",
+            "candidates": [],
+            "method": "alias"
+          }
+        ],
+        "readings": {
+          "ConversionEfficiency": 21.871,
+          "EffluentByproduct": 9.577
+        },
+        "raw_csv": "results_v8_validation_opus/v7_catalysis_dosewin_interior_dose_sympto_10001512_data/experiment_12.csv"
+      }
+    },
+    {
+      "turn": 18,
+      "latency_s": 6.99,
+      "reasoning": "I have data at multiple regen doses. Let me fit the dose-response curve to pin the optimum before answering. The 4 regen points: 40\u21928.8, 70\u219221.9, 75\u219220.5, 90\u219215.7. Peak appears near 70-75. Let me compute a quadratic fit to find the true peak.",
+      "memory": "Hypotheses: new feed poisons catalyst; regeneration restores activity; optimum ~70.\nRuled out: pressure drop, temp/pressure decoys, feed purification/guard bed absent.\nConfirmed: regen@40 conv8.8/byprod24.6; regen@70 conv21.9/byprod9.6; regen@75 conv20.5/byprod8.5; regen@90 conv15.7/byprod9.3; peak ~70.\nNext: answer with regen ~70.",
+      "raw": "<reasoning>I have data at multiple regen doses. Let me fit the dose-response curve to pin the optimum before answering. The 4 regen points: 40\u21928.8, 70\u219221.9, 75\u219220.5, 90\u219215.7. Peak appears near 70-75. Let me compute a quadratic fit to find the true peak.</reasoning>\n<action type=\"code\">\nimport numpy as np\nx=np.array([40,70,75,90])\ny=np.array([8.8,21.9,20.5,15.7])\nc=np.polyfit(x,y,2)\npeak=-c[1]/(2*c[0])\nprint(\"coeffs\",c,\"peak at\",round(peak,1))\nfor d in [65,70,72,75]:\n    print(d, round(np.polyval(c,d),2))\n</action>\n<memory>\nHypotheses: new feed poisons catalyst; regeneration restores activity; optimum ~70.\nRuled out: pressure drop, temp/pressure decoys, feed purification/guard bed absent.\nConfirmed: regen@40 conv8.8/byprod24.6; regen@70 conv21.9/byprod9.6; regen@75 conv20.5/byprod8.5; regen@90 conv15.7/byprod9.3; peak ~70.\nNext: answer with regen ~70.\n</memory>",
+      "action_type": "code",
+      "code": "import numpy as np\nx=np.array([40,70,75,90])\ny=np.array([8.8,21.9,20.5,15.7])\nc=np.polyfit(x,y,2)\npeak=-c[1]/(2*c[0])\nprint(\"coeffs\",c,\"peak at\",round(peak,1))\nfor d in [65,70,72,75]:\n    print(d, round(np.polyval(c,d),2))",
+      "code_output": "coeffs [-1.42233032e-02  1.98460273e+00 -4.77998610e+01] peak at 69.8\n65 21.11\n70 21.43\n72 21.36\n75 21.04\n"
+    },
+    {
+      "turn": 19,
+      "latency_s": 13.98,
+      "reasoning": "I've spent 12/15 experiments. My data strongly supports that the new feedstock introduced a catalyst poison, and regeneration (thermal/oxidative regen of the fixed bed) restores activity, with an optimum regeneration level around 70. Too high (90) hurts \u2014 consistent with over-regeneration damaging the catalyst. The temp/pressure retuning theory is a decoy. Feed purification/guard bed is absent.\n\nThe byproduct fraction is a genuine downstream marker: it moves inversely with conversion under regeneration (high byproduct at poor regen@40, low at good regen@70/75). So byproduct fraction is a true mechanism proxy tracking catalyst activity state. Temperature/pressure readings are the confounded decoys the team latched onto.\n\nI have 3 experiments left but my regen dose-response is well characterized with a peak fit at ~69.8. I have enough to answer confidently. Let me finalize.",
+      "memory": "Confirmed: new feed poisons catalyst; regen@70 optimum restores conversion (~22) & lowers byproduct (~9.6); peak fit ~69.8; over-regen@90 harmful.\nAnswer submitted: regenerate bed @70; proxy=byproduct fraction; decoys=temp/pressure.",
+      "raw": "<reasoning>\nI've spent 12/15 experiments. My data strongly supports that the new feedstock introduced a catalyst poison, and regeneration (thermal/oxidative regen of the fixed bed) restores activity, with an optimum regeneration level around 70. Too high (90) hurts \u2014 consistent with over-regeneration damaging the catalyst. The temp/pressure retuning theory is a decoy. Feed purification/guard bed is absent.\n\nThe byproduct fraction is a genuine downstream marker: it moves inversely with conversion under regeneration (high byproduct at poor regen@40, low at good regen@70/75). So byproduct fraction is a true mechanism proxy tracking catalyst activity state. Temperature/pressure readings are the confounded decoys the team latched onto.\n\nI have 3 experiments left but my regen dose-response is well characterized with a peak fit at ~69.8. I have enough to answer confidently. Let me finalize.\n</reasoning>\n<action type=\"answer\">{\n  \"recommended_intervention_text\":[{\"request\":\"regenerate the catalyst bed\",\"value\":70}],\n  \"structured\":{\n     \"true_mechanism_proxy\":\"effluent byproduct fraction (tracks catalyst poisoning/activity state)\",\n     \"confounded_decoys\":[\"reactor temperature\",\"reactor pressure\"],\n     \"actuator_sign_predictions\":{\"regenerate the catalyst bed\":\"+\",\"retune temperature\":\"0\",\"retune pressure\":\"0\",\"add feed purification/guard bed\":\"0\"}\n  },\n  \"explanation\":\"The conversion drop began right after switching to a new feedstock supplier, and stayed low run after run \u2014 a persistent, not transient, loss. This signature points to catalyst poisoning by a contaminant in the new feed, not an operating-point problem. The team's temperature/pressure theory is a decoy: routine data read in-range and those readings correlate with performance only as bystanders. The decisive test was catalyst regeneration at varying intensity: regen@40 gave poor conversion (~8.8) with high byproduct (~24.6); regen@70 restored conversion to ~21.9 with low byproduct (~9.6); regen@75 similar (~20.5); regen@90 fell back to ~15.7 (over-regeneration damages the bed). A quadratic fit of the dose-response peaks at ~69.8. The byproduct fraction is the genuine downstream marker \u2014 it rises when the catalyst is poisoned/inactive and falls when activity is restored, moving inversely with conversion across all regen levels. Recommendation: regenerate the catalyst bed at intensity ~70 (moderate) to strip the poison and restore active sites; avoid over-regenerating. Since no feed guard bed/purification actuator exists on this line, periodic regeneration is the practical fix while sourcing cleaner feed.\"\n}</action>\n<memory>\nConfirmed: new feed poisons catalyst; regen@70 optimum restores conversion (~22) & lowers byproduct (~9.6); peak fit ~69.8; over-regen@90 harmful.\nAnswer submitted: regenerate bed @70; proxy=byproduct fraction; decoys=temp/pressure.\n</memory>",
+      "action_type": "answer",
+      "policy_resolution": null,
+      "answer_raw": {
+        "recommended_intervention_text": [
+          {
+            "request": "regenerate the catalyst bed",
+            "value": 70
+          }
+        ],
+        "structured": {
+          "true_mechanism_proxy": "effluent byproduct fraction (tracks catalyst poisoning/activity state)",
+          "confounded_decoys": [
+            "reactor temperature",
+            "reactor pressure"
+          ],
+          "actuator_sign_predictions": {
+            "regenerate the catalyst bed": "+",
+            "retune temperature": "0",
+            "retune pressure": "0",
+            "add feed purification/guard bed": "0"
+          }
+        },
+        "explanation": "The conversion drop began right after switching to a new feedstock supplier, and stayed low run after run \u2014 a persistent, not transient, loss. This signature points to catalyst poisoning by a contaminant in the new feed, not an operating-point problem. The team's temperature/pressure theory is a decoy: routine data read in-range and those readings correlate with performance only as bystanders. The decisive test was catalyst regeneration at varying intensity: regen@40 gave poor conversion (~8.8) with high byproduct (~24.6); regen@70 restored conversion to ~21.9 with low byproduct (~9.6); regen@75 similar (~20.5); regen@90 fell back to ~15.7 (over-regeneration damages the bed). A quadratic fit of the dose-response peaks at ~69.8. The byproduct fraction is the genuine downstream marker \u2014 it rises when the catalyst is poisoned/inactive and falls when activity is restored, moving inversely with conversion across all regen levels. Recommendation: regenerate the catalyst bed at intensity ~70 (moderate) to strip the poison and restore active sites; avoid over-regenerating. Since no feed guard bed/purification actuator exists on this line, periodic regeneration is the practical fix while sourcing cleaner feed."
+      },
+      "resolved_intervention": {
+        "RegenerationCycle": 70.0
+      },
+      "answer_resolution_echo": [
+        {
+          "request": "regenerate the catalyst bed",
+          "kind": "intervene",
+          "ok": true,
+          "interpretation": "apply 'RegenerationCycle' (dosing to reduce HotSpotFormation) at 70.0",
+          "target_id": "RegenerationCycle",
+          "value": 70.0,
+          "reason": "",
+          "candidates": [],
+          "method": "alias"
+        }
+      ],
+      "grade": {
+        "accepted": true,
+        "part_a_utility_ok": true,
+        "part_b_battery_ok": true,
+        "recommended_intervention": {
+          "RegenerationCycle": 70.0
+        },
+        "recommended_utility": 21.619,
+        "gold_intervention": {
+          "FeedFlowRate": 0.0,
+          "RegenerationCycle": 66.0
+        },
+        "gold_utility": 22.796,
+        "baseline_utility": -8.236,
+        "benefit_recovered": 0.962,
+        "is_conditional_policy": false,
+        "utility_gap": 1.177,
+        "battery_fraction": 0.833,
+        "battery_items": [
+          [
+            "true_mechanism_proxy",
+            true
+          ],
+          [
+            "confounded_decoys",
+            false
+          ],
+          [
+            "sign:add feed purification/guard bed",
+            true
+          ],
+          [
+            "sign:retune temperature",
+            true
+          ],
+          [
+            "sign:retune pressure",
+            true
+          ],
+          [
+            "sign:RegenerationCycle",
+            true
+          ]
+        ]
+      },
+      "artifact_check": {
+        "suspect": false,
+        "reasons": []
+      }
+    }
+  ],
+  "wall_seconds": 314.9,
+  "model": "us.anthropic.claude-opus-4-8",
+  "world_file": "/home/ec2-user/SageMaker/vivian/data/rpg_v8_fast_worlds/world_v7_catalysis_dosewin_interior_dose_sympto_10001512.json"
+}

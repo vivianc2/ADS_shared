@@ -88,7 +88,23 @@ def _neutral_measurable_desc(spec: Dict[str, Any]) -> str:
 
 
 def _neutral_actuator_desc(act: Dict[str, Any]) -> str:
-    return act.get("description") or (act.get("aliases") or ["a control"])[0]
+    """Mirror the measurable path: use the first ALIAS — a neutral operator name for the
+    control (e.g. 'set water temperature', 'corrosion inhibitor') — so the scientist knows
+    WHAT each knob is and can form domain hypotheses, WITHOUT being told its causal ROLE.
+    We deliberately do NOT use `description`, which encodes the answer: the true fix reads
+    "dosing to reduce <true_root>" and the symptom trap reads "a control that adjusts the
+    <outcome> readout". The alias drops both tells (fix -> 'corrosion inhibitor'; distractor
+    'control for HardnessCaCO3' -> 'set hardness'), matching how measurables use a neutral
+    alias rather than the canonical variable name.
+
+    RESIDUAL LEAK — must be fixed at WORLD-GEN, not here: some skins give the symptom-trap
+    actuator an alias that still reveals its role ('dye-masking additive', 'color-masking
+    agent'), whereas others already give it a plausible legitimate alias (bioprocess: 'assay
+    recalibration'). The catalog cannot invent a neutral name; the skins must give the trap a
+    non-revealing alias so it is indistinguishable by label from a real control. See
+    rpg_personal_docs/expA_9b_run_notes.md (reward/task v2)."""
+    aliases = act.get("aliases") or []
+    return aliases[0] if aliases else "an adjustable control"
 
 
 def build_catalog(world: Dict[str, Any], scm, *, seed: int) -> Catalog:

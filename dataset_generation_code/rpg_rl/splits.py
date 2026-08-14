@@ -25,8 +25,10 @@ from skins import skin_names
 from sampler import ARCHETYPES
 
 # --- reserved (held-out) families. Edit here to change the split; keep >=2 skins + >=1 arch. ---
+# run-6 (v8, 9 archetypes): held out = 3 distinct + near-flat@base families (transfer set),
+# plus 2 reserved skins for domain transfer. Train = the 6 signal archetypes on the 8 train skins.
 HELDOUT_SKINS = ["clinical", "fermentation"]        # 2 of 10 skins reserved
-HELDOUT_ARCHETYPES = ["hidden_subtype"]             # 1 of 3 archetypes reserved
+HELDOUT_ARCHETYPES = ["hidden_subtype", "surrogate_trap", "competing_causes"]  # 3 of 9 reserved
 
 
 def train_skins() -> List[str]:

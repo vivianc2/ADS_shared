@@ -44,7 +44,7 @@ Each turn, output exactly:
 Action payloads (JSON, ids only):
 - measure:   {"ids": ["m3","m0"]}                         # read those signals
 - intervene: {"actions":[{"actuator":"a2","value":66}], "measure":["m3"]}   # set controls, then read
-- code:      raw Python over the CSVs (variable experiment_<n>_csv); does not cost budget
+- code:      raw Python analysis; does not cost budget. Each experiment's data is preloaded as a pandas DataFrame named experiment_<n>_df (use it directly, e.g. experiment_1_df.describe()); its file path is also available as experiment_<n>_csv. pandas as pd, numpy as np, scipy.stats as stats are imported. Each code turn runs in a FRESH namespace — the experiment_<n>_df variables are always available, but variables you define do NOT persist to the next code turn, so recompute what you need.
 - answer:    {"actions":[{"actuator":"a2","value":66}],
               "policy":{"treatment":"a2","stratifier":"m1","threshold":50,"dose_if_ge":100,"dose_if_lt":0},
               "proxy":"m3", "decoys":["m0"], "signs":{"a2":"+"}}
@@ -102,7 +102,13 @@ class RPGEnv:
         return ("MEASURABLE SIGNALS (ids):\n" + ms +
                 "\n\nCONTROLS (ids):\n" + "\n".join(acts))
 
-    def _observation(self) -> str:
+    def _observation(self, include_catalog: bool = False) -> str:
+        # The id catalog (`_catalog_block`) is STATIC per world (built once in
+        # __post_init__). It is shown ONLY in the first observation (reset -> the dataset
+        # prompt) and omitted on every later turn: the full chat history is retained, so
+        # the catalog from turn 1 stays in context, and re-emitting it every turn just
+        # inflates the sequence up to ~32x (the dominant length/compute bottleneck for
+        # prefill + fwd/bwd). See rl_run6_setup / Exp A notes.
         pub = self.sim.public()
         remaining = self.budget - self._used
         turns_left = self.max_turns - self._turn
@@ -114,15 +120,14 @@ class RPGEnv:
         elif self._n_interv == 0 and self._used >= 3:
             directive = ('\nDIRECTIVE: you have run no INTERVENTION — observation alone cannot '
                          'establish causation; intervene to test a cause.\n')
+        catalog_section = f"\n{self._catalog_block()}\n" if include_catalog else ""
         return f"""SITUATION
 {pub['scenario']}
 
 OUTCOME OF INTEREST: {pub['outcome_name']} ({pub['outcome_direction']})
 BUDGET: {self._used}/{self.budget} experiments used, {remaining} left (code is free).
 TURNS: {self._turn}/{self.max_turns}, {turns_left} left. Interventions so far: {self._n_interv}.
-{files}{directive}
-{self._catalog_block()}
-
+{files}{directive}{catalog_section}
 RESULT OF LAST ACTION
 {self._latest}
 
@@ -136,7 +141,7 @@ YOUR MEMORY
         self._memory, self._latest = "(empty)", "(none yet)"
         self._csv_map, self._carried, self.turns = {}, {}, []
         self._done = False
-        return self._observation()
+        return self._observation(include_catalog=True)
 
     def step(self, model_text: str) -> Tuple[str, float, bool, Dict[str, Any]]:
         """Advance one turn given the model's raw text. Returns
@@ -165,6 +170,14 @@ YOUR MEMORY
         except Exception as e:
             data = {}
             rec["error"] = f"json parse: {e}"
+        # The model sometimes emits a bare JSON array (e.g. measure payload `["m0","m1"]`)
+        # instead of the object form `{"ids": [...]}`. json.loads then returns a list, and the
+        # measure/intervene branches below call data.get(...) -> AttributeError that would crash
+        # the whole rollout. Treat any non-dict payload as an empty action so the env returns a
+        # "no valid action" observation and the policy recovers (matches the parse-error path).
+        if not isinstance(data, dict):
+            rec["error"] = f"non-dict payload ({type(data).__name__}); expected object with keys"
+            data = {}
 
         if atype in ("answer", "give_up"):
             return self._terminal(data if atype == "answer" else None, rec, forced=False)

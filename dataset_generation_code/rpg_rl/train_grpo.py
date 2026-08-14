@@ -58,6 +58,7 @@ class Cfg:
     top_p: float = 0.95
     top_k: int = 20
     seed0: int = 8_000_000
+    archetypes: str = ""              # comma-sep archetype restriction (e.g. "confounded_chain")
     max_turns: int = 32
     budget: int = 15
     grad_clip: float = 1.0
@@ -74,7 +75,7 @@ def setup_model(cfg: Cfg):
     if tok.pad_token_id is None:
         tok.pad_token = tok.eos_token
     model = AutoModelForCausalLM.from_pretrained(
-        cfg.model, torch_dtype=torch.bfloat16, attn_implementation="eager")
+        cfg.model, torch_dtype=torch.bfloat16, attn_implementation="sdpa")
     model.to("cuda")
     lora = LoraConfig(r=cfg.lora_r, lora_alpha=cfg.lora_alpha, lora_dropout=cfg.lora_dropout,
                       target_modules=["q_proj", "k_proj", "v_proj", "o_proj",
@@ -267,7 +268,9 @@ def main():
 
     model, tok = setup_model(cfg)
     opt = torch.optim.AdamW([p for p in model.parameters() if p.requires_grad], lr=cfg.lr)
-    stream = WorldStream(split="train", seed0=cfg.seed0)
+    arches = [a.strip() for a in cfg.archetypes.split(",") if a.strip()] or None
+    stream = WorldStream(split="train", seed0=cfg.seed0, archetypes=arches)
+    print(f"train stream cells restricted to archetypes: {arches or 'ALL'}")
 
     logf = open(cfg.log_file, "a")
     for step in range(1, cfg.steps + 1):

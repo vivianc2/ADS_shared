@@ -122,16 +122,18 @@ You can do four things (ONE action per turn):
                               "measure":["product titer","broth cloudiness"]}</action>
 
 3) Run analysis code over the raw data you have collected. Each measure/intervene
-   writes a CSV of per-unit rows, exposed to your code as a variable named
-   experiment_<id>_csv holding the file path. You have pd (pandas), np (numpy),
-   and stats (scipy.stats). print() what you want to see. Code does NOT cost an
-   experiment from your budget -- use it to fit dose-response curves, run
-   regressions, test whether a correlate is a confound, check for interactions,
-   etc. Example:
+   is preloaded for you as a pandas DataFrame named experiment_<id>_df (per-unit rows);
+   its file path is also available as experiment_<id>_csv. Use the DataFrame directly --
+   do NOT pd.read_csv a bare name. You have pd (pandas), np (numpy), and stats
+   (scipy.stats). print() what you want to see. Code does NOT cost an experiment from
+   your budget -- use it to fit dose-response curves, run regressions, test whether a
+   correlate is a confound, check for interactions, etc. Each code turn runs in a FRESH
+   namespace: the experiment_<id>_df variables are always available, but variables YOU
+   define do not carry to the next code turn -- so one code turn per analysis is enough.
+   Example:
    <action type="code">
-import pandas as pd
 from scipy import stats
-df = pd.read_csv(experiment_1_csv)
+df = experiment_1_df                     # already loaded; no read needed
 print(df.describe())
 print("corr:", df.corr(numeric_only=True).round(3))
 slope,inter,r,p,se = stats.linregress(df["SomeSignal"], df["ProductTiter"])

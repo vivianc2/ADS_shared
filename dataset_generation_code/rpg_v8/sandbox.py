@@ -44,8 +44,18 @@ def _worker(code: str, csv_map: Dict[str, str], carried: Dict[str, Any], result_
 
     ns: Dict[str, Any] = {"pd": _pd, "np": _np, "stats": _stats}
     # inject CSV file paths as variables: experiment_<id>_csv = "/path.csv"
+    # AND pre-load each as a ready DataFrame: experiment_<id>_df (so the model can use
+    # the data directly without pd.read_csv — avoids the "quoted the var as a filename"
+    # failure and the re-read-every-turn friction, since each code turn is a fresh ns).
+    _loaded_dfs = []
     for var_name, path in csv_map.items():
         ns[var_name] = path
+        df_name = var_name[:-4] + "_df" if var_name.endswith("_csv") else var_name + "_df"
+        try:
+            ns[df_name] = _pd.read_csv(path)
+            _loaded_dfs.append(df_name)
+        except Exception:
+            pass
     ns.update(carried)
 
     injected = set(ns.keys())

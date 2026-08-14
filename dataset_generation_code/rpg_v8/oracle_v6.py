@@ -289,10 +289,20 @@ def _score_battery(battery, answer, recommended=None, strict=True):
     items.append(("true_mechanism_proxy", st.get("true_mechanism_proxy") in proxy_set))
     agent_decoys = set(st.get("confounded_decoys", []))
     gt_decoys = set(battery["confounded_decoys"])
-    # decoy check: must flag the true confounder(s), and must NOT mislabel any
-    # genuine proxy as a decoy.
-    items.append(("confounded_decoys",
-                  gt_decoys.issubset(agent_decoys) and not (agent_decoys & proxy_set)))
+    # decoy credit: GRADED (Jaccard of agent vs gold decoys) instead of all-or-nothing.
+    # The old form `gt_decoys.issubset(agent_decoys)` scored naming 2-of-3 confounders as 0,
+    # identical to naming none — a cliff that dominated Part-B failures and gave the reward no
+    # intra-B gradient. We keep the ONE hard constraint: mislabeling a genuine mechanism proxy
+    # as a decoy is a real mechanism error -> 0. Otherwise score |A∩D| / |A∪D| (and credit
+    # correctly naming "no decoys" when the world has none -> 1.0).
+    if agent_decoys & proxy_set:
+        decoy_score = 0.0
+    elif not gt_decoys and not agent_decoys:
+        decoy_score = 1.0
+    else:
+        union = gt_decoys | agent_decoys
+        decoy_score = len(gt_decoys & agent_decoys) / len(union) if union else 1.0
+    items.append(("confounded_decoys", decoy_score))
     pred = st.get("actuator_sign_predictions", {}) or {}
     trap = battery.get("symptom_trap_actuator")
     gold_signs = battery["actuator_sign_predictions"]
@@ -316,8 +326,11 @@ def _score_battery(battery, answer, recommended=None, strict=True):
             items.append((f"sign:{aid}(trap)", ok))
         else:
             items.append((f"sign:{aid}", pred.get(aid) == gold))
-    n_ok = sum(1 for _, ok in items if ok)
-    return n_ok / len(items), items
+    # items hold numeric scores: booleans (True/False -> 1.0/0.0) for exact-match items and
+    # graded floats in [0,1] (e.g. confounded_decoys). Sum the scores rather than counting
+    # truthy, so partial credit contributes fractionally to the battery fraction.
+    score_sum = sum(float(ok) for _, ok in items)
+    return score_sum / len(items), items
 
 
 def _normalize_policy_answer(scm: WorldSCM, answer: Dict[str, Any],

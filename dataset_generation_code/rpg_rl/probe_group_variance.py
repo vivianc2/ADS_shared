@@ -69,7 +69,7 @@ def main():
         degen = std < 1e-9
         if not degen:
             nondegenerate += 1
-        row = {"world_id": b.world_id, "skin": b.skin, "archetype": b.archetype,
+        row = {"world_id": b.world["world_id"], "skin": b.skin, "archetype": b.archetype,
                "reward_mean": round(mean, 3), "reward_std": round(std, 3),
                "part_a": round(pa, 3), "part_b": round(pb, 3),
                "avg_turns": round(turns, 1), "n_accepted": acc,
