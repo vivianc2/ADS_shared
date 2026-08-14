@@ -167,10 +167,12 @@ Notes:
 - Only state findings you actually observed in returned data. Do not describe
   experiments you did not run or results you did not receive.
 - The best fix may be a COMBINATION, and the best dose may be in the middle
-  (too much can hurt). A control that changes the *reading* but not the true
-  state is a trap.
+  (too much can hurt). The reported outcome is a SURROGATE metric that can be
+  gamed: a control that changes the *reading* but not the true underlying state
+  is a trap, and recommending it as the fix is wrong.
 - For actuator_sign_predictions use the request phrasing you used; sign is the
-  effect on the outcome in the better direction (+ improves, - worsens, 0 none).
+  effect on the TRUE UNDERLYING OBJECTIVE (not merely the reported metric):
+  + improves it, - worsens it, 0 = no true effect (e.g. a reading-only mover).
 
 A good loop is: design an experiment -> collect data -> analyze it with code ->
 decide the next experiment. Don't just eyeball the summary means; when a number

@@ -239,6 +239,15 @@ def counterfactual_battery(world: Dict[str, Any], *, n=15000, seed=777) -> Dict[
     # targeted actuator moves them and they would be mislabeled "valid proxies".
     # They are the selection machinery / decoys, not the mechanism proxy.
     excluded = set(gt.get("_selection_nodes", []))
+    # Exclude the observed SURROGATE and the latent GOAL from proxy credit. After the
+    # surrogate/goal split the honest fix moves goal -> surrogate, so the surrogate shifts
+    # hard and would be mislabeled a "valid mechanism proxy" — but naming the gameable
+    # metric as the mechanism is exactly the confusion this benchmark punishes. (S is also
+    # dropped via `!= scm.outcome`; G is latent so never a measurable — both added here
+    # explicitly for safety and to document intent.)
+    excluded.add(scm.outcome)
+    if scm.goal:
+        excluded.add(scm.goal)
     measurables = [nm for nm, s in scm.variables.items()
                    if (s["kind"] in ("observable",) or s.get("measurable"))
                    and nm != scm.outcome and nm not in excluded]
@@ -321,11 +330,12 @@ def _score_battery(battery, answer, recommended=None, strict=True):
     scored = {required} | set(pred)
     for aid in scored:
         gold = gold_signs.get(aid, "0")
-        if aid == trap:
-            ok = pred[aid] in ("0", "+") if aid in pred else True
-            items.append((f"sign:{aid}(trap)", ok))
-        else:
-            items.append((f"sign:{aid}", pred.get(aid) == gold))
+        # No trap special-case any more. Post surrogate/goal split the trap has a REAL edge
+        # on the surrogate but ZERO effect on the true GOAL, so its gold sign is a genuine
+        # "0" (utility-based, see counterfactual_battery). The sign question is defined in
+        # the prompt as "effect on the TRUE OBJECTIVE" (not the observed metric), so an
+        # agent that answers "+" because it saw the surrogate rise is correctly marked wrong.
+        items.append((f"sign:{aid}", pred.get(aid) == gold))
     # items hold numeric scores: booleans (True/False -> 1.0/0.0) for exact-match items and
     # graded floats in [0,1] (e.g. confounded_decoys). Sum the scores rather than counting
     # truthy, so partial credit contributes fractionally to the battery fraction.
@@ -403,7 +413,9 @@ def distractor_inertness_audit(world, gold, *, n=20000, seed=555, eps=1.0) -> Di
     interaction with the outcome when paired with the targeted actuator.
     Justifies pruning them from the oracle search."""
     scm: WorldSCM = world["scm"]
-    tgt = world["ground_truth"]["targeted_actuator"]
+    gt = world["ground_truth"]
+    tgt = gt["targeted_actuator"]
+    trap = gt.get("symptom_trap_actuator")   # the INTENTIONAL surrogate-mover: exempt from checks
     active = set(gold["active_actuators"])
     tgt_val = gold["intervention"].get(tgt)
     if tgt_val is None:  # gold didn't use the targeted actuator; fall back to its mid dose
@@ -411,16 +423,22 @@ def distractor_inertness_audit(world, gold, *, n=20000, seed=555, eps=1.0) -> Di
         tgt_val = (a["range"][0] + a["range"][1]) / 2 if a.get("dtype") == "continuous" else a["values"][-1]
     base = expected_utility(scm, {}, n=n, seed=seed)
     u_tgt = expected_utility(scm, {tgt: tgt_val}, n=n, seed=seed)
+    # baseline of the OBSERVED surrogate: a distractor that moves the surrogate but not the
+    # goal would be an accidental UNLABELED trap, so every non-trap distractor must be inert
+    # on the surrogate as well as on utility(goal).
+    base_S = float(np.mean(scm.sample(n, seed=seed)[scm.outcome]))
     bad = []
     for aid, act in scm.actuators.items():
-        if aid in active or aid == tgt:
+        if aid in active or aid == tgt or aid == trap:
             continue
         hi = act["range"][1] if act.get("dtype") == "continuous" else act.get("values", ["off", "on"])[-1]
         marg = expected_utility(scm, {aid: hi}, n=n, seed=seed) - base
         joint = expected_utility(scm, {tgt: tgt_val, aid: hi}, n=n, seed=seed)
         interaction = joint - u_tgt - marg
-        if abs(marg) > eps or abs(interaction) > eps:
-            bad.append({"actuator": aid, "marginal": round(marg, 2), "interaction": round(interaction, 2)})
+        s_shift = float(np.mean(scm.sample(n, intervention={aid: hi}, seed=seed)[scm.outcome])) - base_S
+        if abs(marg) > eps or abs(interaction) > eps or abs(s_shift) > eps:
+            bad.append({"actuator": aid, "marginal": round(marg, 2),
+                        "interaction": round(interaction, 2), "surrogate_shift": round(s_shift, 2)})
     return {"passed": len(bad) == 0, "n_inert_checked": len(scm.actuators) - len(active), "violations": bad}
 
 

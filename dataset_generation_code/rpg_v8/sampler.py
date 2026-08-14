@@ -127,7 +127,7 @@ def sample_world(seed: int, skin: Optional[str] = None,
     n_distractors = rng.choice([8, 10, 12])
     n_inert_knobs = rng.choice([4, 5, 6])
     feats = set(features if features is not None else
-                [f for f in FEATURES if (f == "symptom_trap") or rng.random() < 0.5])
+                [f for f in FEATURES if f != "symptom_trap" and rng.random() < 0.5])
     # two_cause and sign_flip both act on the source->root edge; pick at most one
     if "two_cause" in feats and "sign_flip" in feats:
         feats.discard(rng.choice(["two_cause", "sign_flip"]))
@@ -156,6 +156,15 @@ def sample_world(seed: int, skin: Optional[str] = None,
     # clean single lever (no two_cause/sign_flip/interior_dose; the fix is removed below).
     if arche == "confounded_reversal":
         feats.discard("two_cause"); feats.discard("sign_flip"); feats.discard("interior_dose")
+    # The Goodhart / symptom trap is the DEFINING mechanism of surrogate_trap, which is a
+    # HELD-OUT archetype. Confine the trap to it — and keep it OUT of every TRAINING archetype
+    # — so we can still measure TRANSFER of trap-resistance: a model that never trained on a
+    # metric-gaming control must nonetheless resist one at eval. A universal trap would put
+    # that skill in-distribution and forfeit the headline held-out claim.
+    if arche == "surrogate_trap":
+        feats.add("symptom_trap")
+    else:
+        feats.discard("symptom_trap")
 
     V: Dict[str, Dict[str, Any]] = {}
     A: Dict[str, Dict[str, Any]] = {}
@@ -178,6 +187,12 @@ def sample_world(seed: int, skin: Optional[str] = None,
     src = _take(rng, S["source_knob_pool"], 1, used)[0]
     fix = _take(rng, S["fix_actuator_pool"], 1, used)[0]
     trap = _take(rng, S["trap_actuator_pool"], 1, used)[0]
+    # The TRUE GOAL is a LATENT objective — the oracle scores utility on it and the symptom
+    # trap CANNOT touch it. `outcome` (above) is only its OBSERVED surrogate readout, which
+    # the agent measures and the trap can move. Skins name the goal explicitly (deeper
+    # objective the metric proxies); fall back to an internal latent name otherwise.
+    goal = S.get("goal") or {"name": f"Underlying{outcome['name']}",
+                             "aliases": ["underlying true objective"]}
     src2 = None
     if "two_cause" in feats:
         # need a second source knob; reuse an inert-var name as a second controllable
@@ -190,13 +205,12 @@ def sample_world(seed: int, skin: Optional[str] = None,
         _col = _take(rng, S["inert_var_pool"], 1, used)
         if _sd and _col:
             sel_decoy, col_node = _sd[0], _col[0]
-    # reserve the surrogate node up-front (surrogate_trap archetype)
+    # surrogate_trap no longer builds a SEPARATE controllable metric. Post-split the
+    # PRIMARY observed metric (`outcome`) is itself a surrogate readout of the latent goal,
+    # and the universal symptom trap moves it with a real edge -> that IS the
+    # surrogate-endpoint challenge. Merging avoids a world with two surrogates.
     surr_node = None
     surr_actuator = None
-    if arche == "surrogate_trap":
-        _su = _take(rng, S["inert_var_pool"], 1, used)
-        if _su:
-            surr_node = _su[0]
     # reserve the reversal confounder up-front (confounded_reversal archetype)
     rev_conf = None
     if arche == "confounded_reversal":
@@ -356,31 +370,46 @@ def sample_world(seed: int, skin: Optional[str] = None,
             # placeholder; calibrated after the SCM is built (see the weight search).
             competing_extra = {cc_root2: 0.5 * chain_sign}
 
-    # ---- outcome: driven by last mediator (chain_sign) + small confounder path ----
+    # ---- GOAL (latent true objective) driven by last mediator (chain_sign) + small
+    # confounder path. This is the TRUE causal chain terminus; the oracle scores utility
+    # HERE. It is LATENT (no assay) — the trap cannot touch it and the agent cannot read it
+    # directly; the agent must infer goal-recovery from the mechanism proxy.
     weights = {last_mediator: 0.9 * chain_sign}
     for c in confs:
         weights[c["name"]] = 0.1 * (1 if higher_better else -1)
     weights.update(subtype_extra)
     weights.update(competing_extra)
-    # confounded_reversal: the reversal confounder drives the outcome POSITIVELY and
-    # strongly (weight calibrated after the SCM is built) so the source knob's
-    # observational correlation with the outcome is OPPOSITE its causal sign. rev_conf
-    # is a common cause of src (observed) and the outcome -> confounding by indication.
+    # confounded_reversal: the reversal confounder drives the GOAL POSITIVELY and strongly
+    # (weight calibrated after the SCM is built) so the source knob's observational
+    # correlation with the observed surrogate is OPPOSITE its causal sign. rev_conf is a
+    # common cause of src (observed) and the goal -> confounding by indication.
     reversal_extra = ({rev_conf["name"]: 1.0}
                       if (arche == "confounded_reversal" and rev_conf is not None) else {})
     weights.update(reversal_extra)
     intercept = 15 if chain_sign < 0 else 8
-    add_var(outcome, kind="outcome",
+    add_var(goal, kind="latent",
             parents=[last_mediator] + [c["name"] for c in confs]
                     + list(subtype_extra) + list(competing_extra) + list(reversal_extra),
-            mech={"form": "linear", "weights": weights, "intercept": intercept},
+            mech={"form": "linear", "weights": weights, "intercept": intercept})
+    # ---- OBSERVED SURROGATE: a faithful, noisy readout of the latent goal (goal -> outcome).
+    # This is the metric the agent measures and optimizes; utility is NOT scored here. Under
+    # an honest fix goal recovers -> surrogate recovers; the trap adds a REAL edge to THIS
+    # node only (below), raising the surrogate with zero effect on the goal or the proxy.
+    add_var(outcome, kind="outcome", parents=[goal["name"]],
+            mech={"form": "linear", "weights": {goal["name"]: 1.0}, "intercept": 0},
             measurable=True, assay_noise={"normal": [0, 3]})
 
     # ---- true mechanism proxy: attaches to a mediator (>=1 hop downstream) ----
+    # Assay noise kept LOW so the fix-induced proxy shift clears the oracle's validity gate
+    # (counterfactual_battery admits a proxy only if shift/sd > 0.5; proxy_signal_audit wants
+    # interventional shift/sd > 1.0). With the goal now LATENT and the surrogate gameable (in
+    # surrogate_trap), the proxy is the agent's honest verification channel, so it MUST be a
+    # detectable signal — a high-noise proxy would make the oracle's valid-proxy set degenerate
+    # AND the skill unlearnable. (Was SD 12 -> shift/sd ~0.08; re-audited per archetype x skin.)
     proxy_parent = mediators[min(1, len(mediators) - 1)]["name"]
     add_var(proxy, kind="observable", parents=[proxy_parent],
             mech={"form": "linear", "weights": {proxy_parent: 0.8}, "intercept": 5},
-            measurable=True, assay_noise={"normal": [0, 12]})
+            measurable=True, assay_noise={"normal": [0, 4]})
 
     # ---- confounded decoys: driven by a confounder (zero do-effect on outcome) ----
     for d in decoys:
@@ -388,28 +417,6 @@ def sample_world(seed: int, skin: Optional[str] = None,
         add_var(d, kind="observable", parents=[cparent],
                 mech={"form": "linear", "weights": {cparent: 0.7}, "intercept": 40},
                 measurable=True, assay_noise={"normal": [0, 4]})
-
-    # ---- surrogate-trap augmentation (controllable-but-useless metric) ----
-    # A measured SURROGATE that correlates with the outcome observationally (it
-    # shares the decoys' confounder) but is NOT on the causal path to the outcome,
-    # plus a controllable handle that moves the surrogate directly with ZERO
-    # do-effect on the true outcome. The trap: an agent can push the handle, watch
-    # the surrogate improve, and mistake that for progress. Skill under test: an
-    # intervention that moves a measured metric but not the OUTCOME is worthless --
-    # verify the OUTCOME itself. decoy_audit forces the handle and confirms the
-    # outcome does not move; the handle's sign on the outcome is graded "0".
-    if arche == "surrogate_trap" and surr_node is not None and decoys:
-        c_surr = V[decoys[0]["name"]]["parents"][0]   # same confounder calibrate() tunes
-        add_var(surr_node, kind="observable", parents=[c_surr],
-                mech={"form": "linear", "weights": {c_surr: 0.7}, "intercept": 40},
-                measurable=True, assay_noise={"normal": [0, 4]})
-        surr_aid = f"set_{surr_node['name']}"
-        A[surr_aid] = {"aliases": [f"set {a}" for a in surr_node["aliases"][:2]]
-                       + [f"adjust {surr_node['name']}"],
-                       "target": surr_node["name"], "op": "set", "dtype": "continuous",
-                       "range": [0, 100], "default": 50,
-                       "description": f"control for {surr_node['name']}"}
-        surr_actuator = surr_aid
 
     # ---- FIX actuator: scales the root down (reduces the true cause) ----
     if "two_cause" in feats or arche in ("instrument_only", "confounded_reversal"):
@@ -421,23 +428,31 @@ def sample_world(seed: int, skin: Optional[str] = None,
     else:
         side = None
         if "interior_dose" in feats:
-            side = {"target": outcome["name"],
+            # over-treatment harms the TRUE GOAL (a real therapeutic-window penalty),
+            # not merely the surrogate reading -> target the latent goal.
+            side = {"target": goal["name"],
                     "expr": ("-overstrip(d;thr=0.66,gain=30)" if higher_better
                              else "overstrip(d;thr=0.66,gain=30)")}
         eff = {"target": root["name"], "op": "scale", "dtype": "continuous",
                "range": [0, 100], "default": 0, "expr": "1-sat(d;k=0.66)",
-               "description": f"dosing to reduce {root['name']}"}
+               "description": "a continuous dosing control"}
         if side:
             eff["side_effect"] = side
         fix_id = add_act(fix, **eff)
 
-    # ---- TRAP actuator: masks the outcome reading only ----
+    # ---- TRAP actuator: a REAL edge on the observed surrogate (surrogate-endpoint trap) ----
+    # Dosing this GENUINELY raises the observed surrogate (op="add" on `outcome`, which is a
+    # readout of the latent goal), but it has ZERO path to the goal -> utility is unchanged
+    # and the mechanism proxy stays flat. So a plausible treatment name (e.g. "clarifying
+    # polymer") is now honest: it really moves the metric; it just doesn't fix the cause.
+    # (Replaces the old op="mask" reading-bias, which was chemically incoherent for any real
+    # treatment name and forced a role-leaking description.)
     trap_id = None
     if "symptom_trap" in feats:
         expr = "transient_boost(d)" if higher_better else "-transient_boost(d)"
-        trap_id = add_act(trap, target=outcome["name"], op="mask", dtype="continuous",
+        trap_id = add_act(trap, target=outcome["name"], op="add", dtype="continuous",
                           range=[0, 100], default=0, expr=expr,
-                          description=f"a control that adjusts the {outcome['name']} readout")
+                          description="an adjustable process control")
 
     # ---- inert distractor variables + inert control actuators ----
     inert_vars = _take(rng, S["inert_var_pool"], n_distractors, used)
@@ -490,7 +505,7 @@ def sample_world(seed: int, skin: Optional[str] = None,
         # thresh/soft are calibrated below to hit a target spurious correlation.
         selection = {"node": col_node["name"], "op": ">=", "thresh": 0.0, "soft": 4.0}
 
-    scm = WorldSCM(variables=V, actuators=A, outcome=outcome["name"],
+    scm = WorldSCM(variables=V, actuators=A, outcome=outcome["name"], goal=goal["name"],
                    higher_is_better=higher_better, selection=selection)
 
     # ---- competing_causes: calibrate cause-2's outcome weight so the two causes
@@ -498,7 +513,7 @@ def sample_world(seed: int, skin: Optional[str] = None,
     # benefit, so each single fix is below the Part-A bar while both together
     # recover ~all. Per-world search -> robust across skins without hardcoded %.
     if arche == "competing_causes" and cc_root2 is not None and fix_id and cc_fix2:
-        ow = scm.variables[outcome["name"]]["mech"]["weights"]
+        ow = scm.variables[goal["name"]]["mech"]["weights"]   # cause-2 feeds the GOAL
         hi1 = scm.actuators[fix_id]["range"][1]
         hi2 = scm.actuators[cc_fix2]["range"][1]
         def _eu(iv):
@@ -527,8 +542,10 @@ def sample_world(seed: int, skin: Optional[str] = None,
     # beneficial) while its causal effect stays NEGATIVE (harmful) -- the sign reverses
     # between observation and intervention (Simpson's / confounding by indication).
     if arche == "confounded_reversal" and rev_conf is not None:
-        ow = scm.variables[outcome["name"]]["mech"]["weights"]
+        ow = scm.variables[goal["name"]]["mech"]["weights"]   # rev_conf feeds the GOAL
         rc = rev_conf["name"]
+        # the OBSERVED correlation the agent sees is corr(src, observed surrogate); search
+        # the rev_conf->goal weight so this is positive while the causal sign stays negative.
         def _obs_corr():
             v = scm.sample(12000, seed=seed + 733)
             o = scm.measure(v, [src["name"], outcome["name"]], seed=seed + 734)
@@ -588,8 +605,10 @@ def sample_world(seed: int, skin: Optional[str] = None,
         naive.append({sub_info["treatment_actuator"]: 100})   # treat everyone -> ~0
     for iv in inert_vars[:2]:
         naive.append({f"set_{iv['name']}": 100})
-    if surr_actuator is not None:
-        naive.append({surr_actuator: 100})   # push the surrogate metric -> ~0 outcome effect
+    if trap_id is not None:
+        # dosing the trap raises the observed surrogate but has ZERO effect on the goal ->
+        # the canonical "optimized the metric, not the cause" mistake (fails Part A).
+        naive.append({trap_id: 100})
     if arche == "confounded_reversal":
         # observationally the source knob looks beneficial, so "turn it up" is the
         # obvious move -- but it is causally HARMFUL (the sign reverses under do()).

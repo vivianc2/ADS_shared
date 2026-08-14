@@ -172,8 +172,13 @@ def eval_expr(expr: str, d: float) -> float:
 class WorldSCM:
     variables: Dict[str, Dict[str, Any]]
     actuators: Dict[str, Dict[str, Any]]
-    outcome: str
+    outcome: str                       # the OBSERVED surrogate metric the agent reads/optimizes
     higher_is_better: bool = True
+    # The TRUE GOAL the oracle scores utility on — a latent objective the symptom trap CANNOT
+    # touch. `outcome` is only a surrogate readout of `goal` (goal -> outcome). The honest fix
+    # moves `goal` (and hence `outcome`); the trap moves `outcome` only. If `goal` is None the
+    # world is un-split (legacy) and utility falls back to the observed outcome.
+    goal: Optional[str] = None
     # Optional SELECTION spec. Models how the OBSERVATIONAL record was formed:
     # historical units are retained into the dataset only when a collider node
     # clears a threshold (e.g. only cases that got escalated/logged are on file).
@@ -193,6 +198,8 @@ class WorldSCM:
     def to_dict(self) -> Dict[str, Any]:
         d = {"variables": self.variables, "actuators": self.actuators,
              "outcome": self.outcome, "higher_is_better": self.higher_is_better}
+        if self.goal is not None:
+            d["goal"] = self.goal
         if self.selection is not None:
             d["selection"] = self.selection
         return d
@@ -201,7 +208,7 @@ class WorldSCM:
     def from_dict(cls, d: Dict[str, Any]) -> "WorldSCM":
         return cls(variables=d["variables"], actuators=d["actuators"],
                    outcome=d["outcome"], higher_is_better=bool(d.get("higher_is_better", True)),
-                   selection=d.get("selection"))
+                   goal=d.get("goal"), selection=d.get("selection"))
 
     # ---- catalogs ----
     def measurable_vars(self) -> List[str]:
@@ -439,5 +446,8 @@ class WorldSCM:
         return obs
 
     def utility(self, vals: Dict[str, np.ndarray]) -> np.ndarray:
-        y = vals[self.outcome]
+        # Utility is scored on the TRUE GOAL (latent), NOT the observed surrogate outcome —
+        # so a symptom trap that only moves the surrogate scores exactly 0 utility. Falls back
+        # to `outcome` for legacy un-split worlds (goal is None).
+        y = vals[self.goal or self.outcome]
         return y if self.higher_is_better else -y

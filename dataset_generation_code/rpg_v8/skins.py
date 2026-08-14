@@ -58,7 +58,7 @@ SKINS: Dict[str, Dict[str, Any]] = {
         ],
         "trap_actuator_pool": [
             _mk("StabilizerAdditive", "protein stabilizer", "formulation stabilizer", "protectant"),
-            _mk("AssayCalibrationShift", "assay recalibration", "reporting calibration"),
+            _mk("CarrierProtein", "carrier protein", "albumin supplement"),
         ],
         "inert_var_pool": [
             _mk("AntifoamLevel", "antifoam", "defoamer"),
@@ -128,7 +128,7 @@ SKINS: Dict[str, Dict[str, Any]] = {
             _mk("ConnectorReseat", "connector reseat program", "reseat connectors"),
         ],
         "trap_actuator_pool": [
-            _mk("TelemetrySmoothing", "telemetry smoothing", "rolling-average reporting"),
+            _mk("PriorityBoost", "priority boost", "qos prioritization"),
         ],
         "inert_var_pool": [
             _mk("CpuClock", "cpu clock", "processor frequency"),
@@ -191,7 +191,7 @@ SKINS: Dict[str, Dict[str, Any]] = {
             _mk("PhStabilizer", "ph stabilizer", "alkalinity adjustment"),
         ],
         "trap_actuator_pool": [
-            _mk("MaskingAdditive", "dye-masking additive", "color-masking agent"),
+            _mk("ClarifyingPolymer", "clarifying polymer", "coagulant aid"),
         ],
         "inert_var_pool": [
             _mk("FluorideLevel", "fluoride level", "fluoridation"),
@@ -258,8 +258,8 @@ SKINS: Dict[str, Dict[str, Any]] = {
             _mk("BiofungicideDrench", "biofungicide drench", "root drench"),
         ],
         "trap_actuator_pool": [
-            _mk("FoliarGreeningSpray", "foliar greening spray", "cosmetic greening agent"),
-            _mk("HarvestGradingShift", "harvest grading shift", "grading recalibration"),
+            _mk("FoliarPigment", "foliar pigment spray", "leaf-green tonic"),
+            _mk("PostharvestWax", "postharvest wax coat", "produce polish"),
         ],
         "inert_var_pool": [
             _mk("SoilPhosphorus", "soil phosphorus", "phosphate level"),
@@ -334,7 +334,7 @@ SKINS: Dict[str, Dict[str, Any]] = {
         ],
         "trap_actuator_pool": [
             _mk("Antipyretic", "antipyretic", "fever suppressant", "temperature-lowering drug"),
-            _mk("ScoreReweighting", "score reweighting", "assessment recalibration"),
+            _mk("Analgesic", "analgesic", "pain control"),
         ],
         "inert_var_pool": [
             _mk("BloodPressure", "blood pressure", "arterial pressure"),
@@ -407,8 +407,8 @@ SKINS: Dict[str, Dict[str, Any]] = {
             _mk("FilterUpgrade", "filtration upgrade", "particle filter swap"),
         ],
         "trap_actuator_pool": [
-            _mk("TestBinReclassify", "test-bin reclassification", "yield rebinning"),
-            _mk("ProbeCardRecal", "probe-card recalibration", "tester recalibration"),
+            _mk("EdgeExclusionTrim", "edge-exclusion trim", "wafer-edge trim"),
+            _mk("MegasonicRinse", "megasonic surface rinse", "spin-rinse clean"),
         ],
         "inert_var_pool": [
             _mk("SpinSpeed", "spin speed", "coater rpm"),
@@ -481,7 +481,7 @@ SKINS: Dict[str, Dict[str, Any]] = {
         ],
         "trap_actuator_pool": [
             _mk("AppetiteStimulant", "appetite stimulant", "feed attractant"),
-            _mk("GradingReclassify", "grading reclassification", "size-grading shift"),
+            _mk("SkinConditioner", "skin conditioner", "slime-coat tonic"),
         ],
         "inert_var_pool": [
             _mk("WaterpH", "water ph", "tank ph"),
@@ -554,8 +554,8 @@ SKINS: Dict[str, Dict[str, Any]] = {
             _mk("SlowFormation", "slow-formation protocol", "gentle formation cycling"),
         ],
         "trap_actuator_pool": [
-            _mk("CapacityRecal", "capacity recalibration", "gauge recalibration"),
-            _mk("VoltageWindowShift", "voltage-window shift", "test-window adjustment"),
+            _mk("WettingAgent", "electrolyte wetting agent", "surfactant additive"),
+            _mk("ConditioningCycle", "conditioning cycle", "maintenance top-up"),
         ],
         "inert_var_pool": [
             _mk("CoatingThickness", "coating thickness", "electrode loading"),
@@ -628,8 +628,8 @@ SKINS: Dict[str, Dict[str, Any]] = {
             _mk("FeedPurification", "feed purification", "impurity polishing"),
         ],
         "trap_actuator_pool": [
-            _mk("AnalyzerSpanAdjust", "analyzer span adjustment", "gc recalibration"),
-            _mk("ReportingBasisShift", "reporting-basis shift", "conversion-basis change"),
+            _mk("PromoterSpike", "promoter spike", "activity booster"),
+            _mk("DiluentCoFeed", "diluent co-feed", "feed diluent"),
         ],
         "inert_var_pool": [
             _mk("RecycleRatio", "recycle ratio", "recycle fraction"),
@@ -703,7 +703,7 @@ SKINS: Dict[str, Dict[str, Any]] = {
         ],
         "trap_actuator_pool": [
             _mk("Antifoam", "antifoam addition", "defoamer dosing"),
-            _mk("RefractometerRecal", "refractometer recalibration", "gravity-meter recalibration"),
+            _mk("ClarifyingFinings", "clarifying finings", "finings addition"),
         ],
         "inert_var_pool": [
             _mk("DissolvedO2Ferm", "dissolved oxygen", "aeration level"),

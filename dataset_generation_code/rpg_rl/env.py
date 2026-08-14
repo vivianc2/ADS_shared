@@ -51,6 +51,8 @@ Action payloads (JSON, ids only):
 - give_up:   {}
 
 Observation and code alone CANNOT establish causation — you must INTERVENE to test a cause and find what improves the outcome. Submit "answer" once you know the fix AND the mechanism (which signal is the true proxy, which are decoys, and each control's effect sign +/-/0). For a world where a treatment helps only a sub-population, use "policy" to stratify on the marker signal.
+
+CRUCIAL — the reported OUTCOME OF INTEREST is a SURROGATE metric that can be gamed: some controls raise this reading WITHOUT fixing the underlying problem. You are judged on the TRUE underlying objective the metric reflects, not the metric itself. So do not trust a control just because the outcome reading went up — verify it actually changed the CAUSE (the mechanism proxy moves), not only the surrogate. When you report a control's effect sign (+/-/0), report its effect on the TRUE OBJECTIVE, not on the observed metric: a control that only lifts the reading without changing the cause has sign 0, and recommending it as the fix is wrong.
 """
 
 
