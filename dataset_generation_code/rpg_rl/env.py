@@ -192,7 +192,12 @@ YOUR MEMORY
             rec["code_output"] = out
             self.turns.append(rec)
         elif atype == "measure":
-            ids = [i for i in data.get("ids", []) if self.cat.measurable_name(i)]
+            # Element-level hardening (mirrors the non-dict `data` guard above): the model may emit
+            # non-str id entries or a non-list `ids`. Skip them so a malformed measure becomes a
+            # no-op observation instead of crashing the rollout (str-key dict.get / unhashable id).
+            raw_ids = data.get("ids", [])
+            ids = [i for i in (raw_ids if isinstance(raw_ids, list) else [])
+                   if isinstance(i, str) and self.cat.measurable_name(i)]
             names = [self.cat.measurable_name(i) for i in ids]
             result = self.sim.measure(names)
             self._used += 1
@@ -202,9 +207,16 @@ YOUR MEMORY
             rec["result"] = result
             self.turns.append(rec)
         elif atype == "intervene":
+            # Element-level hardening: `actions` entries must be dicts (the model sometimes emits a
+            # list of bare strings -> x.get(...) raised 'str' has no attribute 'get' and killed the
+            # whole run). `measure` ids must be strs. Non-list payloads are treated as empty.
+            raw_actions = data.get("actions", [])
             acts = [{"request": self.cat.actuator_name(x.get("actuator")), "value": x.get("value")}
-                    for x in data.get("actions", []) if self.cat.actuator_name(x.get("actuator"))]
-            mids = [i for i in data.get("measure", []) if self.cat.measurable_name(i)]
+                    for x in (raw_actions if isinstance(raw_actions, list) else [])
+                    if isinstance(x, dict) and self.cat.actuator_name(x.get("actuator"))]
+            raw_measure = data.get("measure", [])
+            mids = [i for i in (raw_measure if isinstance(raw_measure, list) else [])
+                    if isinstance(i, str) and self.cat.measurable_name(i)]
             mnames = [self.cat.measurable_name(i) for i in mids]
             result = self.sim.intervene(acts, mnames)
             self._used += 1
