@@ -153,16 +153,35 @@ def compute_reward(struct: Dict[str, Any], world: Dict[str, Any], cat: Catalog,
     """Pure reward for one episode's final id-answer. Returns a dict with the scalar
     ``reward`` plus its components and the full grade (for logging/debugging)."""
     answer, invalid_frac = _to_canonical_answer(struct, cat)
+
+    def _grade_answer(ans):
+        """Grade an answer, but don't let an OPTIONAL, spurious conditional `policy`
+        zero an otherwise-valid answer. The policy field is advertised in the answer
+        schema, so the policy WILL emit one on almost every world (measured: 83/83 at
+        step-0 eval) — including non-subtype worlds where a `policy` object drives a
+        dict-valued dose into the oracle and raises (TypeError: float() ... 'dict').
+        If grading raises AND a policy was included, retry once with the policy stripped
+        (the base intervention + battery still deserve their credit). Only if the
+        policy-free answer ALSO fails do we treat it as ungradeable. This makes part-A
+        for a correct fix robust to the model's near-universal habit of attaching a
+        policy; a LEGITIMATE, well-formed subtype policy still grades on the first try."""
+        try:
+            return grade(world, ans, gold, battery, strict=cfg.strict_part_b)
+        except Exception:
+            if "recommended_policy" in ans:
+                ans_no_pol = {k: v for k, v in ans.items() if k != "recommended_policy"}
+                return grade(world, ans_no_pol, gold, battery, strict=cfg.strict_part_b)
+            raise
+
     try:
-        g = grade(world, answer, gold, battery, strict=cfg.strict_part_b)
+        g = _grade_answer(answer)
         benefit = g.get("benefit_recovered")
         part_a = max(0.0, min(1.0, benefit)) if benefit is not None else (1.0 if g["part_a_utility_ok"] else 0.0)
         part_b = float(g["battery_fraction"])
     except Exception as e:  # noqa: BLE001
         # ROBUSTNESS CONTRACT (see module docstring): the reward MUST be total — never
-        # crash the trainer on a pathological policy answer (e.g. a conditional-`policy`
-        # object applied to a non-policy world drives a dict-valued intervention into the
-        # oracle). Such an answer did not solve the world -> reward 0 (minus any invalid-id
+        # crash the trainer on a pathological answer. If even the policy-stripped answer
+        # can't be graded, it did not solve the world -> reward 0 (minus any invalid-id
         # penalty). Flagged + surfaced so we can count how often it fires.
         return {
             "reward": float(-cfg.c_invalid * invalid_frac),
