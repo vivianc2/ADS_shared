@@ -122,6 +122,14 @@ class RPGEnv:
         elif self._n_interv == 0 and self._used >= 3:
             directive = ('\nDIRECTIVE: you have run no INTERVENTION — observation alone cannot '
                          'establish causation; intervene to test a cause.\n')
+        elif self._turn >= 6 and self._n_interv >= 1:
+            # TRUNCATION FIX (2026-08-17): the total-context budget (~max_input_length) is exhausted
+            # around turn ~8-9 by verbose thinking-ON turns, well before the turn/budget caps fire above,
+            # so episodes used to run out mid-investigation with NO answer (stop_reason=length -> 0 reward,
+            # ~40-48% of eval episodes). Nudge convergence early so the model commits an answer in time.
+            directive = ('\nDIRECTIVE: context is limited and you have interventional evidence — do NOT keep '
+                         'exploring; verify your leading hypothesis and submit <action type="answer"> within '
+                         'the next 1-2 turns.\n')
         catalog_section = f"\n{self._catalog_block()}\n" if include_catalog else ""
         return f"""SITUATION
 {pub['scenario']}
