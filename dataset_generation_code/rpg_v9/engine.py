@@ -94,16 +94,22 @@ def _abs(m, v, n):
 
 
 def _gated_and(m, v, n):
-    """AND-gate: output is high only when BOTH inputs clear their thresholds.
-    output = vmax * sigmoid((a-ta)/wa) * sigmoid((b-tb)/wb) + intercept.
-    Either input low -> its sigmoid ~0 -> output ~intercept. This models a true
-    two-required-causes mechanism where neither lever helps alone."""
+    """(Super-additive) AND-gate.
+        output = intercept + ma*ga + mb*gb + vmax*ga*gb
+    where ga,gb = sigmoid((a-ta)/wa), sigmoid((b-tb)/wb).
+    - ma=mb=0 (default): the ORIGINAL hard AND — neither lever helps alone (vmax only on
+      the joint term). Kept for backward-compat with existing worlds.
+    - ma,mb>0 (synergy-v2 redesign): each lever gives a MODEST individual effect (so it's
+      discoverable and earns partial benefit, but stays below the accept bar), while the
+      dominant `vmax` synergy term still requires BOTH — preserving the 'test combinations'
+      skill while making the pair findable within the experiment budget."""
     a, b = v[m["a"]], v[m["b"]]
     ta, tb = float(m.get("ta", 50)), float(m.get("tb", 50))
     wa, wb = float(m.get("wa", 8)), float(m.get("wb", 8))
     ga = 1.0 / (1.0 + np.exp(-(a - ta) / wa))
     gb = 1.0 / (1.0 + np.exp(-(b - tb) / wb))
-    return float(m.get("intercept", 0.0)) + float(m.get("vmax", 80.0)) * ga * gb
+    return (float(m.get("intercept", 0.0)) + float(m.get("ma", 0.0)) * ga
+            + float(m.get("mb", 0.0)) * gb + float(m.get("vmax", 80.0)) * ga * gb)
 
 
 def _subtype_effect(m, v, n):

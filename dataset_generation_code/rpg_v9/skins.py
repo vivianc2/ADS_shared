@@ -35,6 +35,8 @@ SKINS: Dict[str, Dict[str, Any]] = {
             _mk("MisfoldingRate", "misfolding rate", "aggregation propensity"),
         ],
         "proxy_pool": [
+            # positive-polarity mechanism proxy (see sampler _POSITIVE_PROXY)
+            _mk("ViableCellDensity", "viable cell density", "culture vitality index", "specific productivity index"),
             _mk("BrothTurbidity", "broth turbidity", "cloudiness", "lysis marker"),
             _mk("LDHRelease", "ldh release", "cell lysis marker", "membrane leakage"),
             _mk("FragmentedProteinPct", "fragmented protein", "clipping percent"),
@@ -172,6 +174,11 @@ SKINS: Dict[str, Dict[str, Any]] = {
             _mk("TurbidityLoad", "turbidity load", "suspended solids"),
         ],
         "proxy_pool": [
+            # positive-polarity mechanism proxy (higher = better, tracks the fix upward);
+            # see sampler _POSITIVE_PROXY. Without one, the honest proxy is a "lower=better"
+            # marker (turbidity) that the engine forces UPWARD with the fix -> inverts a
+            # domain reasoner (RPG_SYNERGY_SOFT picks this instead).
+            _mk("FiltrationIntegrityIndex", "filtration integrity index", "clarifier performance index", "settling efficiency"),
             _mk("TurbidityNTU", "turbidity ntu", "water turbidity", "cloudiness"),
             _mk("MetalColorimetry", "metal colorimetry", "iron colorimetric reading"),
         ],
@@ -312,6 +319,8 @@ SKINS: Dict[str, Dict[str, Any]] = {
             _mk("ImmuneExhaustion", "immune exhaustion", "immune depletion"),
         ],
         "proxy_pool": [
+            # positive-polarity mechanism proxy (see sampler _POSITIVE_PROXY)
+            _mk("TissuePerfusionIndex", "tissue perfusion index", "oxygenation index", "capillary refill index"),
             _mk("CReactiveProtein", "c-reactive protein", "crp", "inflammatory marker"),
             _mk("SerumLactate", "serum lactate", "lactate level"),
         ],
@@ -386,6 +395,8 @@ SKINS: Dict[str, Dict[str, Any]] = {
             _mk("DielectricBreakdown", "dielectric breakdown", "insulation failure"),
         ],
         "proxy_pool": [
+            # positive-polarity mechanism proxy (see sampler _POSITIVE_PROXY)
+            _mk("FilmUniformityIndex", "film uniformity index", "step coverage index", "planarization quality"),
             _mk("DefectDensity", "defect density", "inline defect count", "defect map density"),
             _mk("LeakageCurrent", "leakage current", "off-state current"),
         ],
@@ -459,6 +470,8 @@ SKINS: Dict[str, Dict[str, Any]] = {
             _mk("ImmuneCompetence", "immune competence", "disease resistance"),
         ],
         "proxy_pool": [
+            # positive-polarity mechanism proxy (see sampler _POSITIVE_PROXY)
+            _mk("GillPerfusionIndex", "gill perfusion index", "osmoregulatory capacity", "branchial oxygen uptake"),
             _mk("GillHistologyScore", "gill histology score", "gill damage index"),
             _mk("PlasmaCortisol", "plasma cortisol", "stress hormone level"),
         ],

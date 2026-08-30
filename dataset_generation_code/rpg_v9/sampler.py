@@ -97,6 +97,21 @@ def _choice(rng, seq):
     return seq[rng.randrange(len(seq))]
 
 
+# Mechanism-proxy names whose natural polarity is HIGHER = BETTER, i.e. consistent with the
+# engine's higher_better=True (the proxy tracks the root/outcome UPWARD with the correct fix).
+# Bad-marker proxies (turbidity, defect density, CRP, leakage) are the OPPOSITE polarity: the
+# engine forces them up with the fix, but a domain reasoner knows they should go DOWN, so it
+# INVERTS the answer (traced: Opus signed the synergy co-actuators "-"/"0" and reduced them ->
+# part_a 0.00 on watertreatment/semiconductor/clinical). For synergy (RPG_SYNERGY_SOFT) we
+# restrict the mechanism proxy to this set so "proxy moves in the good direction" is honest.
+_POSITIVE_PROXY = {
+    "DewPointMargin", "LeafGreenness", "TissueNutrientAssay", "CoulombicEfficiency",
+    "CatalystSurfaceArea", "ViabilityStain",
+    "FiltrationIntegrityIndex", "TissuePerfusionIndex", "FilmUniformityIndex", "GillPerfusionIndex",
+    "ViableCellDensity",
+}
+
+
 def _take(rng, pool: List[Dict[str, Any]], k: int, used: set) -> List[Dict[str, Any]]:
     """Draw k distinct entries whose names are not already used."""
     avail = [x for x in pool if x["name"] not in used]
@@ -181,7 +196,16 @@ def sample_world(seed: int, skin: Optional[str] = None,
     outcome = S["outcome"]
     root = _take(rng, S["root_cause_pool"], 1, used)[0]
     mediators = _take(rng, S["mediator_pool"], depth, used)
-    proxy = _take(rng, S["proxy_pool"], 1, used)[0]
+    # For synergy (default ON; gated with the super-additive fix on RPG_SYNERGY_SOFT), require a
+    # positive-polarity mechanism proxy so the honest "verify the proxy moved in the good
+    # direction" check is not physically inverted (see _POSITIVE_PROXY). Fall back to the full
+    # pool if a skin has no positive option. RPG_SYNERGY_SOFT=0 reproduces the old (buggy) design.
+    _proxy_pool = S["proxy_pool"]
+    if arche == "synergy_pair" and float(__import__("os").environ.get("RPG_SYNERGY_SOFT", "20")):
+        _pos = [p for p in _proxy_pool if p["name"] in _POSITIVE_PROXY]
+        if _pos:
+            _proxy_pool = _pos
+    proxy = _take(rng, _proxy_pool, 1, used)[0]
     confs = _take(rng, S["confounder_pool"], n_confounders, used)
     decoys = _take(rng, S["decoy_pool"], n_decoys, used)
     src = _take(rng, S["source_knob_pool"], 1, used)[0]
@@ -256,10 +280,19 @@ def sample_world(seed: int, skin: Optional[str] = None,
 
     # ---- ROOT node ----
     if "two_cause" in feats:
-        # AND-gate: root high only if BOTH source knobs clear thresholds
+        # AND-gate: root high only if BOTH source knobs clear thresholds.
+        # RPG_SYNERGY_SOFT=<ma>: super-additive redesign — each lever gives a modest
+        # individual effect (findable, partial credit, below accept bar) + dominant joint
+        # synergy. NOW DEFAULT 20 (the fix): the original hard AND (ma=0) was unsolvable
+        # within the 15-experiment budget (1-of-28 pair) and, combined with the inverted
+        # proxy polarity, gave Opus part_a ~0.13. Set RPG_SYNERGY_SOFT=0 to reproduce the
+        # old hard-AND design for provenance. See box1_clean_eval/SYNERGY_REDESIGN_REPORT.md.
+        import os as _os
+        _ms = float(_os.environ.get("RPG_SYNERGY_SOFT", "20"))
         add_var(root, kind="latent", parents=[src["name"], src2["name"]],
                 mech={"form": "gated_and", "a": src["name"], "b": src2["name"],
-                      "ta": 55, "tb": 55, "wa": 9, "wb": 9, "vmax": 95.0, "intercept": 3.0})
+                      "ta": 55, "tb": 55, "wa": 9, "wb": 9,
+                      "vmax": (55.0 if _ms else 95.0), "intercept": 3.0, "ma": _ms, "mb": _ms})
         # for two_cause, "high root" is GOOD (it's the required-uptake style),
         # so the chain to outcome is positive; handled below via chain_sign.
         chain_sign = +1.0
