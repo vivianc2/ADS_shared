@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from engine import WorldSCM
 from sim_v6 import SimV6
@@ -68,6 +68,8 @@ class RPGEnv:
     catalog_seed: int = 0
     reward_cfg: RewardConfig = field(default_factory=RewardConfig)
     data_dir: Optional[str] = None
+    system_prompt: str = SYSTEM_PROMPT
+    reward_fn: Callable[..., Dict[str, Any]] = compute_reward
 
     # runtime state
     scm: WorldSCM = field(init=False)
@@ -269,7 +271,7 @@ YOUR MEMORY
     def _terminal(self, answer_struct, rec, *, forced: bool):
         self._done = True
         struct = answer_struct if isinstance(answer_struct, dict) else {}
-        rw = compute_reward(struct, self.world, self.cat, self.gold, self.battery,
+        rw = self.reward_fn(struct, self.world, self.cat, self.gold, self.battery,
                             cfg=self.reward_cfg, n_interventions=self._n_interv)
         rec["answer_struct"] = struct
         rec["reward_breakdown"] = {k: rw[k] for k in ("reward", "part_a", "part_b",
