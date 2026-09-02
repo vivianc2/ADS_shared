@@ -94,9 +94,3 @@ docker exec skyrl bash -lc '
 `... run_rpg.sh generator.inference_engine.gpu_memory_utilization=0.8 generator.inference_engine.max_num_seqs=512`.
 For a larger model (e.g. 27B) raise `NUM_GPUS` and lower `gpu_memory_utilization`.
 **Verify after launch:** step-0 eval `stop_reason=stop` (no truncation), no OOM.
-
-## What Vivian needs to send you (that's it)
-1. `key.txt` + `wandb_key.txt` (secure channel).
-Everything else = `docker pull` + `git clone` + `huggingface-cli download` + the ADS_shared clone you have.
-```
-```
