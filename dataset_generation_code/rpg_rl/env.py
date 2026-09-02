@@ -194,6 +194,21 @@ YOUR MEMORY
         if atype in ("answer", "give_up"):
             return self._terminal(data if atype == "answer" else None, rec, forced=False)
 
+        # `budget` is a hard experiment limit, not merely a prompt directive. Once it
+        # is exhausted, measurement and intervention requests become recoverable
+        # no-ops so the agent can still use free code turns or submit its answer.
+        # Check before calling SimV6: every successful call below increments `_used`.
+        if atype in ("measure", "intervene") and self._used >= self.budget:
+            self._latest = (
+                "(experiment budget exhausted — no experiment run and budget not "
+                "charged; use existing evidence and submit answer)"
+            )
+            rec["error"] = f"{atype}: experiment budget exhausted"
+            self.turns.append(rec)
+            if cap_hit:
+                return self._terminal(None, rec, forced=True)
+            return self._observation(), 0.0, False, {"turn_type": "budget_exhausted"}
+
         if atype == "code":
             from sandbox import run_code
             # The model frequently wraps code as JSON `{"code":"..."}` (mirroring measure/intervene,
@@ -269,6 +284,11 @@ YOUR MEMORY
 
     # ---- terminal handling: compute the PURE id-based reward ----
     def _terminal(self, answer_struct, rec, *, forced: bool):
+        if self._used > self.budget:
+            raise RuntimeError(
+                f"experiment budget invariant violated: used={self._used}, "
+                f"budget={self.budget}"
+            )
         self._done = True
         struct = answer_struct if isinstance(answer_struct, dict) else {}
         rw = self.reward_fn(struct, self.world, self.cat, self.gold, self.battery,
