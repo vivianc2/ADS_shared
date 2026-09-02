@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import inspect
 import itertools
+import math
 from typing import Any, Callable, Dict
 
 from bootstrap import configure_imports
@@ -126,6 +127,38 @@ def configuration_definitions() -> list[dict[str, str]]:
             "reward_description": REWARD_DESCRIPTIONS[reward_id],
         })
     return definitions
+
+
+def prompt_definitions() -> list[dict[str, str]]:
+    """Stable prompt-only inference definitions."""
+    return [
+        {
+            "prompt_id": prompt_id,
+            "system_prompt": prompt,
+            "prompt_sha256": sha256_text(prompt),
+        }
+        for prompt_id, prompt in PROMPTS.items()
+    ]
+
+
+def evaluate_candidate_rewards(struct, world, cat, gold, battery, *,
+                               n_interventions: int) -> dict[str, float]:
+    """Apply every candidate reward function to one terminal answer."""
+    values: dict[str, float] = {}
+    for reward_id, reward_fn in REWARDS.items():
+        result = reward_fn(
+            struct,
+            world,
+            cat,
+            gold,
+            battery,
+            n_interventions=n_interventions,
+        )
+        value = float(result["reward"])
+        if not math.isfinite(value):
+            raise ValueError(f"{reward_id} returned a non-finite reward")
+        values[reward_id] = value
+    return values
 
 
 def evaluate_terminal(struct, world, cat, gold, battery, *, n_interventions: int):

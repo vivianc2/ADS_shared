@@ -1,0 +1,732 @@
+{
+  "schema_version": "rpg_scm_v7",
+  "world_id": "v7_datacenter_collider_sign_flip_8000002",
+  "domain": "datacenter",
+  "meta": {
+    "seed": 8000002,
+    "features": [
+      "sign_flip"
+    ],
+    "skin": "datacenter",
+    "depth": 4
+  },
+  "scenario": "A production compute cluster's job throughput has dropped about 30% over the past two weeks and has not recovered. The decline followed a data-hall maintenance window in which cooling was serviced and a line card was reseated. A rack inlet-temperature sensor has been reading warmer than its historical band, and the operations team's leading theory is that the room is running hot, so they are considering increasing cooling. Standard host metrics look broadly normal. The cooling plant, power distribution, storage QoS, and environmental controls are all adjustable, and portable environmental equipment is available. You have a limited number of experiments; you may measure quantities and apply available controls, alone or in combination. Determine what is really driving the loss and what to do about it.",
+  "scm": {
+    "variables": {
+      "MicroArcingSusceptibility": {
+        "aliases": [
+          "susceptibility",
+          "batch susceptibility"
+        ],
+        "kind": "latent",
+        "dist": {
+          "normal": [
+            55,
+            20
+          ]
+        }
+      },
+      "TenantMixShift": {
+        "aliases": [
+          "tenant mix",
+          "workload mix shift"
+        ],
+        "kind": "latent",
+        "dist": {
+          "normal": [
+            50,
+            16
+          ]
+        }
+      },
+      "CoolingAggressiveness": {
+        "aliases": [
+          "cooling aggressiveness",
+          "how hard cooling runs"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            40,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "CoolingAggressivenessHarmAxis": {
+        "aliases": [
+          "harm axis"
+        ],
+        "kind": "latent",
+        "parents": [
+          "CoolingAggressiveness"
+        ],
+        "mech": {
+          "form": "sign_flip",
+          "of": "CoolingAggressiveness",
+          "knee": 45,
+          "lo_gain": 0.05,
+          "hi_gain": 0.9,
+          "intercept": 2.0
+        }
+      },
+      "MicroArcing": {
+        "aliases": [
+          "micro-arcing",
+          "electrical arcing",
+          "connector arcing"
+        ],
+        "kind": "latent",
+        "parents": [
+          "CoolingAggressivenessHarmAxis",
+          "MicroArcingSusceptibility"
+        ],
+        "mech": {
+          "form": "interaction",
+          "a": "CoolingAggressivenessHarmAxis",
+          "b": "MicroArcingSusceptibility",
+          "gain": 260.0,
+          "scale": 100.0,
+          "intercept": 3.0
+        },
+        "noise": {
+          "normal": [
+            0,
+            1.5
+          ]
+        }
+      },
+      "InterfaceErrorRate": {
+        "aliases": [
+          "interface errors",
+          "link errors",
+          "crc errors"
+        ],
+        "kind": "latent",
+        "parents": [
+          "MicroArcing"
+        ],
+        "mech": {
+          "form": "hill",
+          "of": "MicroArcing",
+          "vmax": 70,
+          "k": 35,
+          "n": 2
+        }
+      },
+      "PacketRetransmit": {
+        "aliases": [
+          "packet retransmits",
+          "retransmission rate"
+        ],
+        "kind": "latent",
+        "parents": [
+          "InterfaceErrorRate"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "InterfaceErrorRate": 0.9
+          },
+          "intercept": 5
+        }
+      },
+      "EffectiveBandwidth": {
+        "aliases": [
+          "effective bandwidth",
+          "usable bandwidth"
+        ],
+        "kind": "latent",
+        "parents": [
+          "PacketRetransmit"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "PacketRetransmit": 0.9
+          },
+          "intercept": 5
+        }
+      },
+      "UnderlyingJobThroughput": {
+        "aliases": [
+          "underlying true objective"
+        ],
+        "kind": "latent",
+        "parents": [
+          "EffectiveBandwidth",
+          "TenantMixShift"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "EffectiveBandwidth": -0.9,
+            "TenantMixShift": 0.4
+          },
+          "intercept": 15
+        }
+      },
+      "JobThroughput": {
+        "aliases": [
+          "job throughput",
+          "throughput",
+          "jobs per hour"
+        ],
+        "kind": "outcome",
+        "parents": [
+          "UnderlyingJobThroughput"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "UnderlyingJobThroughput": 1.0
+          },
+          "intercept": 0
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "DewPointMargin": {
+        "aliases": [
+          "dew point margin",
+          "coil moisture",
+          "condensation sensor"
+        ],
+        "kind": "observable",
+        "parents": [
+          "PacketRetransmit"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "PacketRetransmit": 0.8
+          },
+          "intercept": 5
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            11.83
+          ]
+        }
+      },
+      "RackInletTemp": {
+        "aliases": [
+          "rack inlet temperature",
+          "hot rack sensor",
+          "rack temp"
+        ],
+        "kind": "observable",
+        "parents": [
+          "TenantMixShift"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "TenantMixShift": 0.7
+          },
+          "intercept": 40
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            4
+          ]
+        }
+      },
+      "UpsBatteryLevel": {
+        "aliases": [
+          "ups battery",
+          "battery charge"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "DiskIoWait": {
+        "aliases": [
+          "disk io wait",
+          "storage latency"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "CpuClock": {
+        "aliases": [
+          "cpu clock",
+          "processor frequency"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "ContainerCount": {
+        "aliases": [
+          "container count",
+          "pod count"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "FanSpeed": {
+        "aliases": [
+          "fan speed",
+          "cooling fan rpm"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "CacheHitRate": {
+        "aliases": [
+          "cache hit rate",
+          "cache efficiency"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "JobQueueDepth": {
+        "aliases": [
+          "job queue depth",
+          "scheduler backlog"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "GpuTemp": {
+        "aliases": [
+          "gpu temperature",
+          "accelerator temp"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "AmbientRoomHumidityDriver": {
+        "aliases": [
+          "latent driver"
+        ],
+        "kind": "latent",
+        "dist": {
+          "normal": [
+            50,
+            16
+          ]
+        }
+      },
+      "AmbientRoomHumidity": {
+        "aliases": [
+          "room humidity",
+          "ambient humidity"
+        ],
+        "kind": "observable",
+        "parents": [
+          "AmbientRoomHumidityDriver"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "AmbientRoomHumidityDriver": 0.9
+          },
+          "intercept": 5
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            4
+          ]
+        }
+      },
+      "MemoryUtilization": {
+        "aliases": [
+          "memory utilization",
+          "ram usage"
+        ],
+        "kind": "observable",
+        "parents": [
+          "EffectiveBandwidth",
+          "AmbientRoomHumidityDriver"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "EffectiveBandwidth": 0.1335654897762461,
+            "AmbientRoomHumidityDriver": 0.06268476171418018
+          },
+          "intercept": 0
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            0.1
+          ]
+        }
+      }
+    },
+    "actuators": {
+      "CoolingAggressiveness": {
+        "aliases": [
+          "cooling aggressiveness",
+          "how hard cooling runs"
+        ],
+        "target": "CoolingAggressiveness",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 40,
+        "description": "controller for CoolingAggressiveness"
+      },
+      "Dehumidifier": {
+        "aliases": [
+          "dehumidifier",
+          "dehumidify",
+          "reduce humidity",
+          "desiccant"
+        ],
+        "target": "MicroArcing",
+        "op": "scale",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 0,
+        "expr": "1-sat(d;k=0.66)",
+        "description": "a continuous dosing control"
+      },
+      "set_UpsBatteryLevel": {
+        "aliases": [
+          "set ups battery",
+          "set battery charge",
+          "adjust UpsBatteryLevel"
+        ],
+        "target": "UpsBatteryLevel",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for UpsBatteryLevel"
+      },
+      "set_DiskIoWait": {
+        "aliases": [
+          "set disk io wait",
+          "set storage latency",
+          "adjust DiskIoWait"
+        ],
+        "target": "DiskIoWait",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for DiskIoWait"
+      },
+      "set_CpuClock": {
+        "aliases": [
+          "set cpu clock",
+          "set processor frequency",
+          "adjust CpuClock"
+        ],
+        "target": "CpuClock",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for CpuClock"
+      },
+      "set_ContainerCount": {
+        "aliases": [
+          "set container count",
+          "set pod count",
+          "adjust ContainerCount"
+        ],
+        "target": "ContainerCount",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for ContainerCount"
+      }
+    },
+    "outcome": "JobThroughput",
+    "higher_is_better": true,
+    "goal": "UnderlyingJobThroughput",
+    "selection": {
+      "node": "MemoryUtilization",
+      "op": ">=",
+      "thresh": 5.446624692449028,
+      "soft": 0.13981426124282323
+    }
+  },
+  "ground_truth": {
+    "true_root": "MicroArcing",
+    "true_mechanism_proxy": "DewPointMargin",
+    "confounded_decoys": [
+      "RackInletTemp",
+      "AmbientRoomHumidity"
+    ],
+    "targeted_actuator": "Dehumidifier",
+    "symptom_trap_actuator": "Dehumidifier",
+    "co_actuators": null,
+    "selection_decoy": "AmbientRoomHumidity",
+    "_selection_nodes": [
+      "AmbientRoomHumidity",
+      "MemoryUtilization"
+    ],
+    "subtype_policy": null,
+    "latent_plain_name": "a hidden micro-arcing that propagates through interface errors, packet retransmits, effective bandwidth to the outcome",
+    "naive_interventions": [
+      {
+        "CoolingAggressiveness": 100
+      },
+      {
+        "set_UpsBatteryLevel": 100
+      },
+      {
+        "set_DiskIoWait": 100
+      }
+    ],
+    "_features": [
+      "sign_flip"
+    ],
+    "_skin": "datacenter",
+    "_depth": 4,
+    "_archetype": "collider_selection",
+    "_seed": 8000002
+  },
+  "oracle": {
+    "gold": {
+      "intervention": {
+        "Dehumidifier": 100.0
+      },
+      "expected_utility": 26.440888524270772,
+      "baseline_utility": 20.545061849214253,
+      "active_actuators": [
+        "CoolingAggressiveness",
+        "Dehumidifier"
+      ]
+    },
+    "counterfactual_battery": {
+      "true_mechanism_proxy": "DewPointMargin",
+      "valid_mechanism_proxies": [
+        "DewPointMargin"
+      ],
+      "lenient_mechanism_proxies": [
+        "DewPointMargin"
+      ],
+      "confounded_decoys": [
+        "AmbientRoomHumidity",
+        "RackInletTemp"
+      ],
+      "actuator_sign_predictions": {
+        "CoolingAggressiveness": "-",
+        "Dehumidifier": "+",
+        "set_UpsBatteryLevel": "0",
+        "set_DiskIoWait": "0",
+        "set_CpuClock": "0",
+        "set_ContainerCount": "0"
+      },
+      "targeted_actuator": "Dehumidifier",
+      "symptom_trap_actuator": "Dehumidifier"
+    },
+    "calibration": {
+      "proxy_assay_noise": 11.83,
+      "proxy_corr": 0.46,
+      "decoy_corr": 0.537
+    },
+    "audits": {
+      "decoy": {
+        "passed": true,
+        "decoys": {
+          "RackInletTemp": {
+            "obs_corr": 0.537,
+            "clamp_do_effect": 0.0,
+            "ok": true
+          },
+          "AmbientRoomHumidity": {
+            "obs_corr": 0.384,
+            "clamp_do_effect": 0.0,
+            "ok": true
+          }
+        }
+      },
+      "proxy_signal": {
+        "passed": true,
+        "proxy_outcome_corr": -0.461,
+        "obs_ok": true,
+        "interventional_shift_sd": 0.66,
+        "interv_ok": false,
+        "band": [
+          0.35,
+          0.75
+        ]
+      },
+      "distractor_inertness": {
+        "passed": true,
+        "n_inert_checked": 4,
+        "violations": []
+      },
+      "gold_selfconsistency": {
+        "passed": true,
+        "gold_utility": 26.44,
+        "beating_perturbations": []
+      },
+      "counterintuitiveness": {
+        "passed": true,
+        "baseline_utility": 20.53,
+        "gold_utility": 26.44,
+        "naive_results": [
+          {
+            "naive": {
+              "CoolingAggressiveness": 100
+            },
+            "utility": -14.0,
+            "gain_over_baseline": -34.53,
+            "fraction_of_gold_benefit": -5.84,
+            "helps": false
+          },
+          {
+            "naive": {
+              "set_UpsBatteryLevel": 100
+            },
+            "utility": 20.53,
+            "gain_over_baseline": 0.0,
+            "fraction_of_gold_benefit": 0.0,
+            "helps": false
+          },
+          {
+            "naive": {
+              "set_DiskIoWait": 100
+            },
+            "utility": 20.53,
+            "gain_over_baseline": 0.0,
+            "fraction_of_gold_benefit": 0.0,
+            "helps": false
+          }
+        ],
+        "note": "obvious first move must not meaningfully help"
+      }
+    }
+  }
+}

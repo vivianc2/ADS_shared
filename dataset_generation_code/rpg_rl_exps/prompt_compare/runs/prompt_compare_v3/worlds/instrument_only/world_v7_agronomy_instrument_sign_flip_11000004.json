@@ -1,0 +1,699 @@
+{
+  "schema_version": "rpg_scm_v7",
+  "world_id": "v7_agronomy_instrument_sign_flip_11000004",
+  "domain": "agronomy",
+  "meta": {
+    "seed": 11000004,
+    "features": [
+      "sign_flip"
+    ],
+    "skin": "agronomy",
+    "depth": 2
+  },
+  "scenario": "A commercial greenhouse tomato operation growing vine tomatoes has seen marketable yield fall about 30% over two growing cycles, and the shortfall has repeated across successive plantings. The decline set in after a switch to a new irrigation-water source following a well upgrade. The agronomists' leading theories are under-watering or a nitrogen shortfall, so they are considering more water and feed. New leaves have looked paler than usual between the veins. Routine soil and tissue panels read broadly within range. The irrigation, fertigation, and amendment dosing are all adjustable, and dosing and amendment equipment is available. You have a limited number of experiments; you may measure quantities and apply available controls or amendments, alone or in combination. Determine what is really driving the loss and what to do about it.",
+  "scm": {
+    "variables": {
+      "SoilbornePathogenSusceptibility": {
+        "aliases": [
+          "susceptibility",
+          "batch susceptibility"
+        ],
+        "kind": "latent",
+        "dist": {
+          "normal": [
+            55,
+            20
+          ]
+        }
+      },
+      "SeasonalLight": {
+        "aliases": [
+          "seasonal light",
+          "solar radiation",
+          "daylight hours"
+        ],
+        "kind": "latent",
+        "dist": {
+          "normal": [
+            50,
+            16
+          ]
+        }
+      },
+      "PlantingCohort": {
+        "aliases": [
+          "planting cohort",
+          "transplant batch",
+          "crop age"
+        ],
+        "kind": "latent",
+        "dist": {
+          "normal": [
+            50,
+            16
+          ]
+        }
+      },
+      "FertigationRate": {
+        "aliases": [
+          "fertigation rate",
+          "nutrient feed rate"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            40,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "FertigationRateHarmAxis": {
+        "aliases": [
+          "harm axis"
+        ],
+        "kind": "latent",
+        "parents": [
+          "FertigationRate"
+        ],
+        "mech": {
+          "form": "sign_flip",
+          "of": "FertigationRate",
+          "knee": 45,
+          "lo_gain": 0.05,
+          "hi_gain": 0.9,
+          "intercept": 2.0
+        }
+      },
+      "SoilbornePathogen": {
+        "aliases": [
+          "soilborne pathogen",
+          "root pathogen load",
+          "root rot pressure"
+        ],
+        "kind": "latent",
+        "parents": [
+          "FertigationRateHarmAxis",
+          "SoilbornePathogenSusceptibility"
+        ],
+        "mech": {
+          "form": "interaction",
+          "a": "FertigationRateHarmAxis",
+          "b": "SoilbornePathogenSusceptibility",
+          "gain": 260.0,
+          "scale": 100.0,
+          "intercept": 3.0
+        },
+        "noise": {
+          "normal": [
+            0,
+            1.5
+          ]
+        }
+      },
+      "ChlorophyllSynthesis": {
+        "aliases": [
+          "chlorophyll synthesis",
+          "greening capacity"
+        ],
+        "kind": "latent",
+        "parents": [
+          "SoilbornePathogen"
+        ],
+        "mech": {
+          "form": "hill",
+          "of": "SoilbornePathogen",
+          "vmax": 70,
+          "k": 35,
+          "n": 2
+        }
+      },
+      "PhotosyntheticEfficiency": {
+        "aliases": [
+          "photosynthetic efficiency",
+          "carbon assimilation"
+        ],
+        "kind": "latent",
+        "parents": [
+          "ChlorophyllSynthesis"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "ChlorophyllSynthesis": 0.9
+          },
+          "intercept": 5
+        }
+      },
+      "UnderlyingCropYield": {
+        "aliases": [
+          "underlying true objective"
+        ],
+        "kind": "latent",
+        "parents": [
+          "PhotosyntheticEfficiency",
+          "SeasonalLight",
+          "PlantingCohort"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "PhotosyntheticEfficiency": -0.9,
+            "SeasonalLight": 0.2,
+            "PlantingCohort": 0.1
+          },
+          "intercept": 15
+        }
+      },
+      "CropYield": {
+        "aliases": [
+          "crop yield",
+          "marketable yield",
+          "harvest yield",
+          "yield"
+        ],
+        "kind": "outcome",
+        "parents": [
+          "UnderlyingCropYield"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "UnderlyingCropYield": 1.0
+          },
+          "intercept": 0
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "TissueNutrientAssay": {
+        "aliases": [
+          "tissue nutrient assay",
+          "leaf tissue test"
+        ],
+        "kind": "observable",
+        "parents": [
+          "PhotosyntheticEfficiency"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "PhotosyntheticEfficiency": 0.8
+          },
+          "intercept": 5
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            8.41
+          ]
+        }
+      },
+      "CanopyTemp": {
+        "aliases": [
+          "canopy temperature",
+          "leaf surface temp"
+        ],
+        "kind": "observable",
+        "parents": [
+          "SeasonalLight"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "SeasonalLight": 0.7
+          },
+          "intercept": 40
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            4
+          ]
+        }
+      },
+      "SoilMoisture": {
+        "aliases": [
+          "soil moisture",
+          "root-zone moisture"
+        ],
+        "kind": "observable",
+        "parents": [
+          "SeasonalLight"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "SeasonalLight": 0.7
+          },
+          "intercept": 40
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            4
+          ]
+        }
+      },
+      "GrowthRegulator": {
+        "aliases": [
+          "growth regulator",
+          "plant hormone spray"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "PruningIntensity": {
+        "aliases": [
+          "pruning intensity",
+          "canopy pruning"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "MulchDepth": {
+        "aliases": [
+          "mulch depth",
+          "ground cover"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "NightTemperature": {
+        "aliases": [
+          "night temperature",
+          "nocturnal temp"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "WindExposure": {
+        "aliases": [
+          "wind exposure",
+          "shelter index"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "SoilOrganicMatter": {
+        "aliases": [
+          "soil organic matter",
+          "humus content"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "SoilPotassium": {
+        "aliases": [
+          "soil potassium",
+          "potash level"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "DrainageRate": {
+        "aliases": [
+          "drainage rate",
+          "field drainage"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      }
+    },
+    "actuators": {
+      "FertigationRate": {
+        "aliases": [
+          "fertigation rate",
+          "nutrient feed rate"
+        ],
+        "target": "FertigationRate",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 40,
+        "description": "controller for FertigationRate"
+      },
+      "set_GrowthRegulator": {
+        "aliases": [
+          "set growth regulator",
+          "set plant hormone spray",
+          "adjust GrowthRegulator"
+        ],
+        "target": "GrowthRegulator",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for GrowthRegulator"
+      },
+      "set_PruningIntensity": {
+        "aliases": [
+          "set pruning intensity",
+          "set canopy pruning",
+          "adjust PruningIntensity"
+        ],
+        "target": "PruningIntensity",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for PruningIntensity"
+      },
+      "set_MulchDepth": {
+        "aliases": [
+          "set mulch depth",
+          "set ground cover",
+          "adjust MulchDepth"
+        ],
+        "target": "MulchDepth",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for MulchDepth"
+      },
+      "set_NightTemperature": {
+        "aliases": [
+          "set night temperature",
+          "set nocturnal temp",
+          "adjust NightTemperature"
+        ],
+        "target": "NightTemperature",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for NightTemperature"
+      },
+      "set_WindExposure": {
+        "aliases": [
+          "set wind exposure",
+          "set shelter index",
+          "adjust WindExposure"
+        ],
+        "target": "WindExposure",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for WindExposure"
+      },
+      "set_SoilOrganicMatter": {
+        "aliases": [
+          "set soil organic matter",
+          "set humus content",
+          "adjust SoilOrganicMatter"
+        ],
+        "target": "SoilOrganicMatter",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for SoilOrganicMatter"
+      }
+    },
+    "outcome": "CropYield",
+    "higher_is_better": true,
+    "goal": "UnderlyingCropYield"
+  },
+  "ground_truth": {
+    "true_root": "SoilbornePathogen",
+    "true_mechanism_proxy": "TissueNutrientAssay",
+    "confounded_decoys": [
+      "CanopyTemp",
+      "SoilMoisture"
+    ],
+    "targeted_actuator": "FertigationRate",
+    "symptom_trap_actuator": "FertigationRate",
+    "co_actuators": null,
+    "selection_decoy": null,
+    "_selection_nodes": [],
+    "subtype_policy": null,
+    "latent_plain_name": "a hidden soilborne pathogen that propagates through chlorophyll synthesis, photosynthetic efficiency to the outcome",
+    "naive_interventions": [
+      {
+        "FertigationRate": 100
+      },
+      {
+        "set_GrowthRegulator": 100
+      },
+      {
+        "set_PruningIntensity": 100
+      }
+    ],
+    "_features": [
+      "sign_flip"
+    ],
+    "_skin": "agronomy",
+    "_depth": 2,
+    "_archetype": "instrument_only",
+    "_seed": 11000004
+  },
+  "oracle": {
+    "gold": {
+      "intervention": {
+        "FertigationRate": 0.0
+      },
+      "expected_utility": 23.896076593142727,
+      "baseline_utility": 18.86860413360205,
+      "active_actuators": [
+        "FertigationRate"
+      ]
+    },
+    "counterfactual_battery": {
+      "true_mechanism_proxy": "TissueNutrientAssay",
+      "valid_mechanism_proxies": [
+        "FertigationRate",
+        "TissueNutrientAssay"
+      ],
+      "lenient_mechanism_proxies": [
+        "FertigationRate",
+        "TissueNutrientAssay"
+      ],
+      "confounded_decoys": [
+        "CanopyTemp",
+        "SoilMoisture"
+      ],
+      "actuator_sign_predictions": {
+        "FertigationRate": "-",
+        "set_GrowthRegulator": "0",
+        "set_PruningIntensity": "0",
+        "set_MulchDepth": "0",
+        "set_NightTemperature": "0",
+        "set_WindExposure": "0",
+        "set_SoilOrganicMatter": "0"
+      },
+      "targeted_actuator": "FertigationRate",
+      "symptom_trap_actuator": "FertigationRate"
+    },
+    "calibration": {
+      "proxy_assay_noise": 8.41,
+      "proxy_corr": 0.522,
+      "decoy_corr": 0.353
+    },
+    "audits": {
+      "decoy": {
+        "passed": true,
+        "decoys": {
+          "CanopyTemp": {
+            "obs_corr": 0.353,
+            "clamp_do_effect": 0.0,
+            "ok": true
+          },
+          "SoilMoisture": {
+            "obs_corr": 0.357,
+            "clamp_do_effect": 0.0,
+            "ok": true
+          }
+        }
+      },
+      "proxy_signal": {
+        "passed": true,
+        "proxy_outcome_corr": -0.524,
+        "obs_ok": true,
+        "interventional_shift_sd": 3.18,
+        "interv_ok": true,
+        "band": [
+          0.35,
+          0.75
+        ]
+      },
+      "distractor_inertness": {
+        "passed": true,
+        "n_inert_checked": 6,
+        "violations": []
+      },
+      "gold_selfconsistency": {
+        "passed": true,
+        "gold_utility": 23.9,
+        "beating_perturbations": []
+      },
+      "counterintuitiveness": {
+        "passed": true,
+        "baseline_utility": 18.88,
+        "gold_utility": 23.9,
+        "naive_results": [
+          {
+            "naive": {
+              "FertigationRate": 100
+            },
+            "utility": -19.44,
+            "gain_over_baseline": -38.32,
+            "fraction_of_gold_benefit": -7.647,
+            "helps": false
+          },
+          {
+            "naive": {
+              "set_GrowthRegulator": 100
+            },
+            "utility": 18.88,
+            "gain_over_baseline": 0.0,
+            "fraction_of_gold_benefit": 0.0,
+            "helps": false
+          },
+          {
+            "naive": {
+              "set_PruningIntensity": 100
+            },
+            "utility": 18.88,
+            "gain_over_baseline": 0.0,
+            "fraction_of_gold_benefit": 0.0,
+            "helps": false
+          }
+        ],
+        "note": "obvious first move must not meaningfully help"
+      }
+    }
+  }
+}

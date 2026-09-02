@@ -10,9 +10,12 @@ Measure Qwen3.5-9B on the same RPG worlds under a 3 × 3 matrix of:
 - three system prompts (`p1`, `p2`, `p3`); and
 - three terminal reward functions (`r1`, `r2`, `r3`).
 
-Each configuration runs eight independent rollouts on each world, matching GRPO
-group size `G=8`. The experiment compares prompt-driven task performance and
-reward-function behavior without training the model.
+Each prompt runs eight independent rollouts on each world, matching GRPO group size
+`G=8`. After each rollout terminates, all three reward functions score the same
+terminal answer. The nine prompt/reward configuration IDs are analytical views over
+those shared prompt rollouts, not nine separate inference conditions. The experiment
+compares prompt-driven task performance and reward-function behavior without training
+the model.
 
 Important interpretation: the reward is computed only after an episode ends, so it
 cannot change model behavior in this experiment. Evaluation metrics compare system
@@ -54,9 +57,10 @@ Configuration IDs are the Cartesian product:
 
 `p1_r1`, `p1_r2`, `p1_r3`, `p2_r1`, ..., `p3_r3`.
 
-Each configuration runs 90 worlds × 8 rollouts = 720 episodes. The complete run has
-6,480 episodes. A rollout is a full multi-turn `RPGEnv` episode, not a single model
-completion.
+Each prompt runs 90 worlds × 8 rollouts = 720 episodes. The complete run has 2,160
+model episodes and 6,480 terminal reward evaluations (2,160 terminal answers × three
+reward functions). A rollout is a full multi-turn `RPGEnv` episode, not a single
+model completion.
 
 ## 4. Reproducibility and fairness
 
@@ -73,14 +77,36 @@ completion.
 - Keep model, chat template, thinking mode, sampling parameters, token limits,
   environment budget, and maximum turns fixed across configurations.
 - Derive a stable rollout seed from `(master_seed, world_id, prompt_id,
-  rollout_index)`. Deliberately exclude `reward_id`, so reward variants for the same
-  prompt are paired.
+  rollout_index)`. Reward ID is absent because reward functions are applied post hoc
+  to the same terminal answer.
 - Pass the seed on every model request and record the resolved sampling settings.
+- Match the canonical POPE rollout settings: thinking on, temperature `1.0`, top-p
+  `1.0`, top-k `-1` (disabled), and at most 8,192 generated tokens per assistant turn.
+  Record all of these settings in the scientific fingerprint. The generation cap
+  includes model thinking when the server returns thinking in ordinary assistant
+  content.
+- Before every model request, render the complete chat with the same model tokenizer,
+  generation prompt, and thinking setting used by vLLM. If that prompt exceeds 18,432
+  tokens, do not send it: record a transparent zero-reward soft terminal with
+  `finish_reason: length` and `termination_reason: input_length`. This matches SkyRL's
+  `generator.max_input_length=18432` behavior and leaves 6,144 tokens of headroom under
+  `max_model_len=32768` even when an allowed prompt uses the full 8,192-token generation
+  budget.
+- Maintain a complete, episode-local OpenAI message history: system prompt, initial
+  catalog-bearing user observation, and every subsequent assistant response and user
+  observation. Send that accumulated history on every turn. Use the exact assistant
+  text passed to `RPGEnv.step` as the assistant history message.
 - Never mutate a module-level prompt while concurrent rollouts are active.
+- Never share a message-history object between concurrent rollouts.
+- Treat a vLLM context-length HTTP 400 as non-retryable. It is a last-resort fallback
+  for tokenizer/server disagreement after the client-side 18,432-token check. Convert
+  it into a transparent zero-reward terminal with `termination_reason: context_limit`,
+  retain the server error in the JSONL, and count it in `stats.json`; do not let one
+  oversized history make the run permanently incomplete.
 
-The raw outputs for the three reward variants of a prompt should match when the
-backend is deterministic. A mismatch is a warning recorded in `stats.json`, not a
-reason to discard data.
+There is exactly one raw output for each `(prompt, world, rollout_index)`. All reward
+variants therefore share the transcript by construction rather than relying on
+backend determinism to reproduce it.
 
 ## 5. Minimal environment change
 
@@ -95,7 +121,15 @@ callers:
 
 The experiment runner must use `env.system_prompt` when calling the model. Do not
 change the global `SYSTEM_PROMPT` between jobs. Because the shared `rollout.py` cannot
-be edited, implement the small rollout loop inside `prompt_compare`.
+be edited, implement the small rollout loop inside `prompt_compare`. `RPGEnv` may use
+`r1` for the terminal scalar required by its step API, but the runner must explicitly
+apply `r1`, `r2`, and `r3` to the same terminal answer after the episode ends. The
+post-hoc `r1` value must agree with the environment return.
+
+Treat `budget` as a hard upper bound on simulator experiments. Once `_used == budget`,
+later `measure` or `intervene` actions must not call the simulator or increment
+`_used`; return a recoverable observation directing the model to answer from existing
+evidence. Free `code` turns and terminal `answer`/`give_up` actions remain available.
 
 Each candidate reward function must accept the existing `compute_reward` inputs and
 return a dictionary containing at least a finite numeric `reward`. Candidate reward
@@ -111,7 +145,8 @@ answer with the existing strict oracle and the current evidence rule:
 - if no intervention was applied, both parts are zero; and
 - `score = 0.5 * part_a + 0.5 * part_b`.
 
-For each `(configuration, world)` group of eight rollouts, calculate:
+For each `(configuration, world)` analytical view, select the named reward from the
+eight shared prompt rollouts and calculate:
 
 - `reward_mean = mean(reward)`;
 - `reward_variance = mean((reward - reward_mean)^2)` (population variance, `ddof=0`);
@@ -147,10 +182,10 @@ prompt_compare/
     worlds/
       <archetype>/world_<world_id>.json
     outputs/
-      <archetype>/<world_id>/<config_id>/rollout_00.jsonl
-      <archetype>/<world_id>/<config_id>/rollout_01.jsonl
+      <archetype>/<world_id>/<prompt_id>/rollout_00.jsonl
+      <archetype>/<world_id>/<prompt_id>/rollout_01.jsonl
       ...
-      <archetype>/<world_id>/<config_id>/rollout_07.jsonl
+      <archetype>/<world_id>/<prompt_id>/rollout_07.jsonl
     stats.json
     figures/
     logs/
@@ -160,12 +195,27 @@ Worlds and model outputs are separate. Do not copy oracle/ground-truth data into
 model prompts or raw response records.
 
 Each rollout JSONL contains one record per turn with identifiers, request seed,
-observation, raw model response, parsed action type, and timing. Its final record is a
-terminal summary containing candidate reward, fixed evaluation score, part A, part B,
-termination reason, intervention count, and `complete: true`.
+observation, raw model response, parsed action type, timing, rendered prompt-token
+count, request-message count, and a hash of the exact accumulated message list sent
+to vLLM. The turn records must
+be sufficient to reconstruct and verify every request history without duplicating the
+full history in every JSONL row. Its final record is a terminal summary containing the
+`candidate_rewards` map (`r1`, `r2`, and `r3`), fixed evaluation score, part A, part B,
+termination reason, optional context-limit error, intervention count, and
+`complete: true`.
+
+Store the three candidate reward values even though they can be derived at rollout
+time. They are the terminal measurements consumed by aggregation, and keeping them
+makes resume, statistics regeneration, and audit independent of rerunning oracle code
+or of later changes to reward implementations. Prompt and reward source hashes in the
+manifest bind the stored measurements to the exact definitions used.
 
 Write rollout files atomically. On `--resume`, skip only files whose final record has
-`complete: true`; incomplete files are rerun with the same seed.
+`complete: true` and whose entire JSONL passes the same per-file validator used by
+aggregation. That validator checks record/turn counts, transcript hash, the complete
+request-history hash chain, prompt-token bounds, synthetic-action/termination
+consistency, identifiers, sampling settings, and environment limits. Incomplete or
+invalid completed files are rerun with the same seed.
 
 `stats.json` is the sole canonical statistics file. It contains:
 
@@ -173,9 +223,11 @@ Write rollout files atomically. On `--resume`, skip only files whose final recor
 - `per_world`: 810 records (9 configurations × 90 worlds);
 - `per_archetype`: 81 records (9 configurations × 9 archetypes);
 - `overall`: 9 records; and
-- error counts, pairing warnings, and completeness checks.
+- error counts, post-hoc reward-application provenance, and completeness checks.
 
-Transport/server failures may be retried up to three times with the same seed.
+Retryable transport/server failures may be retried up to three times with the same
+seed. Non-retryable HTTP 4xx responses must not be retried with an unchanged payload;
+context-length 400 responses use the recorded soft-terminal behavior above.
 Malformed model actions are valid model behavior and must not be retried. Do not
 silently compute final statistics from fewer than eight completed rollouts; fail the
 aggregation and list the missing paths.
@@ -190,15 +242,17 @@ python run_experiment.py all \
   --model Qwen/Qwen3.5-9B \
   --gpus 5,6,7 \
   --seed 7000000 \
-  --run-id prompt_compare_v1
+  --run-id prompt_compare_v3
 ```
 
-Use three independent vLLM OpenAI-compatible workers, one on each of GPUs 5, 6, and
-7, after a preflight confirms the configured model fits on one GPU. Assign complete
-world/configuration groups to workers and submit the eight trajectories concurrently
-so vLLM can batch active turns. Keep ports configurable, wait for health checks, save
-server logs, and stop only servers started by this command. If the one-GPU preflight
-fails, stop with a clear error instead of silently changing the experiment topology.
+Use three independent vLLM OpenAI-compatible workers, one on each of exactly three
+unique GPU IDs supplied by the user, after a preflight confirms the configured model
+fits on one GPU. The canonical launch uses GPUs 5, 6, and 7, but hosts numbered 0, 1,
+and 2 must be supported with `--gpus 0,1,2`. Assign complete world/prompt groups to
+workers and submit the eight trajectories concurrently so vLLM can batch active
+turns. Keep ports configurable, wait for health checks, save server logs, and stop
+only servers started by this command. If the one-GPU fit preflight fails, stop with a
+clear error instead of silently changing tensor parallelism.
 
 The entrypoint must support `--resume` and a small `--smoke-test` mode. It must print
 the run directory and final completeness summary.
@@ -210,26 +264,34 @@ All plotting code must live in `prompt_compare/visualization/`. It reads only
 
 Produce at least:
 
-- a 3 × 3 heatmap of overall average evaluation score;
-- a 3 × 3 heatmap of average per-world best-of-eight score;
-- reward mean and within-group variance by configuration; and
-- archetype-by-configuration heatmaps for average score, part A, and part B.
+- a prompt-level score sheet with average score, part A, part B, and average
+  per-world best-of-eight score for `p1`, `p2`, and `p3`;
+- a prompt-level reward sheet with reward mean and within-group variance for each
+  of `r1`, `r2`, and `r3`; and
+- archetype-by-prompt heatmaps for average score, part A, and part B, with exactly
+  `p1`, `p2`, and `p3` on the x-axis because evaluation scores are invariant to
+  post-hoc reward selection.
+
+Write both sheets as rendered PNG tables and CSV files.
 
 Use fixed axes and color ranges across comparable plots.
 
 ## 10. Validation and completion criteria
 
 Before the full run, tests and smoke mode must verify prompt/reward injection,
-concurrent isolation, deterministic seed derivation, metric calculations, atomic
-resume behavior, and JSON schema completeness.
+concurrent isolation, complete multi-turn message history, deterministic seed
+derivation, metric calculations, atomic resume behavior, and JSON schema
+completeness.
 
 The run is complete only when:
 
 - there are 90 unique audited worlds, exactly 10 per archetype;
 - all nine configuration IDs are present;
-- every configuration/world group has exactly eight completed rollouts;
+- every prompt/world group has exactly eight completed rollouts (2,160 episodes);
+- each terminal has all three candidate rewards (6,480 reward evaluations);
 - all 810 per-world and 81 per-archetype statistics records exist;
 - every stored metric is finite and within its expected range;
+- every terminal has `experiment_count <= budget`;
 - `stats.json` can be regenerated from saved rollout files; and
 - every required figure is generated from `stats.json`.
 
@@ -292,4 +354,3 @@ Observation and code alone CANNOT establish causation — you must INTERVENE to 
 - `r1`: CURRENT REWARD FUNCTIONS
 - `r2`: `part_a - 0.25 * invalid_id_fraction`
 - `r3`: `part_b - 0.25 * invalid_id_fraction`
-

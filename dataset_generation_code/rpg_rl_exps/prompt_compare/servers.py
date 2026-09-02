@@ -11,9 +11,56 @@ import subprocess
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from threading import Lock
 from typing import Any
+
+
+class NonRetryableRequestError(RuntimeError):
+    """The server rejected a request that cannot succeed unchanged."""
+
+
+class ContextLengthExceededError(NonRetryableRequestError):
+    """The accumulated chat plus requested output exceeded the model context."""
+
+    def __init__(self, message: str, *, prompt_tokens: int | None = None):
+        self.prompt_tokens = prompt_tokens
+        super().__init__(message)
+
+
+class InputLengthExceededError(ContextLengthExceededError):
+    """The rendered chat prompt exceeded the client-side SkyRL input limit."""
+
+    def __init__(self, prompt_tokens: int, max_input_tokens: int):
+        self.prompt_tokens = int(prompt_tokens)
+        self.max_input_tokens = int(max_input_tokens)
+        super().__init__(
+            f"client-side prompt length {self.prompt_tokens} exceeds "
+            f"max_input_tokens={self.max_input_tokens}",
+            prompt_tokens=self.prompt_tokens,
+        )
+
+
+def _http_error_detail(exc: urllib.error.HTTPError) -> str:
+    try:
+        payload = exc.read().decode("utf-8", errors="replace")
+    except Exception:  # noqa: BLE001
+        payload = ""
+    return payload.strip() or str(exc.reason)
+
+
+def _is_context_length_error(detail: str) -> bool:
+    lowered = detail.lower()
+    return any(marker in lowered for marker in (
+        "maximum context length",
+        "max_model_len",
+        "context length",
+        "prompt is too long",
+        "too many tokens",
+        "prompt tokens",
+    ))
 
 
 @dataclass(frozen=True)
@@ -86,7 +133,7 @@ def _tail(path: Path, lines: int = 60) -> str:
 
 
 class ServerManager:
-    """Start and stop only the three vLLM processes owned by this invocation."""
+    """Start and stop only the vLLM processes owned by this invocation."""
 
     def __init__(self, settings: ServerSettings, logs_dir: Path):
         self.settings = settings
@@ -125,7 +172,6 @@ class ServerManager:
             str(self.settings.max_model_len),
             "--gpu-memory-utilization",
             str(self.settings.gpu_memory_utilization),
-            "--disable-log-requests",
         ]
         if self.settings.disable_multimodal:
             command.extend(["--limit-mm-per-prompt", '{"image":0,"video":0}'])
@@ -175,8 +221,11 @@ class ServerManager:
 
     def start(self) -> tuple[str, ...]:
         if len(self.settings.gpus) != 3 or len(self.settings.ports) != 3:
-            raise ValueError("the full topology requires exactly three GPUs and three ports")
-        if len(set(self.settings.gpus)) != 3 or len(set(self.settings.ports)) != 3:
+            raise ValueError("exactly three GPUs and three ports are required")
+        if (
+            len(set(self.settings.gpus)) != len(self.settings.gpus)
+            or len(set(self.settings.ports)) != len(self.settings.ports)
+        ):
             raise ValueError("GPU ids and ports must each be unique")
         inspect_gpus(self.settings.gpus)
         try:
@@ -227,16 +276,17 @@ class ServerManager:
 
 @dataclass(frozen=True)
 class SamplingSettings:
+    max_input_tokens: int = 18432
     max_tokens: int = 8192
     temperature: float = 1.0
-    top_p: float = 0.95
-    top_k: int = 20
+    top_p: float = 1.0
+    top_k: int = -1
     min_p: float = 0.0
     enable_thinking: bool = True
     request_timeout_s: int = 900
     transport_retries: int = 3
 
-    def request_record(self) -> dict[str, Any]:
+    def request_payload(self) -> dict[str, Any]:
         return {
             "max_tokens": self.max_tokens,
             "temperature": self.temperature,
@@ -245,6 +295,55 @@ class SamplingSettings:
             "min_p": self.min_p,
             "chat_template_kwargs": {"enable_thinking": self.enable_thinking},
         }
+
+    def request_record(self) -> dict[str, Any]:
+        return {
+            "max_input_tokens": self.max_input_tokens,
+            **self.request_payload(),
+        }
+
+
+class ChatTemplateTokenCounter:
+    """Count the exact rendered chat prompt tokens before sending a request."""
+
+    def __init__(self, model: str, *, enable_thinking: bool, tokenizer=None):
+        if tokenizer is None:
+            try:
+                from transformers import AutoTokenizer
+
+                tokenizer = AutoTokenizer.from_pretrained(
+                    model,
+                    local_files_only=True,
+                    trust_remote_code=True,
+                )
+            except Exception as exc:  # noqa: BLE001
+                raise RuntimeError(
+                    f"could not load tokenizer for client-side input-length checks: {model}"
+                ) from exc
+        self.tokenizer = tokenizer
+        self.enable_thinking = bool(enable_thinking)
+        # One counter is shared by all rollout workers. Tokenizer calls are short
+        # compared with generation, and the lock avoids relying on tokenizer/Jinja
+        # thread-safety while concurrent G=8 requests are prepared.
+        self._lock = Lock()
+
+    def __call__(self, messages: list[dict[str, str]]) -> int:
+        with self._lock:
+            encoded = self.tokenizer.apply_chat_template(
+                messages,
+                add_generation_prompt=True,
+                tokenize=True,
+                return_dict=True,
+                enable_thinking=self.enable_thinking,
+            )
+        input_ids = encoded["input_ids"] if isinstance(encoded, Mapping) else encoded
+        if hasattr(input_ids, "tolist"):
+            input_ids = input_ids.tolist()
+        if input_ids and isinstance(input_ids[0], list):
+            if len(input_ids) != 1:
+                raise ValueError("expected one chat conversation while counting tokens")
+            input_ids = input_ids[0]
+        return len(input_ids)
 
 
 @dataclass(frozen=True)
@@ -256,25 +355,49 @@ class Generation:
     usage: dict[str, Any]
     attempts: int
     latency_s: float
+    prompt_tokens: int | None = None
 
 
 class VLLMClient:
     def __init__(self, base_url: str, model: str, settings: SamplingSettings,
-                 api_key: str = "EMPTY"):
+                 api_key: str = "EMPTY", token_counter=None):
         self.url = base_url.rstrip("/") + "/chat/completions"
         self.model = model
         self.settings = settings
         self.api_key = api_key
+        self.token_counter = token_counter
 
-    def generate(self, system_prompt: str, observation: str, seed: int) -> Generation:
+    def generate(self, messages: list[dict[str, str]], seed: int) -> Generation:
+        if len(messages) < 2 or messages[0].get("role") != "system":
+            raise ValueError("messages must start with a system message and include a user turn")
+        if any(
+            message.get("role") not in {"system", "user", "assistant"}
+            or not isinstance(message.get("content"), str)
+            for message in messages
+        ):
+            raise ValueError("every message must have a supported role and string content")
+        expected_roles = [
+            "system",
+            *("user" if index % 2 else "assistant" for index in range(1, len(messages))),
+        ]
+        if (
+            [message["role"] for message in messages] != expected_roles
+            or messages[-1]["role"] != "user"
+        ):
+            raise ValueError("messages must alternate user and assistant and end with user")
+        prompt_tokens = None
+        if self.token_counter is not None:
+            prompt_tokens = int(self.token_counter(messages))
+            if prompt_tokens > self.settings.max_input_tokens:
+                raise InputLengthExceededError(
+                    prompt_tokens,
+                    self.settings.max_input_tokens,
+                )
         payload = {
             "model": self.model,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": observation},
-            ],
+            "messages": [dict(message) for message in messages],
             "seed": seed,
-            **self.settings.request_record(),
+            **self.settings.request_payload(),
         }
         body = json.dumps(payload).encode("utf-8")
         start = time.perf_counter()
@@ -306,15 +429,35 @@ class VLLMClient:
                 action_text = content
                 if reasoning and "<reasoning>" not in content:
                     action_text = f"<reasoning>{reasoning}</reasoning>\n{content}"
+                usage = decoded.get("usage") or {}
+                if prompt_tokens is None:
+                    reported_prompt_tokens = usage.get("prompt_tokens")
+                    if isinstance(reported_prompt_tokens, int):
+                        prompt_tokens = reported_prompt_tokens
                 return Generation(
                     raw_text=content,
                     action_text=action_text,
                     reasoning_content=reasoning,
                     finish_reason=choice.get("finish_reason"),
-                    usage=decoded.get("usage") or {},
+                    usage=usage,
                     attempts=attempt,
                     latency_s=float(time.perf_counter() - start),
+                    prompt_tokens=prompt_tokens,
                 )
+            except urllib.error.HTTPError as exc:
+                detail = _http_error_detail(exc)
+                message = f"HTTP {exc.code}: {detail}"
+                if exc.code == 400 and _is_context_length_error(detail):
+                    raise ContextLengthExceededError(
+                        message,
+                        prompt_tokens=prompt_tokens,
+                    ) from exc
+                if 400 <= exc.code < 500 and exc.code not in {408, 409, 425, 429}:
+                    raise NonRetryableRequestError(message) from exc
+                errors.append(message)
+                if attempt == total_attempts:
+                    break
+                time.sleep(min(4.0, 0.5 * (2 ** (attempt - 1))))
             except (OSError, ValueError, KeyError, IndexError, json.JSONDecodeError) as exc:
                 errors.append(f"{type(exc).__name__}: {exc}")
                 if attempt == total_attempts:

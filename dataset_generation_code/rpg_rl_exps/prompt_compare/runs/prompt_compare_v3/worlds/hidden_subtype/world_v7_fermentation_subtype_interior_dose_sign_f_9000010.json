@@ -1,0 +1,800 @@
+{
+  "schema_version": "rpg_scm_v7",
+  "world_id": "v7_fermentation_subtype_interior_dose_sign_f_9000010",
+  "domain": "fermentation",
+  "meta": {
+    "seed": 9000010,
+    "features": [
+      "interior_dose",
+      "sign_flip"
+    ],
+    "skin": "fermentation",
+    "depth": 2
+  },
+  "scenario": "A industrial fermentation plant running a batch ethanol fermentation has seen fermentation yield fall about 25% over the past three weeks, repeating batch after batch. The drop began after a cleaning-protocol change and a switch to a new yeast-propagation batch. The production team's leading theories are that fermentation runs too cool or is underfed, so they favor warmer temperatures and more sugar feed. Batches have smelled faintly sour at the end of fermentation. Routine process panels read broadly within range. The feed, temperature, dosing, and treatment systems are all adjustable, and dosing and treatment options are available. You have a limited number of experiments; you may measure quantities and apply available controls or additives, alone or in combination. Determine what is really driving the loss and what to do about it.",
+  "scm": {
+    "variables": {
+      "WildYeastContaminationSusceptibility": {
+        "aliases": [
+          "susceptibility",
+          "batch susceptibility"
+        ],
+        "kind": "latent",
+        "dist": {
+          "normal": [
+            55,
+            20
+          ]
+        }
+      },
+      "FermenterHistory": {
+        "aliases": [
+          "fermenter history",
+          "vessel service age"
+        ],
+        "kind": "latent",
+        "dist": {
+          "normal": [
+            50,
+            16
+          ]
+        }
+      },
+      "SugarFeedRate": {
+        "aliases": [
+          "sugar feed rate",
+          "substrate feed",
+          "wort feed rate"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            40,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "SugarFeedRateHarmAxis": {
+        "aliases": [
+          "harm axis"
+        ],
+        "kind": "latent",
+        "parents": [
+          "SugarFeedRate"
+        ],
+        "mech": {
+          "form": "sign_flip",
+          "of": "SugarFeedRate",
+          "knee": 45,
+          "lo_gain": 0.05,
+          "hi_gain": 0.9,
+          "intercept": 2.0
+        }
+      },
+      "WildYeastContamination": {
+        "aliases": [
+          "wild-yeast contamination",
+          "contaminant strain",
+          "off-strain load"
+        ],
+        "kind": "latent",
+        "parents": [
+          "SugarFeedRateHarmAxis",
+          "WildYeastContaminationSusceptibility"
+        ],
+        "mech": {
+          "form": "interaction",
+          "a": "SugarFeedRateHarmAxis",
+          "b": "WildYeastContaminationSusceptibility",
+          "gain": 260.0,
+          "scale": 100.0,
+          "intercept": 3.0
+        },
+        "noise": {
+          "normal": [
+            0,
+            1.5
+          ]
+        }
+      },
+      "MembraneIntegrity": {
+        "aliases": [
+          "membrane integrity",
+          "cell-membrane health"
+        ],
+        "kind": "latent",
+        "parents": [
+          "WildYeastContamination"
+        ],
+        "mech": {
+          "form": "hill",
+          "of": "WildYeastContamination",
+          "vmax": 70,
+          "k": 35,
+          "n": 2
+        }
+      },
+      "BuddingRate": {
+        "aliases": [
+          "budding rate",
+          "proliferation rate"
+        ],
+        "kind": "latent",
+        "parents": [
+          "MembraneIntegrity"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "MembraneIntegrity": 0.9
+          },
+          "intercept": 5
+        }
+      },
+      "WaterHardnessFermSubtype": {
+        "aliases": [
+          "patient subtype",
+          "hidden subtype",
+          "responder class"
+        ],
+        "kind": "latent",
+        "dist": {
+          "normal": [
+            50.0,
+            18
+          ]
+        }
+      },
+      "YeastGeneration": {
+        "aliases": [
+          "yeast generation",
+          "repitch count"
+        ],
+        "kind": "observable",
+        "parents": [
+          "WaterHardnessFermSubtype"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "WaterHardnessFermSubtype": 1.0
+          },
+          "intercept": 0
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            6
+          ]
+        }
+      },
+      "WaterHardnessFermDose": {
+        "aliases": [
+          "water hardness dose"
+        ],
+        "kind": "latent",
+        "dist": {
+          "normal": [
+            0,
+            0
+          ]
+        }
+      },
+      "WaterHardnessFermResponse": {
+        "aliases": [
+          "treatment response"
+        ],
+        "kind": "latent",
+        "parents": [
+          "WaterHardnessFermDose",
+          "WaterHardnessFermSubtype"
+        ],
+        "mech": {
+          "form": "subtype_effect",
+          "dose": "WaterHardnessFermDose",
+          "subtype": "WaterHardnessFermSubtype",
+          "center": 50.0,
+          "gain": 46.0,
+          "scale": 100.0
+        }
+      },
+      "UnderlyingEthanolYield": {
+        "aliases": [
+          "underlying true objective"
+        ],
+        "kind": "latent",
+        "parents": [
+          "BuddingRate",
+          "FermenterHistory",
+          "WaterHardnessFermResponse"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "BuddingRate": -0.9,
+            "FermenterHistory": 0.2,
+            "WaterHardnessFermResponse": 1.0
+          },
+          "intercept": 15
+        }
+      },
+      "EthanolYield": {
+        "aliases": [
+          "ethanol yield",
+          "fermentation yield",
+          "product yield",
+          "yield"
+        ],
+        "kind": "outcome",
+        "parents": [
+          "UnderlyingEthanolYield"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "UnderlyingEthanolYield": 1.0
+          },
+          "intercept": 0
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "OrganicAcidTiter": {
+        "aliases": [
+          "organic-acid titer",
+          "acetate concentration"
+        ],
+        "kind": "observable",
+        "parents": [
+          "BuddingRate"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "BuddingRate": 0.8
+          },
+          "intercept": 5
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            8.61
+          ]
+        }
+      },
+      "CO2OffgasRate": {
+        "aliases": [
+          "co2 offgas rate",
+          "gas-evolution rate"
+        ],
+        "kind": "observable",
+        "parents": [
+          "FermenterHistory"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "FermenterHistory": 0.7
+          },
+          "intercept": 40
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            4
+          ]
+        }
+      },
+      "ClarifierDose": {
+        "aliases": [
+          "clarifier dose",
+          "fining agent"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "NitrogenSource": {
+        "aliases": [
+          "nitrogen source",
+          "yan level"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "InoculationVolume": {
+        "aliases": [
+          "inoculation volume",
+          "pitch volume"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "AgitationFerm": {
+        "aliases": [
+          "agitation rate",
+          "stir speed"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "CarbonationLevel": {
+        "aliases": [
+          "carbonation level",
+          "dissolved co2"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "GravityInitial": {
+        "aliases": [
+          "original gravity",
+          "starting sugar"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "DissolvedO2Ferm": {
+        "aliases": [
+          "dissolved oxygen",
+          "aeration level"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "VesselPressureFerm": {
+        "aliases": [
+          "vessel pressure",
+          "headspace pressure"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      }
+    },
+    "actuators": {
+      "SugarFeedRate": {
+        "aliases": [
+          "sugar feed rate",
+          "substrate feed",
+          "wort feed rate"
+        ],
+        "target": "SugarFeedRate",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 40,
+        "description": "controller for SugarFeedRate"
+      },
+      "WaterHardnessFerm": {
+        "aliases": [
+          "water hardness",
+          "brewing-liquor minerals"
+        ],
+        "target": "WaterHardnessFermDose",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 0,
+        "description": "apply the water hardness treatment"
+      },
+      "pHBuffering": {
+        "aliases": [
+          "ph buffering",
+          "acid neutralization"
+        ],
+        "target": "WildYeastContamination",
+        "op": "scale",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 0,
+        "expr": "1-sat(d;k=0.66)",
+        "description": "a continuous dosing control",
+        "side_effect": {
+          "target": "UnderlyingEthanolYield",
+          "expr": "-overstrip(d;thr=0.66,gain=30)"
+        }
+      },
+      "set_ClarifierDose": {
+        "aliases": [
+          "set clarifier dose",
+          "set fining agent",
+          "adjust ClarifierDose"
+        ],
+        "target": "ClarifierDose",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for ClarifierDose"
+      },
+      "set_NitrogenSource": {
+        "aliases": [
+          "set nitrogen source",
+          "set yan level",
+          "adjust NitrogenSource"
+        ],
+        "target": "NitrogenSource",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for NitrogenSource"
+      },
+      "set_InoculationVolume": {
+        "aliases": [
+          "set inoculation volume",
+          "set pitch volume",
+          "adjust InoculationVolume"
+        ],
+        "target": "InoculationVolume",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for InoculationVolume"
+      },
+      "set_AgitationFerm": {
+        "aliases": [
+          "set agitation rate",
+          "set stir speed",
+          "adjust AgitationFerm"
+        ],
+        "target": "AgitationFerm",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for AgitationFerm"
+      },
+      "set_CarbonationLevel": {
+        "aliases": [
+          "set carbonation level",
+          "set dissolved co2",
+          "adjust CarbonationLevel"
+        ],
+        "target": "CarbonationLevel",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for CarbonationLevel"
+      },
+      "set_GravityInitial": {
+        "aliases": [
+          "set original gravity",
+          "set starting sugar",
+          "adjust GravityInitial"
+        ],
+        "target": "GravityInitial",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for GravityInitial"
+      }
+    },
+    "outcome": "EthanolYield",
+    "higher_is_better": true,
+    "goal": "UnderlyingEthanolYield"
+  },
+  "ground_truth": {
+    "true_root": "WildYeastContamination",
+    "true_mechanism_proxy": "OrganicAcidTiter",
+    "confounded_decoys": [
+      "CO2OffgasRate"
+    ],
+    "targeted_actuator": "WaterHardnessFerm",
+    "symptom_trap_actuator": "pHBuffering",
+    "co_actuators": null,
+    "selection_decoy": null,
+    "_selection_nodes": [],
+    "subtype_policy": {
+      "subtype": "WaterHardnessFermSubtype",
+      "marker": "YeastGeneration",
+      "dose": "WaterHardnessFermDose",
+      "treatment_actuator": "WaterHardnessFerm",
+      "response": "WaterHardnessFermResponse",
+      "center": 50.0
+    },
+    "latent_plain_name": "a hidden wild-yeast contamination that propagates through membrane integrity, budding rate to the outcome",
+    "naive_interventions": [
+      {
+        "SugarFeedRate": 100
+      },
+      {
+        "WaterHardnessFerm": 100
+      },
+      {
+        "set_ClarifierDose": 100
+      },
+      {
+        "set_NitrogenSource": 100
+      }
+    ],
+    "_features": [
+      "interior_dose",
+      "sign_flip"
+    ],
+    "_skin": "fermentation",
+    "_depth": 2,
+    "_archetype": "hidden_subtype",
+    "_seed": 9000010
+  },
+  "oracle": {
+    "gold": {
+      "intervention": {
+        "SugarFeedRate": 0.0,
+        "pHBuffering": 66.0,
+        "WaterHardnessFerm": {
+          "policy": {
+            "stratifier": "YeastGeneration",
+            "threshold": 50.054,
+            "dose_if_ge": 100.0,
+            "dose_if_lt": 0.0
+          }
+        }
+      },
+      "policy": {
+        "marker": "YeastGeneration",
+        "threshold": 50.054,
+        "dose_if_ge": 100.0,
+        "dose_if_lt": 0.0
+      },
+      "base_intervention": {
+        "SugarFeedRate": 0.0,
+        "pHBuffering": 66.0
+      },
+      "expected_utility": 43.68251092880205,
+      "baseline_utility": 13.944525734294812,
+      "active_actuators": [
+        "SugarFeedRate",
+        "pHBuffering"
+      ],
+      "is_conditional_policy": true
+    },
+    "counterfactual_battery": {
+      "true_mechanism_proxy": "OrganicAcidTiter",
+      "valid_mechanism_proxies": [
+        "OrganicAcidTiter"
+      ],
+      "lenient_mechanism_proxies": [
+        "OrganicAcidTiter"
+      ],
+      "confounded_decoys": [
+        "CO2OffgasRate"
+      ],
+      "actuator_sign_predictions": {
+        "SugarFeedRate": "-",
+        "WaterHardnessFerm": "0",
+        "pHBuffering": "-",
+        "set_ClarifierDose": "0",
+        "set_NitrogenSource": "0",
+        "set_InoculationVolume": "0",
+        "set_AgitationFerm": "0",
+        "set_CarbonationLevel": "0",
+        "set_GravityInitial": "0"
+      },
+      "targeted_actuator": "WaterHardnessFerm",
+      "symptom_trap_actuator": "pHBuffering"
+    },
+    "calibration": {
+      "proxy_assay_noise": 8.61,
+      "proxy_corr": 0.521,
+      "decoy_corr": 0.356
+    },
+    "audits": {
+      "decoy": {
+        "passed": true,
+        "decoys": {
+          "CO2OffgasRate": {
+            "obs_corr": 0.356,
+            "clamp_do_effect": 0.0,
+            "ok": true
+          }
+        }
+      },
+      "proxy_signal": {
+        "passed": true,
+        "proxy_outcome_corr": -0.521,
+        "obs_ok": true,
+        "interventional_shift_sd": 0.02,
+        "interv_ok": false,
+        "band": [
+          0.35,
+          0.75
+        ]
+      },
+      "distractor_inertness": {
+        "passed": true,
+        "n_inert_checked": 7,
+        "violations": []
+      },
+      "gold_selfconsistency": {
+        "passed": true,
+        "gold_utility": 43.68,
+        "beating_perturbations": []
+      },
+      "counterintuitiveness": {
+        "passed": true,
+        "baseline_utility": 13.93,
+        "gold_utility": 43.68,
+        "naive_results": [
+          {
+            "naive": {
+              "SugarFeedRate": 100
+            },
+            "utility": -24.44,
+            "gain_over_baseline": -38.37,
+            "fraction_of_gold_benefit": -1.29,
+            "helps": false
+          },
+          {
+            "naive": {
+              "WaterHardnessFerm": 100
+            },
+            "utility": 13.74,
+            "gain_over_baseline": -0.19,
+            "fraction_of_gold_benefit": -0.006,
+            "helps": false
+          },
+          {
+            "naive": {
+              "set_ClarifierDose": 100
+            },
+            "utility": 13.93,
+            "gain_over_baseline": 0.0,
+            "fraction_of_gold_benefit": 0.0,
+            "helps": false
+          },
+          {
+            "naive": {
+              "set_NitrogenSource": 100
+            },
+            "utility": 13.93,
+            "gain_over_baseline": 0.0,
+            "fraction_of_gold_benefit": 0.0,
+            "helps": false
+          }
+        ],
+        "note": "obvious first move must not meaningfully help"
+      }
+    }
+  }
+}

@@ -1,0 +1,788 @@
+{
+  "schema_version": "rpg_scm_v7",
+  "world_id": "v7_clinical_chain_interior_dose_sign_f_7000005",
+  "domain": "clinical",
+  "meta": {
+    "seed": 7000005,
+    "features": [
+      "interior_dose",
+      "sign_flip"
+    ],
+    "skin": "clinical",
+    "depth": 3
+  },
+  "scenario": "On a post-surgical step-down unit, the average functional recovery score for recovering patients has slipped about 25% over the past quarter, and the pattern has held across successive admissions. It emerged after a change to the unit's standing medication and fluid protocol. The care team's leading theories are that patients are dehydrated or under-oxygenated, so they favor more fluids and oxygen. Several patients have shown low-grade temperature readings on and off. Routine labs and vitals read broadly within range. The fluid and oxygen orders, medication list, and supportive care are all adjustable within protocol. You have a limited number of experiments; you may measure quantities and apply available interventions, alone or in combination. Determine what is really driving the decline and what to do about it.",
+  "scm": {
+    "variables": {
+      "ElectrolyteImbalanceSusceptibility": {
+        "aliases": [
+          "susceptibility",
+          "batch susceptibility"
+        ],
+        "kind": "latent",
+        "dist": {
+          "normal": [
+            55,
+            20
+          ]
+        }
+      },
+      "ComorbidityIndex": {
+        "aliases": [
+          "comorbidity index",
+          "baseline frailty"
+        ],
+        "kind": "latent",
+        "dist": {
+          "normal": [
+            50,
+            16
+          ]
+        }
+      },
+      "FluidInfusionRate": {
+        "aliases": [
+          "fluid infusion rate",
+          "iv fluid rate",
+          "hydration rate"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            40,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "FluidInfusionRateHarmAxis": {
+        "aliases": [
+          "harm axis"
+        ],
+        "kind": "latent",
+        "parents": [
+          "FluidInfusionRate"
+        ],
+        "mech": {
+          "form": "sign_flip",
+          "of": "FluidInfusionRate",
+          "knee": 45,
+          "lo_gain": 0.05,
+          "hi_gain": 0.9,
+          "intercept": 2.0
+        }
+      },
+      "ElectrolyteImbalance": {
+        "aliases": [
+          "electrolyte imbalance",
+          "electrolyte derangement"
+        ],
+        "kind": "latent",
+        "parents": [
+          "FluidInfusionRateHarmAxis",
+          "ElectrolyteImbalanceSusceptibility"
+        ],
+        "mech": {
+          "form": "interaction",
+          "a": "FluidInfusionRateHarmAxis",
+          "b": "ElectrolyteImbalanceSusceptibility",
+          "gain": 260.0,
+          "scale": 100.0,
+          "intercept": 3.0
+        },
+        "noise": {
+          "normal": [
+            0,
+            1.5
+          ]
+        }
+      },
+      "MetabolicStress": {
+        "aliases": [
+          "metabolic stress",
+          "catabolic load"
+        ],
+        "kind": "latent",
+        "parents": [
+          "ElectrolyteImbalance"
+        ],
+        "mech": {
+          "form": "hill",
+          "of": "ElectrolyteImbalance",
+          "vmax": 70,
+          "k": 35,
+          "n": 2
+        }
+      },
+      "OrganPerfusion": {
+        "aliases": [
+          "organ perfusion",
+          "end-organ perfusion"
+        ],
+        "kind": "latent",
+        "parents": [
+          "MetabolicStress"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "MetabolicStress": 0.9
+          },
+          "intercept": 5
+        }
+      },
+      "ImmuneExhaustion": {
+        "aliases": [
+          "immune exhaustion",
+          "immune depletion"
+        ],
+        "kind": "latent",
+        "parents": [
+          "OrganPerfusion"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "OrganPerfusion": 0.9
+          },
+          "intercept": 5
+        }
+      },
+      "UnderlyingRecoveryScore": {
+        "aliases": [
+          "underlying true objective"
+        ],
+        "kind": "latent",
+        "parents": [
+          "ImmuneExhaustion",
+          "ComorbidityIndex"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "ImmuneExhaustion": -0.9,
+            "ComorbidityIndex": 0.2
+          },
+          "intercept": 15
+        }
+      },
+      "RecoveryScore": {
+        "aliases": [
+          "recovery score",
+          "recovery index",
+          "functional recovery"
+        ],
+        "kind": "outcome",
+        "parents": [
+          "UnderlyingRecoveryScore"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "UnderlyingRecoveryScore": 1.0
+          },
+          "intercept": 0
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "TissuePerfusionIndex": {
+        "aliases": [
+          "tissue perfusion index",
+          "oxygenation index",
+          "capillary refill index"
+        ],
+        "kind": "observable",
+        "parents": [
+          "OrganPerfusion"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "OrganPerfusion": 0.8
+          },
+          "intercept": 5
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            8.33
+          ]
+        }
+      },
+      "BodyTemperature": {
+        "aliases": [
+          "body temperature",
+          "core temp",
+          "fever reading"
+        ],
+        "kind": "observable",
+        "parents": [
+          "ComorbidityIndex"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "ComorbidityIndex": 0.7
+          },
+          "intercept": 40
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            4
+          ]
+        }
+      },
+      "HeartRate": {
+        "aliases": [
+          "heart rate",
+          "pulse rate"
+        ],
+        "kind": "observable",
+        "parents": [
+          "ComorbidityIndex"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "ComorbidityIndex": 0.7
+          },
+          "intercept": 40
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            4
+          ]
+        }
+      },
+      "SedationLevel": {
+        "aliases": [
+          "sedation level",
+          "sedative dose"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "RoomOccupancy": {
+        "aliases": [
+          "room occupancy",
+          "ward crowding"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "SleepHours": {
+        "aliases": [
+          "sleep hours",
+          "rest duration"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "UrineOutput": {
+        "aliases": [
+          "urine output",
+          "diuresis"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "VisitorFrequency": {
+        "aliases": [
+          "visitor frequency",
+          "family visits"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "BloodPressure": {
+        "aliases": [
+          "blood pressure",
+          "arterial pressure"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "PainScore": {
+        "aliases": [
+          "pain score",
+          "reported pain"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "MobilizationLevel": {
+        "aliases": [
+          "mobilization level",
+          "ambulation"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "PhysioTherapyDose": {
+        "aliases": [
+          "physiotherapy dose",
+          "rehab intensity"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "RespiratoryRate": {
+        "aliases": [
+          "respiratory rate",
+          "breathing rate"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "AmbientNoise": {
+        "aliases": [
+          "ambient noise",
+          "ward noise level"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "BloodGlucose": {
+        "aliases": [
+          "blood glucose",
+          "serum glucose"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      }
+    },
+    "actuators": {
+      "FluidInfusionRate": {
+        "aliases": [
+          "fluid infusion rate",
+          "iv fluid rate",
+          "hydration rate"
+        ],
+        "target": "FluidInfusionRate",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 40,
+        "description": "controller for FluidInfusionRate"
+      },
+      "Deprescribe": {
+        "aliases": [
+          "deprescribing",
+          "medication withdrawal",
+          "stop offending drug"
+        ],
+        "target": "ElectrolyteImbalance",
+        "op": "scale",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 0,
+        "expr": "1-sat(d;k=0.66)",
+        "description": "a continuous dosing control",
+        "side_effect": {
+          "target": "UnderlyingRecoveryScore",
+          "expr": "-overstrip(d;thr=0.66,gain=30)"
+        }
+      },
+      "set_SedationLevel": {
+        "aliases": [
+          "set sedation level",
+          "set sedative dose",
+          "adjust SedationLevel"
+        ],
+        "target": "SedationLevel",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for SedationLevel"
+      },
+      "set_RoomOccupancy": {
+        "aliases": [
+          "set room occupancy",
+          "set ward crowding",
+          "adjust RoomOccupancy"
+        ],
+        "target": "RoomOccupancy",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for RoomOccupancy"
+      },
+      "set_SleepHours": {
+        "aliases": [
+          "set sleep hours",
+          "set rest duration",
+          "adjust SleepHours"
+        ],
+        "target": "SleepHours",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for SleepHours"
+      },
+      "set_UrineOutput": {
+        "aliases": [
+          "set urine output",
+          "set diuresis",
+          "adjust UrineOutput"
+        ],
+        "target": "UrineOutput",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for UrineOutput"
+      },
+      "set_VisitorFrequency": {
+        "aliases": [
+          "set visitor frequency",
+          "set family visits",
+          "adjust VisitorFrequency"
+        ],
+        "target": "VisitorFrequency",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for VisitorFrequency"
+      }
+    },
+    "outcome": "RecoveryScore",
+    "higher_is_better": true,
+    "goal": "UnderlyingRecoveryScore"
+  },
+  "ground_truth": {
+    "true_root": "ElectrolyteImbalance",
+    "true_mechanism_proxy": "TissuePerfusionIndex",
+    "confounded_decoys": [
+      "BodyTemperature",
+      "HeartRate"
+    ],
+    "targeted_actuator": "Deprescribe",
+    "symptom_trap_actuator": "Deprescribe",
+    "co_actuators": null,
+    "selection_decoy": null,
+    "_selection_nodes": [],
+    "subtype_policy": null,
+    "latent_plain_name": "a hidden electrolyte imbalance that propagates through metabolic stress, organ perfusion, immune exhaustion to the outcome",
+    "naive_interventions": [
+      {
+        "FluidInfusionRate": 100
+      },
+      {
+        "set_SedationLevel": 100
+      },
+      {
+        "set_RoomOccupancy": 100
+      }
+    ],
+    "_features": [
+      "interior_dose",
+      "sign_flip"
+    ],
+    "_skin": "clinical",
+    "_depth": 3,
+    "_archetype": "confounded_chain",
+    "_seed": 7000005
+  },
+  "oracle": {
+    "gold": {
+      "intervention": {
+        "FluidInfusionRate": 0.0,
+        "Deprescribe": 66.0
+      },
+      "expected_utility": 16.445444262135386,
+      "baseline_utility": 10.54961758707887,
+      "active_actuators": [
+        "FluidInfusionRate",
+        "Deprescribe"
+      ]
+    },
+    "counterfactual_battery": {
+      "true_mechanism_proxy": "TissuePerfusionIndex",
+      "valid_mechanism_proxies": [
+        "TissuePerfusionIndex"
+      ],
+      "lenient_mechanism_proxies": [
+        "TissuePerfusionIndex"
+      ],
+      "confounded_decoys": [
+        "BodyTemperature",
+        "HeartRate"
+      ],
+      "actuator_sign_predictions": {
+        "FluidInfusionRate": "-",
+        "Deprescribe": "-",
+        "set_SedationLevel": "0",
+        "set_RoomOccupancy": "0",
+        "set_SleepHours": "0",
+        "set_UrineOutput": "0",
+        "set_VisitorFrequency": "0"
+      },
+      "targeted_actuator": "Deprescribe",
+      "symptom_trap_actuator": "Deprescribe"
+    },
+    "calibration": {
+      "proxy_assay_noise": 8.33,
+      "proxy_corr": 0.516,
+      "decoy_corr": 0.383
+    },
+    "audits": {
+      "decoy": {
+        "passed": true,
+        "decoys": {
+          "BodyTemperature": {
+            "obs_corr": 0.383,
+            "clamp_do_effect": 0.0,
+            "ok": true
+          },
+          "HeartRate": {
+            "obs_corr": 0.39,
+            "clamp_do_effect": 0.0,
+            "ok": true
+          }
+        }
+      },
+      "proxy_signal": {
+        "passed": true,
+        "proxy_outcome_corr": -0.516,
+        "obs_ok": true,
+        "interventional_shift_sd": 0.56,
+        "interv_ok": false,
+        "band": [
+          0.35,
+          0.75
+        ]
+      },
+      "distractor_inertness": {
+        "passed": true,
+        "n_inert_checked": 5,
+        "violations": []
+      },
+      "gold_selfconsistency": {
+        "passed": true,
+        "gold_utility": 16.45,
+        "beating_perturbations": []
+      },
+      "counterintuitiveness": {
+        "passed": true,
+        "baseline_utility": 10.54,
+        "gold_utility": 16.45,
+        "naive_results": [
+          {
+            "naive": {
+              "FluidInfusionRate": 100
+            },
+            "utility": -24.0,
+            "gain_over_baseline": -34.53,
+            "fraction_of_gold_benefit": -5.843,
+            "helps": false
+          },
+          {
+            "naive": {
+              "set_SedationLevel": 100
+            },
+            "utility": 10.54,
+            "gain_over_baseline": 0.0,
+            "fraction_of_gold_benefit": 0.0,
+            "helps": false
+          },
+          {
+            "naive": {
+              "set_RoomOccupancy": 100
+            },
+            "utility": 10.54,
+            "gain_over_baseline": 0.0,
+            "fraction_of_gold_benefit": 0.0,
+            "helps": false
+          }
+        ],
+        "note": "obvious first move must not meaningfully help"
+      }
+    }
+  }
+}

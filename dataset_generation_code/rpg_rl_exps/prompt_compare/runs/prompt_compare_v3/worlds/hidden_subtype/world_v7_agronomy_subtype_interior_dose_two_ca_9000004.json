@@ -1,0 +1,754 @@
+{
+  "schema_version": "rpg_scm_v7",
+  "world_id": "v7_agronomy_subtype_interior_dose_two_ca_9000004",
+  "domain": "agronomy",
+  "meta": {
+    "seed": 9000004,
+    "features": [
+      "interior_dose",
+      "two_cause"
+    ],
+    "skin": "agronomy",
+    "depth": 2
+  },
+  "scenario": "A commercial greenhouse tomato operation growing vine tomatoes has seen marketable yield fall about 30% over two growing cycles, and the shortfall has repeated across successive plantings. The decline set in after a switch to a new irrigation-water source following a well upgrade. The agronomists' leading theories are under-watering or a nitrogen shortfall, so they are considering more water and feed. New leaves have looked paler than usual between the veins. Routine soil and tissue panels read broadly within range. The irrigation, fertigation, and amendment dosing are all adjustable, and dosing and amendment equipment is available. You have a limited number of experiments; you may measure quantities and apply available controls or amendments, alone or in combination. Determine what is really driving the loss and what to do about it.",
+  "scm": {
+    "variables": {
+      "MicronutrientLockoutSusceptibility": {
+        "aliases": [
+          "susceptibility",
+          "batch susceptibility"
+        ],
+        "kind": "latent",
+        "dist": {
+          "normal": [
+            55,
+            20
+          ]
+        }
+      },
+      "PlantingCohort": {
+        "aliases": [
+          "planting cohort",
+          "transplant batch",
+          "crop age"
+        ],
+        "kind": "latent",
+        "dist": {
+          "normal": [
+            50,
+            16
+          ]
+        }
+      },
+      "FertigationRate": {
+        "aliases": [
+          "fertigation rate",
+          "nutrient feed rate"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            40,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "SoilPotassium": {
+        "aliases": [
+          "soil potassium",
+          "potash level"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            20,
+            8
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "MicronutrientLockout": {
+        "aliases": [
+          "micronutrient lockout",
+          "trace-nutrient lockout",
+          "nutrient unavailability"
+        ],
+        "kind": "latent",
+        "parents": [
+          "FertigationRate",
+          "SoilPotassium"
+        ],
+        "mech": {
+          "form": "gated_and",
+          "a": "FertigationRate",
+          "b": "SoilPotassium",
+          "ta": 55,
+          "tb": 55,
+          "wa": 9,
+          "wb": 9,
+          "vmax": 55.0,
+          "intercept": 3.0,
+          "ma": 20.0,
+          "mb": 20.0
+        }
+      },
+      "ChlorophyllSynthesis": {
+        "aliases": [
+          "chlorophyll synthesis",
+          "greening capacity"
+        ],
+        "kind": "latent",
+        "parents": [
+          "MicronutrientLockout"
+        ],
+        "mech": {
+          "form": "hill",
+          "of": "MicronutrientLockout",
+          "vmax": 70,
+          "k": 35,
+          "n": 2
+        }
+      },
+      "SugarTranslocation": {
+        "aliases": [
+          "sugar translocation",
+          "photosynthate transport"
+        ],
+        "kind": "latent",
+        "parents": [
+          "ChlorophyllSynthesis"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "ChlorophyllSynthesis": 0.9
+          },
+          "intercept": 5
+        }
+      },
+      "CO2EnrichmentSubtype": {
+        "aliases": [
+          "patient subtype",
+          "hidden subtype",
+          "responder class"
+        ],
+        "kind": "latent",
+        "dist": {
+          "normal": [
+            50.0,
+            18
+          ]
+        }
+      },
+      "RowSpacing": {
+        "aliases": [
+          "row spacing",
+          "plant density"
+        ],
+        "kind": "observable",
+        "parents": [
+          "CO2EnrichmentSubtype"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "CO2EnrichmentSubtype": 1.0
+          },
+          "intercept": 0
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            6
+          ]
+        }
+      },
+      "CO2EnrichmentDose": {
+        "aliases": [
+          "co2 enrichment dose"
+        ],
+        "kind": "latent",
+        "dist": {
+          "normal": [
+            0,
+            0
+          ]
+        }
+      },
+      "CO2EnrichmentResponse": {
+        "aliases": [
+          "treatment response"
+        ],
+        "kind": "latent",
+        "parents": [
+          "CO2EnrichmentDose",
+          "CO2EnrichmentSubtype"
+        ],
+        "mech": {
+          "form": "subtype_effect",
+          "dose": "CO2EnrichmentDose",
+          "subtype": "CO2EnrichmentSubtype",
+          "center": 50.0,
+          "gain": 46.0,
+          "scale": 100.0
+        }
+      },
+      "UnderlyingCropYield": {
+        "aliases": [
+          "underlying true objective"
+        ],
+        "kind": "latent",
+        "parents": [
+          "SugarTranslocation",
+          "PlantingCohort",
+          "CO2EnrichmentResponse"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "SugarTranslocation": 0.9,
+            "PlantingCohort": 0.2,
+            "CO2EnrichmentResponse": 1.0
+          },
+          "intercept": 8
+        }
+      },
+      "CropYield": {
+        "aliases": [
+          "crop yield",
+          "marketable yield",
+          "harvest yield",
+          "yield"
+        ],
+        "kind": "outcome",
+        "parents": [
+          "UnderlyingCropYield"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "UnderlyingCropYield": 1.0
+          },
+          "intercept": 0
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "LeafGreenness": {
+        "aliases": [
+          "leaf greenness",
+          "spad reading",
+          "chlorophyll index"
+        ],
+        "kind": "observable",
+        "parents": [
+          "SugarTranslocation"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "SugarTranslocation": 0.8
+          },
+          "intercept": 5
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            2.38
+          ]
+        }
+      },
+      "CanopyTemp": {
+        "aliases": [
+          "canopy temperature",
+          "leaf surface temp"
+        ],
+        "kind": "observable",
+        "parents": [
+          "PlantingCohort"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "PlantingCohort": 0.7
+          },
+          "intercept": 40
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            4
+          ]
+        }
+      },
+      "PollinatorActivity": {
+        "aliases": [
+          "pollinator activity",
+          "bee visits"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "GrowthRegulator": {
+        "aliases": [
+          "growth regulator",
+          "plant hormone spray"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "NightTemperature": {
+        "aliases": [
+          "night temperature",
+          "nocturnal temp"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "PruningIntensity": {
+        "aliases": [
+          "pruning intensity",
+          "canopy pruning"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "SoilPhosphorus": {
+        "aliases": [
+          "soil phosphorus",
+          "phosphate level"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "MulchDepth": {
+        "aliases": [
+          "mulch depth",
+          "ground cover"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "SoilOrganicMatter": {
+        "aliases": [
+          "soil organic matter",
+          "humus content"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "SeedTreatment": {
+        "aliases": [
+          "seed treatment",
+          "seed coating"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      }
+    },
+    "actuators": {
+      "FertigationRate": {
+        "aliases": [
+          "fertigation rate",
+          "nutrient feed rate"
+        ],
+        "target": "FertigationRate",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 40,
+        "description": "controller for FertigationRate"
+      },
+      "SoilPotassium": {
+        "aliases": [
+          "soil potassium",
+          "potash level"
+        ],
+        "target": "SoilPotassium",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 20,
+        "description": "controller for SoilPotassium"
+      },
+      "CO2Enrichment": {
+        "aliases": [
+          "co2 enrichment",
+          "carbon dioxide dosing"
+        ],
+        "target": "CO2EnrichmentDose",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 0,
+        "description": "apply the co2 enrichment treatment"
+      },
+      "set_PollinatorActivity": {
+        "aliases": [
+          "set pollinator activity",
+          "set bee visits",
+          "adjust PollinatorActivity"
+        ],
+        "target": "PollinatorActivity",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for PollinatorActivity"
+      },
+      "set_GrowthRegulator": {
+        "aliases": [
+          "set growth regulator",
+          "set plant hormone spray",
+          "adjust GrowthRegulator"
+        ],
+        "target": "GrowthRegulator",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for GrowthRegulator"
+      },
+      "set_NightTemperature": {
+        "aliases": [
+          "set night temperature",
+          "set nocturnal temp",
+          "adjust NightTemperature"
+        ],
+        "target": "NightTemperature",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for NightTemperature"
+      },
+      "set_PruningIntensity": {
+        "aliases": [
+          "set pruning intensity",
+          "set canopy pruning",
+          "adjust PruningIntensity"
+        ],
+        "target": "PruningIntensity",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for PruningIntensity"
+      }
+    },
+    "outcome": "CropYield",
+    "higher_is_better": true,
+    "goal": "UnderlyingCropYield"
+  },
+  "ground_truth": {
+    "true_root": "MicronutrientLockout",
+    "true_mechanism_proxy": "LeafGreenness",
+    "confounded_decoys": [
+      "CanopyTemp"
+    ],
+    "targeted_actuator": "CO2Enrichment",
+    "symptom_trap_actuator": "FertigationRate",
+    "co_actuators": [
+      "FertigationRate",
+      "SoilPotassium"
+    ],
+    "selection_decoy": null,
+    "_selection_nodes": [],
+    "subtype_policy": {
+      "subtype": "CO2EnrichmentSubtype",
+      "marker": "RowSpacing",
+      "dose": "CO2EnrichmentDose",
+      "treatment_actuator": "CO2Enrichment",
+      "response": "CO2EnrichmentResponse",
+      "center": 50.0
+    },
+    "latent_plain_name": "a hidden micronutrient lockout that propagates through chlorophyll synthesis, sugar translocation to the outcome",
+    "naive_interventions": [
+      {
+        "CO2Enrichment": 100
+      },
+      {
+        "set_PollinatorActivity": 100
+      },
+      {
+        "set_GrowthRegulator": 100
+      }
+    ],
+    "_features": [
+      "interior_dose",
+      "two_cause"
+    ],
+    "_skin": "agronomy",
+    "_depth": 2,
+    "_archetype": "hidden_subtype",
+    "_seed": 9000004
+  },
+  "oracle": {
+    "gold": {
+      "intervention": {
+        "FertigationRate": 100.0,
+        "SoilPotassium": 100.0,
+        "CO2Enrichment": {
+          "policy": {
+            "stratifier": "RowSpacing",
+            "threshold": 50.054,
+            "dose_if_ge": 100.0,
+            "dose_if_lt": 0.0
+          }
+        }
+      },
+      "policy": {
+        "marker": "RowSpacing",
+        "threshold": 50.054,
+        "dose_if_ge": 100.0,
+        "dose_if_lt": 0.0
+      },
+      "base_intervention": {
+        "FertigationRate": 100.0,
+        "SoilPotassium": 100.0
+      },
+      "expected_utility": 95.49802603103366,
+      "baseline_utility": 26.000705321493527,
+      "active_actuators": [
+        "FertigationRate",
+        "SoilPotassium"
+      ],
+      "is_conditional_policy": true
+    },
+    "counterfactual_battery": {
+      "true_mechanism_proxy": "LeafGreenness",
+      "valid_mechanism_proxies": [
+        "LeafGreenness"
+      ],
+      "lenient_mechanism_proxies": [
+        "LeafGreenness"
+      ],
+      "confounded_decoys": [
+        "CanopyTemp"
+      ],
+      "actuator_sign_predictions": {
+        "FertigationRate": "+",
+        "SoilPotassium": "+",
+        "CO2Enrichment": "0",
+        "set_PollinatorActivity": "0",
+        "set_GrowthRegulator": "0",
+        "set_NightTemperature": "0",
+        "set_PruningIntensity": "0"
+      },
+      "targeted_actuator": "CO2Enrichment",
+      "symptom_trap_actuator": "FertigationRate"
+    },
+    "calibration": {
+      "proxy_assay_noise": 2.38,
+      "proxy_corr": 0.474,
+      "decoy_corr": 0.546
+    },
+    "audits": {
+      "decoy": {
+        "passed": true,
+        "decoys": {
+          "CanopyTemp": {
+            "obs_corr": 0.546,
+            "clamp_do_effect": 0.0,
+            "ok": true
+          }
+        }
+      },
+      "proxy_signal": {
+        "passed": true,
+        "proxy_outcome_corr": 0.485,
+        "obs_ok": true,
+        "interventional_shift_sd": 10.73,
+        "interv_ok": true,
+        "band": [
+          0.35,
+          0.75
+        ]
+      },
+      "distractor_inertness": {
+        "passed": true,
+        "n_inert_checked": 5,
+        "violations": []
+      },
+      "gold_selfconsistency": {
+        "passed": true,
+        "gold_utility": 95.5,
+        "beating_perturbations": []
+      },
+      "counterintuitiveness": {
+        "passed": true,
+        "baseline_utility": 26.03,
+        "gold_utility": 95.5,
+        "naive_results": [
+          {
+            "naive": {
+              "CO2Enrichment": 100
+            },
+            "utility": 25.85,
+            "gain_over_baseline": -0.19,
+            "fraction_of_gold_benefit": -0.003,
+            "helps": false
+          },
+          {
+            "naive": {
+              "set_PollinatorActivity": 100
+            },
+            "utility": 26.03,
+            "gain_over_baseline": 0.0,
+            "fraction_of_gold_benefit": 0.0,
+            "helps": false
+          },
+          {
+            "naive": {
+              "set_GrowthRegulator": 100
+            },
+            "utility": 26.03,
+            "gain_over_baseline": 0.0,
+            "fraction_of_gold_benefit": 0.0,
+            "helps": false
+          }
+        ],
+        "note": "obvious first move must not meaningfully help"
+      }
+    }
+  }
+}

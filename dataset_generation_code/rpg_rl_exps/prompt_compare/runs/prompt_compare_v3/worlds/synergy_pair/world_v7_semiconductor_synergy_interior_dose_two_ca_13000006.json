@@ -1,0 +1,690 @@
+{
+  "schema_version": "rpg_scm_v7",
+  "world_id": "v7_semiconductor_synergy_interior_dose_two_ca_13000006",
+  "domain": "semiconductor",
+  "meta": {
+    "seed": 13000006,
+    "features": [
+      "interior_dose",
+      "two_cause"
+    ],
+    "skin": "semiconductor",
+    "depth": 3
+  },
+  "scenario": "A high-volume 300 mm logic fab making a mature logic device has seen functional die yield drop about 20% over the past six weeks, holding low across many lots. The dip began after a scheduled preventive-maintenance window on the etch and deposition tools. Process engineers' leading theories are a pressure or temperature setpoint drift, so they favor retuning those setpoints. Inline inspection has flagged more defects than usual on a mid-line layer. Standard tool logs read broadly within spec. The etch, deposition, clean, and filtration modules are all adjustable. You have a limited number of experiments; you may measure quantities and apply available process controls, alone or in combination. Determine what is really driving the loss and what to do about it.",
+  "scm": {
+    "variables": {
+      "MetalContaminationSusceptibility": {
+        "aliases": [
+          "susceptibility",
+          "batch susceptibility"
+        ],
+        "kind": "latent",
+        "dist": {
+          "normal": [
+            55,
+            20
+          ]
+        }
+      },
+      "ChamberAge": {
+        "aliases": [
+          "chamber age",
+          "tool hours since service"
+        ],
+        "kind": "latent",
+        "dist": {
+          "normal": [
+            50,
+            16
+          ]
+        }
+      },
+      "EtchPower": {
+        "aliases": [
+          "etch power",
+          "rf power",
+          "plasma power"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            40,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "HumidityFab": {
+        "aliases": [
+          "fab humidity",
+          "cleanroom humidity"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            20,
+            8
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "MetalContamination": {
+        "aliases": [
+          "metallic contamination",
+          "trace-metal contamination",
+          "metal ion contamination"
+        ],
+        "kind": "latent",
+        "parents": [
+          "EtchPower",
+          "HumidityFab"
+        ],
+        "mech": {
+          "form": "gated_and",
+          "a": "EtchPower",
+          "b": "HumidityFab",
+          "ta": 55,
+          "tb": 55,
+          "wa": 9,
+          "wb": 9,
+          "vmax": 55.0,
+          "intercept": 3.0,
+          "ma": 20.0,
+          "mb": 20.0
+        }
+      },
+      "ThresholdShift": {
+        "aliases": [
+          "threshold-voltage shift",
+          "vt shift"
+        ],
+        "kind": "latent",
+        "parents": [
+          "MetalContamination"
+        ],
+        "mech": {
+          "form": "hill",
+          "of": "MetalContamination",
+          "vmax": 70,
+          "k": 35,
+          "n": 2
+        }
+      },
+      "JunctionLeakage": {
+        "aliases": [
+          "junction leakage",
+          "leakage paths"
+        ],
+        "kind": "latent",
+        "parents": [
+          "ThresholdShift"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "ThresholdShift": 0.9
+          },
+          "intercept": 5
+        }
+      },
+      "DielectricBreakdown": {
+        "aliases": [
+          "dielectric breakdown",
+          "insulation failure"
+        ],
+        "kind": "latent",
+        "parents": [
+          "JunctionLeakage"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "JunctionLeakage": 0.9
+          },
+          "intercept": 5
+        }
+      },
+      "UnderlyingWaferYield": {
+        "aliases": [
+          "underlying true objective"
+        ],
+        "kind": "latent",
+        "parents": [
+          "DielectricBreakdown",
+          "ChamberAge"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "DielectricBreakdown": 0.9,
+            "ChamberAge": 0.1
+          },
+          "intercept": 8
+        }
+      },
+      "WaferYield": {
+        "aliases": [
+          "wafer yield",
+          "die yield",
+          "functional yield",
+          "yield"
+        ],
+        "kind": "outcome",
+        "parents": [
+          "UnderlyingWaferYield"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "UnderlyingWaferYield": 1.0
+          },
+          "intercept": 0
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "FilmUniformityIndex": {
+        "aliases": [
+          "film uniformity index",
+          "step coverage index",
+          "planarization quality"
+        ],
+        "kind": "observable",
+        "parents": [
+          "JunctionLeakage"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "JunctionLeakage": 0.8
+          },
+          "intercept": 5
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            2.02
+          ]
+        }
+      },
+      "ChamberPressure": {
+        "aliases": [
+          "chamber pressure",
+          "process pressure"
+        ],
+        "kind": "observable",
+        "parents": [
+          "ChamberAge"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "ChamberAge": 0.7
+          },
+          "intercept": 40
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            4
+          ]
+        }
+      },
+      "BakeTemperature": {
+        "aliases": [
+          "bake temperature",
+          "soft-bake temp"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "GasFlowArgon": {
+        "aliases": [
+          "argon flow",
+          "carrier gas flow"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "ExposureDose": {
+        "aliases": [
+          "exposure dose",
+          "litho dose"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "SlurryConcentration": {
+        "aliases": [
+          "slurry concentration",
+          "cmp slurry"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "RinseTime": {
+        "aliases": [
+          "rinse time",
+          "dhf rinse"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "PadConditioning": {
+        "aliases": [
+          "pad conditioning",
+          "cmp pad wear"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "ScannerFocus": {
+        "aliases": [
+          "scanner focus",
+          "focus offset"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "HandlerThroughput": {
+        "aliases": [
+          "handler throughput",
+          "tool cadence"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "BacksideCooling": {
+        "aliases": [
+          "backside cooling",
+          "helium cooling"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "VibrationLevel": {
+        "aliases": [
+          "vibration level",
+          "tool vibration"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      }
+    },
+    "actuators": {
+      "EtchPower": {
+        "aliases": [
+          "etch power",
+          "rf power",
+          "plasma power"
+        ],
+        "target": "EtchPower",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 40,
+        "description": "controller for EtchPower"
+      },
+      "HumidityFab": {
+        "aliases": [
+          "fab humidity",
+          "cleanroom humidity"
+        ],
+        "target": "HumidityFab",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 20,
+        "description": "controller for HumidityFab"
+      },
+      "set_BakeTemperature": {
+        "aliases": [
+          "set bake temperature",
+          "set soft-bake temp",
+          "adjust BakeTemperature"
+        ],
+        "target": "BakeTemperature",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for BakeTemperature"
+      },
+      "set_GasFlowArgon": {
+        "aliases": [
+          "set argon flow",
+          "set carrier gas flow",
+          "adjust GasFlowArgon"
+        ],
+        "target": "GasFlowArgon",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for GasFlowArgon"
+      },
+      "set_ExposureDose": {
+        "aliases": [
+          "set exposure dose",
+          "set litho dose",
+          "adjust ExposureDose"
+        ],
+        "target": "ExposureDose",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for ExposureDose"
+      },
+      "set_SlurryConcentration": {
+        "aliases": [
+          "set slurry concentration",
+          "set cmp slurry",
+          "adjust SlurryConcentration"
+        ],
+        "target": "SlurryConcentration",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for SlurryConcentration"
+      }
+    },
+    "outcome": "WaferYield",
+    "higher_is_better": true,
+    "goal": "UnderlyingWaferYield"
+  },
+  "ground_truth": {
+    "true_root": "MetalContamination",
+    "true_mechanism_proxy": "FilmUniformityIndex",
+    "confounded_decoys": [
+      "ChamberPressure"
+    ],
+    "targeted_actuator": "EtchPower",
+    "symptom_trap_actuator": "EtchPower",
+    "co_actuators": [
+      "EtchPower",
+      "HumidityFab"
+    ],
+    "selection_decoy": null,
+    "_selection_nodes": [],
+    "subtype_policy": null,
+    "latent_plain_name": "a hidden metallic contamination that propagates through threshold-voltage shift, junction leakage, dielectric breakdown to the outcome",
+    "naive_interventions": [
+      {
+        "set_BakeTemperature": 100
+      },
+      {
+        "set_GasFlowArgon": 100
+      }
+    ],
+    "_features": [
+      "interior_dose",
+      "two_cause"
+    ],
+    "_skin": "semiconductor",
+    "_depth": 3,
+    "_archetype": "synergy_pair",
+    "_seed": 13000006
+  },
+  "oracle": {
+    "gold": {
+      "intervention": {
+        "EtchPower": 100.0,
+        "HumidityFab": 100.0
+      },
+      "expected_utility": 66.69908572307614,
+      "baseline_utility": 24.70245708449002,
+      "active_actuators": [
+        "EtchPower",
+        "HumidityFab"
+      ]
+    },
+    "counterfactual_battery": {
+      "true_mechanism_proxy": "FilmUniformityIndex",
+      "valid_mechanism_proxies": [
+        "EtchPower",
+        "FilmUniformityIndex"
+      ],
+      "lenient_mechanism_proxies": [
+        "EtchPower",
+        "FilmUniformityIndex"
+      ],
+      "confounded_decoys": [
+        "ChamberPressure"
+      ],
+      "actuator_sign_predictions": {
+        "EtchPower": "+",
+        "HumidityFab": "+",
+        "set_BakeTemperature": "0",
+        "set_GasFlowArgon": "0",
+        "set_ExposureDose": "0",
+        "set_SlurryConcentration": "0"
+      },
+      "targeted_actuator": "EtchPower",
+      "symptom_trap_actuator": "EtchPower"
+    },
+    "calibration": {
+      "proxy_assay_noise": 2.02,
+      "proxy_corr": 0.55,
+      "decoy_corr": 0.332
+    },
+    "audits": {
+      "decoy": {
+        "passed": true,
+        "decoys": {
+          "ChamberPressure": {
+            "obs_corr": 0.332,
+            "clamp_do_effect": 0.0,
+            "ok": true
+          }
+        }
+      },
+      "proxy_signal": {
+        "passed": true,
+        "proxy_outcome_corr": 0.56,
+        "obs_ok": true,
+        "interventional_shift_sd": 11.35,
+        "interv_ok": true,
+        "band": [
+          0.35,
+          0.75
+        ]
+      },
+      "distractor_inertness": {
+        "passed": true,
+        "n_inert_checked": 4,
+        "violations": []
+      },
+      "gold_selfconsistency": {
+        "passed": true,
+        "gold_utility": 66.7,
+        "beating_perturbations": []
+      },
+      "counterintuitiveness": {
+        "passed": true,
+        "baseline_utility": 24.73,
+        "gold_utility": 66.7,
+        "naive_results": [
+          {
+            "naive": {
+              "set_BakeTemperature": 100
+            },
+            "utility": 24.73,
+            "gain_over_baseline": 0.0,
+            "fraction_of_gold_benefit": 0.0,
+            "helps": false
+          },
+          {
+            "naive": {
+              "set_GasFlowArgon": 100
+            },
+            "utility": 24.73,
+            "gain_over_baseline": 0.0,
+            "fraction_of_gold_benefit": 0.0,
+            "helps": false
+          }
+        ],
+        "note": "obvious first move must not meaningfully help"
+      }
+    }
+  }
+}

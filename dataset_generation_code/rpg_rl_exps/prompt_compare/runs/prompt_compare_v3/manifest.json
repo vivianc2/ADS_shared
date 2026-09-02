@@ -1,0 +1,998 @@
+{
+  "schema_version": "prompt_compare_v3",
+  "run_id": "prompt_compare_v3",
+  "created_at": "2026-09-01T10:43:38.831420+00:00",
+  "science": {
+    "schema_version": "prompt_compare_v3",
+    "master_seed": 7000000,
+    "rpg_proto": "rpg_v9",
+    "rpg_synergy_soft": 20,
+    "model": "Qwen/Qwen3.5-9B",
+    "served_model_name": "Qwen/Qwen3.5-9B",
+    "chat_template": "model default via vLLM OpenAI chat API",
+    "conversation": {
+      "history_mode": "full_episode_openai_messages",
+      "assistant_message_source": "environment_parser_input",
+      "input_length_policy": "client_chat_template_stop_before_request",
+      "context_overflow": "recorded_zero_reward_server_fallback_no_retry"
+    },
+    "inference": {
+      "dtype": "bfloat16",
+      "max_model_len": 32768,
+      "disable_multimodal": true
+    },
+    "sampling": {
+      "max_input_tokens": 18432,
+      "max_tokens": 8192,
+      "temperature": 1.0,
+      "top_p": 1.0,
+      "top_k": -1,
+      "min_p": 0.0,
+      "chat_template_kwargs": {
+        "enable_thinking": true
+      }
+    },
+    "environment": {
+      "budget": 15,
+      "max_turns": 32,
+      "catalog_seed": "world generation seed"
+    },
+    "expected": {
+      "smoke_test": false,
+      "worlds_per_archetype": 10,
+      "worlds": 90,
+      "configurations": 9,
+      "prompt_configurations": 3,
+      "reward_configurations": 3,
+      "rollouts_per_group": 8,
+      "episodes": 2160,
+      "reward_evaluations": 6480
+    },
+    "archetypes": [
+      "confounded_chain",
+      "collider_selection",
+      "hidden_subtype",
+      "surrogate_trap",
+      "instrument_only",
+      "competing_causes",
+      "synergy_pair",
+      "dose_window",
+      "confounded_reversal"
+    ],
+    "prompts": [
+      {
+        "prompt_id": "p1",
+        "system_prompt": "You are a scientist diagnosing a failing industrial system. You interact ONLY through the catalog of ids given each turn — every measurement, control, and answer refers to those ids (m0, m1, ... for measurable signals; a0, a1, ... for controls). You do NOT know which signal or control matters; you must find out from data by measuring and (crucially) by intervening.\n\nEach turn, output exactly:\n<reasoning>your scientific thinking</reasoning>\n<action type=\"measure|intervene|code|answer|give_up\">JSON</action>\n<memory>notes to carry forward</memory>\n\nAction payloads (JSON, ids only):\n- measure:   {\"ids\": [\"m3\",\"m0\"]}                         # read those signals\n- intervene: {\"actions\":[{\"actuator\":\"a2\",\"value\":66}], \"measure\":[\"m3\"]}   # set controls, then read\n- code:      raw Python analysis; does not cost budget. Each experiment's data is preloaded as a pandas DataFrame named experiment_<n>_df (use it directly, e.g. experiment_1_df.describe()); its file path is also available as experiment_<n>_csv. pandas as pd, numpy as np, scipy.stats as stats are imported. Each code turn runs in a FRESH namespace — the experiment_<n>_df variables are always available, but variables you define do NOT persist to the next code turn, so recompute what you need.\n- answer:    {\"actions\":[{\"actuator\":\"a2\",\"value\":66}],\n              \"policy\":{\"treatment\":\"a2\",\"stratifier\":\"m1\",\"threshold\":50,\"dose_if_ge\":100,\"dose_if_lt\":0},\n              \"proxy\":\"m3\", \"decoys\":[\"m0\"], \"signs\":{\"a2\":\"+\"}}\n- give_up:   {}\n\nObservation and code alone CANNOT establish causation — you must INTERVENE to test a cause and find what improves the outcome. Submit \"answer\" once you know the fix AND the mechanism (which signal is the true proxy, which are decoys, and each control's effect sign +/-/0). For a world where a treatment helps only a sub-population, use \"policy\" to stratify on the marker signal.\n\nCRUCIAL — the reported OUTCOME OF INTEREST is a SURROGATE metric that can be gamed: some controls raise this reading WITHOUT fixing the underlying problem. You are judged on the TRUE underlying objective the metric reflects, not the metric itself. So do not trust a control just because the outcome reading went up — verify it actually changed the CAUSE (the mechanism proxy moves), not only the surrogate. When you report a control's effect sign (+/-/0), report its effect on the TRUE OBJECTIVE, not on the observed metric: a control that only lifts the reading without changing the cause has sign 0, and recommending it as the fix is wrong.\n",
+        "prompt_sha256": "27ad9561715a46f1d3cf56d1e8b5ccb1d66cc43769798dbab2659d80aecd2a2e"
+      },
+      {
+        "prompt_id": "p2",
+        "system_prompt": "You are a scientist diagnosing a failing industrial system. You interact ONLY through the catalog of ids given each turn — every measurement, control, and answer refers to those ids (m0, m1, ... for measurable signals; a0, a1, ... for controls). You do NOT know which signal or control matters; you must find out from data by measuring and (crucially) by intervening.\n\nEach turn, output exactly:\n<reasoning>your scientific thinking</reasoning>\n<action type=\"measure|intervene|code|answer|give_up\">JSON</action>\n<memory>notes to carry forward</memory>\n\nAction payloads (JSON, ids only):\n- measure:   {\"ids\": [\"m3\",\"m0\"]}                         # read those signals\n- intervene: {\"actions\":[{\"actuator\":\"a2\",\"value\":66}], \"measure\":[\"m3\"]}   # set controls, then read\n- code:      raw Python analysis; does not cost budget. Each experiment's data is preloaded as a pandas DataFrame named experiment_<n>_df (use it directly, e.g. experiment_1_df.describe()); its file path is also available as experiment_<n>_csv. pandas as pd, numpy as np, scipy.stats as stats are imported. Each code turn runs in a FRESH namespace — the experiment_<n>_df variables are always available, but variables you define do NOT persist to the next code turn, so recompute what you need.\n- answer:    {\"actions\":[{\"actuator\":\"a2\",\"value\":66}],\n              \"policy\":{\"treatment\":\"a2\",\"stratifier\":\"m1\",\"threshold\":50,\"dose_if_ge\":100,\"dose_if_lt\":0},\n              \"proxy\":\"m3\", \"decoys\":[\"m0\"], \"signs\":{\"a2\":\"+\"}}\n- give_up:   {}\n\nObservation and code alone CANNOT establish causation — you must INTERVENE to test a cause and find what improves the outcome. Submit \"answer\" once you know the fix AND the mechanism (which signal is the true proxy, which are decoys, and each control's effect sign +/-/0). For a world where a treatment helps only a sub-population, use \"policy\" to stratify on the marker signal.\n\nDo not trust a control just because the outcome reading went up — verify it actually changed the CAUSE (the mechanism proxy moves). A control that only lifts the reading without changing the cause has sign 0, and recommending it as the fix is wrong.\n",
+        "prompt_sha256": "bd3fb7d0da614f9bbf048e6d4a5d73c2cd48d6ed575a9a92496e508f78e3f745"
+      },
+      {
+        "prompt_id": "p3",
+        "system_prompt": "You are a scientist diagnosing a failing industrial system. You interact ONLY through the catalog of ids given each turn — every measurement, control, and answer refers to those ids (m0, m1, ... for measurable signals; a0, a1, ... for controls). You do NOT know which signal or control matters; you must find out from data by measuring and (crucially) by intervening.\n\nEach turn, output exactly:\n<reasoning>your scientific thinking</reasoning>\n<action type=\"measure|intervene|code|answer|give_up\">JSON</action>\n<memory>notes to carry forward</memory>\n\nAction payloads (JSON, ids only):\n- measure:   {\"ids\": [\"m3\",\"m0\"]}                         # read those signals\n- intervene: {\"actions\":[{\"actuator\":\"a2\",\"value\":66}], \"measure\":[\"m3\"]}   # set controls, then read\n- code:      raw Python analysis; does not cost budget. Each experiment's data is preloaded as a pandas DataFrame named experiment_<n>_df (use it directly, e.g. experiment_1_df.describe()); its file path is also available as experiment_<n>_csv. pandas as pd, numpy as np, scipy.stats as stats are imported. Each code turn runs in a FRESH namespace — the experiment_<n>_df variables are always available, but variables you define do NOT persist to the next code turn, so recompute what you need.\n- answer:    {\"actions\":[{\"actuator\":\"a2\",\"value\":66}],\n              \"policy\":{\"treatment\":\"a2\",\"stratifier\":\"m1\",\"threshold\":50,\"dose_if_ge\":100,\"dose_if_lt\":0},\n              \"proxy\":\"m3\", \"decoys\":[\"m0\"], \"signs\":{\"a2\":\"+\"}}\n- give_up:   {}\n\nObservation and code alone CANNOT establish causation — you must INTERVENE to test a cause and find what improves the outcome. Submit \"answer\" once you know the fix AND the mechanism (which signal is the true proxy, which are decoys, and each control's effect sign +/-/0). For a world where a treatment helps only a sub-population, use \"policy\" to stratify on the marker signal.\n",
+        "prompt_sha256": "fd140d7779cc9b1d3397059c771b87b017e664c9811989851ec714d79f47ef83"
+      }
+    ],
+    "configurations": [
+      {
+        "config_id": "p1_r1",
+        "prompt_id": "p1",
+        "reward_id": "r1",
+        "prompt_sha256": "27ad9561715a46f1d3cf56d1e8b5ccb1d66cc43769798dbab2659d80aecd2a2e",
+        "reward_sha256": "ac335069243763137d0d67012708d5949ff3a38e5dbb7670ae11e2a3c2972826",
+        "reward_description": "current: 0.5 * part_a + 0.5 * part_b - 0.25 * invalid_id_fraction"
+      },
+      {
+        "config_id": "p1_r2",
+        "prompt_id": "p1",
+        "reward_id": "r2",
+        "prompt_sha256": "27ad9561715a46f1d3cf56d1e8b5ccb1d66cc43769798dbab2659d80aecd2a2e",
+        "reward_sha256": "03ec37fab82273bd1be997f31cb0e8722d3032456ce7b42acc1e71379f7df757",
+        "reward_description": "part_a - 0.25 * invalid_id_fraction"
+      },
+      {
+        "config_id": "p1_r3",
+        "prompt_id": "p1",
+        "reward_id": "r3",
+        "prompt_sha256": "27ad9561715a46f1d3cf56d1e8b5ccb1d66cc43769798dbab2659d80aecd2a2e",
+        "reward_sha256": "fb9f594b197ea1a2d5572b272ccc3a1d5cabbda18ba5084d45427ba5c930df1a",
+        "reward_description": "part_b - 0.25 * invalid_id_fraction"
+      },
+      {
+        "config_id": "p2_r1",
+        "prompt_id": "p2",
+        "reward_id": "r1",
+        "prompt_sha256": "bd3fb7d0da614f9bbf048e6d4a5d73c2cd48d6ed575a9a92496e508f78e3f745",
+        "reward_sha256": "ac335069243763137d0d67012708d5949ff3a38e5dbb7670ae11e2a3c2972826",
+        "reward_description": "current: 0.5 * part_a + 0.5 * part_b - 0.25 * invalid_id_fraction"
+      },
+      {
+        "config_id": "p2_r2",
+        "prompt_id": "p2",
+        "reward_id": "r2",
+        "prompt_sha256": "bd3fb7d0da614f9bbf048e6d4a5d73c2cd48d6ed575a9a92496e508f78e3f745",
+        "reward_sha256": "03ec37fab82273bd1be997f31cb0e8722d3032456ce7b42acc1e71379f7df757",
+        "reward_description": "part_a - 0.25 * invalid_id_fraction"
+      },
+      {
+        "config_id": "p2_r3",
+        "prompt_id": "p2",
+        "reward_id": "r3",
+        "prompt_sha256": "bd3fb7d0da614f9bbf048e6d4a5d73c2cd48d6ed575a9a92496e508f78e3f745",
+        "reward_sha256": "fb9f594b197ea1a2d5572b272ccc3a1d5cabbda18ba5084d45427ba5c930df1a",
+        "reward_description": "part_b - 0.25 * invalid_id_fraction"
+      },
+      {
+        "config_id": "p3_r1",
+        "prompt_id": "p3",
+        "reward_id": "r1",
+        "prompt_sha256": "fd140d7779cc9b1d3397059c771b87b017e664c9811989851ec714d79f47ef83",
+        "reward_sha256": "ac335069243763137d0d67012708d5949ff3a38e5dbb7670ae11e2a3c2972826",
+        "reward_description": "current: 0.5 * part_a + 0.5 * part_b - 0.25 * invalid_id_fraction"
+      },
+      {
+        "config_id": "p3_r2",
+        "prompt_id": "p3",
+        "reward_id": "r2",
+        "prompt_sha256": "fd140d7779cc9b1d3397059c771b87b017e664c9811989851ec714d79f47ef83",
+        "reward_sha256": "03ec37fab82273bd1be997f31cb0e8722d3032456ce7b42acc1e71379f7df757",
+        "reward_description": "part_a - 0.25 * invalid_id_fraction"
+      },
+      {
+        "config_id": "p3_r3",
+        "prompt_id": "p3",
+        "reward_id": "r3",
+        "prompt_sha256": "fd140d7779cc9b1d3397059c771b87b017e664c9811989851ec714d79f47ef83",
+        "reward_sha256": "fb9f594b197ea1a2d5572b272ccc3a1d5cabbda18ba5084d45427ba5c930df1a",
+        "reward_description": "part_b - 0.25 * invalid_id_fraction"
+      }
+    ]
+  },
+  "science_fingerprint": "c1352df4b3ea4bec508646d32a0aebc93b1bb88d9d09984f41d059172b29b34d",
+  "runtime": {
+    "gpus": [
+      "0",
+      "1",
+      "2"
+    ],
+    "ports": [
+      18005,
+      18006,
+      18007
+    ],
+    "host": "127.0.0.1",
+    "dtype": "bfloat16",
+    "max_model_len": 32768,
+    "gpu_memory_utilization": 0.8,
+    "request_timeout_s": 900,
+    "transport_retries": 3
+  },
+  "resolved_imports": {
+    "sampler": "/work/ADS_shared/dataset_generation_code/rpg_v9/sampler.py",
+    "engine": "/work/ADS_shared/dataset_generation_code/rpg_v9/engine.py",
+    "oracle_v6": "/work/ADS_shared/dataset_generation_code/rpg_v9/oracle_v6.py"
+  },
+  "world_generation": {
+    "sampler": "rpg_v9.sample_world",
+    "audit": "rpg_v9.generate_v7.audit",
+    "serialization": "rpg_v9.generate_v7.to_record",
+    "rejected_by_gate": {
+      "audit:decoy": 3
+    }
+  },
+  "worlds": [
+    {
+      "world_id": "v7_bioprocess_chain_interior_dose_7000001",
+      "archetype": "confounded_chain",
+      "skin": "bioprocess",
+      "seed": 7000001,
+      "file": "worlds/confounded_chain/world_v7_bioprocess_chain_interior_dose_7000001.json",
+      "sha256": "ea0d5825e088b541e85e3e9d52276d33d6bbed1eb8fc2d2ab8d18c47667c38e8",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_datacenter_chain__7000002",
+      "archetype": "confounded_chain",
+      "skin": "datacenter",
+      "seed": 7000002,
+      "file": "worlds/confounded_chain/world_v7_datacenter_chain__7000002.json",
+      "sha256": "427845d5ab86a51da643517ccbb43f030f76bd11969c9ab0b75e0209c7460aa9",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_watertreatment_chain_two_cause_7000003",
+      "archetype": "confounded_chain",
+      "skin": "watertreatment",
+      "seed": 7000003,
+      "file": "worlds/confounded_chain/world_v7_watertreatment_chain_two_cause_7000003.json",
+      "sha256": "a11dfb80a1e9d93ee3b30071757bc0cb5f541d79cefaeba0ea3c84370951d953",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_clinical_chain_interior_dose_sign_f_7000005",
+      "archetype": "confounded_chain",
+      "skin": "clinical",
+      "seed": 7000005,
+      "file": "worlds/confounded_chain/world_v7_clinical_chain_interior_dose_sign_f_7000005.json",
+      "sha256": "bb0eac0adbced638e0c750db5804168535f72b533929ee49d66f4fd43110a9e1",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_semiconductor_chain_interior_dose_two_ca_7000006",
+      "archetype": "confounded_chain",
+      "skin": "semiconductor",
+      "seed": 7000006,
+      "file": "worlds/confounded_chain/world_v7_semiconductor_chain_interior_dose_two_ca_7000006.json",
+      "sha256": "f24ece3d211b294c4efdded171ebc3db24d4215588c5606823b7c5dd99eb6262",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_aquaculture_chain_sign_flip_7000007",
+      "archetype": "confounded_chain",
+      "skin": "aquaculture",
+      "seed": 7000007,
+      "file": "worlds/confounded_chain/world_v7_aquaculture_chain_sign_flip_7000007.json",
+      "sha256": "311e89d8a53b7664a04c75dfb70f0b4df308b089a560753e2424c89aaa5bdb73",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_battery_chain_two_cause_7000008",
+      "archetype": "confounded_chain",
+      "skin": "battery",
+      "seed": 7000008,
+      "file": "worlds/confounded_chain/world_v7_battery_chain_two_cause_7000008.json",
+      "sha256": "1253a2594db93c5f8272f0e5dbed9ce3fc5ee4a098dd73a2edbf46b5a4d18d29",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_catalysis_chain_sign_flip_7000009",
+      "archetype": "confounded_chain",
+      "skin": "catalysis",
+      "seed": 7000009,
+      "file": "worlds/confounded_chain/world_v7_catalysis_chain_sign_flip_7000009.json",
+      "sha256": "26ddc0d6e940253410da91e0c711b1ade68859990c50672423ca43ed2077c6a4",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_fermentation_chain_interior_dose_two_ca_7000010",
+      "archetype": "confounded_chain",
+      "skin": "fermentation",
+      "seed": 7000010,
+      "file": "worlds/confounded_chain/world_v7_fermentation_chain_interior_dose_two_ca_7000010.json",
+      "sha256": "e18a1d2b17c436556f6fb4cc0ba9a5c5d8d5d4683a332e89998e2f401b06921a",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_bioprocess_chain_two_cause_7000011",
+      "archetype": "confounded_chain",
+      "skin": "bioprocess",
+      "seed": 7000011,
+      "file": "worlds/confounded_chain/world_v7_bioprocess_chain_two_cause_7000011.json",
+      "sha256": "9421c85cf632395f7f1b623bde68f334d45bd82399f89dd60f4d38c018aa7116",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_bioprocess_collider_two_cause_8000001",
+      "archetype": "collider_selection",
+      "skin": "bioprocess",
+      "seed": 8000001,
+      "file": "worlds/collider_selection/world_v7_bioprocess_collider_two_cause_8000001.json",
+      "sha256": "4cce66eb43998e897b2dbde56488ba57eccb92cad84440786388bccb09df075e",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_datacenter_collider_sign_flip_8000002",
+      "archetype": "collider_selection",
+      "skin": "datacenter",
+      "seed": 8000002,
+      "file": "worlds/collider_selection/world_v7_datacenter_collider_sign_flip_8000002.json",
+      "sha256": "7bbe7ea9030da3fdd56825eb6f64c2c5673cf7c332f44c214b54792499c6e1ef",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_watertreatment_collider__8000003",
+      "archetype": "collider_selection",
+      "skin": "watertreatment",
+      "seed": 8000003,
+      "file": "worlds/collider_selection/world_v7_watertreatment_collider__8000003.json",
+      "sha256": "c3765d935f998a0a03b724af716b03cf6e2bfb2c7a0bd54d8ae0b15a1abedea0",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_agronomy_collider_interior_dose_sign_f_8000004",
+      "archetype": "collider_selection",
+      "skin": "agronomy",
+      "seed": 8000004,
+      "file": "worlds/collider_selection/world_v7_agronomy_collider_interior_dose_sign_f_8000004.json",
+      "sha256": "bbcea73f387e1bebb8b8c1de0c37c6ac33eea9115a20d94e841ed4921b7bf049",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_clinical_collider_two_cause_8000005",
+      "archetype": "collider_selection",
+      "skin": "clinical",
+      "seed": 8000005,
+      "file": "worlds/collider_selection/world_v7_clinical_collider_two_cause_8000005.json",
+      "sha256": "2c41caa10e4bf691acf7195e77ea5b3f17c8166eabc4c2cb12e2dff96ef135a8",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_semiconductor_collider_two_cause_8000006",
+      "archetype": "collider_selection",
+      "skin": "semiconductor",
+      "seed": 8000006,
+      "file": "worlds/collider_selection/world_v7_semiconductor_collider_two_cause_8000006.json",
+      "sha256": "47aa4f8ebb068534bf989e76bf443a58f8450c4f34a79337bdcfdd81c3075ce7",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_aquaculture_collider__8000007",
+      "archetype": "collider_selection",
+      "skin": "aquaculture",
+      "seed": 8000007,
+      "file": "worlds/collider_selection/world_v7_aquaculture_collider__8000007.json",
+      "sha256": "665d1358574b7f8ea72a0a9f9223a1324d7402d73007f6cafbb6293f6c7381a8",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_battery_collider__8000008",
+      "archetype": "collider_selection",
+      "skin": "battery",
+      "seed": 8000008,
+      "file": "worlds/collider_selection/world_v7_battery_collider__8000008.json",
+      "sha256": "f8db512e55251ac67cba98f3e037e810a67529bfc8a4fb05ef9dd16c0ee830ea",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_catalysis_collider_interior_dose_8000009",
+      "archetype": "collider_selection",
+      "skin": "catalysis",
+      "seed": 8000009,
+      "file": "worlds/collider_selection/world_v7_catalysis_collider_interior_dose_8000009.json",
+      "sha256": "7fe9721cda3426ab680f2994a2d7ec86a0d87afa362b11a4bac95ccc4699fb78",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_fermentation_collider_interior_dose_sign_f_8000010",
+      "archetype": "collider_selection",
+      "skin": "fermentation",
+      "seed": 8000010,
+      "file": "worlds/collider_selection/world_v7_fermentation_collider_interior_dose_sign_f_8000010.json",
+      "sha256": "bcc8c8bdae723d2e77e221200a69cea7a926284364bd25e483023dce9dd669ca",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_bioprocess_subtype_interior_dose_two_ca_9000001",
+      "archetype": "hidden_subtype",
+      "skin": "bioprocess",
+      "seed": 9000001,
+      "file": "worlds/hidden_subtype/world_v7_bioprocess_subtype_interior_dose_two_ca_9000001.json",
+      "sha256": "c3fe8fca9b9a1b198d388d83f9a394c66bc8c841d0c302da159c6a13b4838103",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_watertreatment_subtype__9000003",
+      "archetype": "hidden_subtype",
+      "skin": "watertreatment",
+      "seed": 9000003,
+      "file": "worlds/hidden_subtype/world_v7_watertreatment_subtype__9000003.json",
+      "sha256": "baf853d0ca82a89a148afca8efe45abdd52e4ea086ab58c842162c6d6f56ba96",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_agronomy_subtype_interior_dose_two_ca_9000004",
+      "archetype": "hidden_subtype",
+      "skin": "agronomy",
+      "seed": 9000004,
+      "file": "worlds/hidden_subtype/world_v7_agronomy_subtype_interior_dose_two_ca_9000004.json",
+      "sha256": "875f3343bb2c7637b78b7e68eef5806f999bf5bf1677bc38cfb80970d7d4854f",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_clinical_subtype_two_cause_9000005",
+      "archetype": "hidden_subtype",
+      "skin": "clinical",
+      "seed": 9000005,
+      "file": "worlds/hidden_subtype/world_v7_clinical_subtype_two_cause_9000005.json",
+      "sha256": "0b6e8e2ad037780ad7639135967418d489b2d858e42f2118ad94a6a1b279e5d8",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_semiconductor_subtype_interior_dose_two_ca_9000006",
+      "archetype": "hidden_subtype",
+      "skin": "semiconductor",
+      "seed": 9000006,
+      "file": "worlds/hidden_subtype/world_v7_semiconductor_subtype_interior_dose_two_ca_9000006.json",
+      "sha256": "27c0ac95d0a6de2c846faa7aef52c23a32fc5b1f246265c104d3d62581a1ea34",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_aquaculture_subtype_interior_dose_sign_f_9000007",
+      "archetype": "hidden_subtype",
+      "skin": "aquaculture",
+      "seed": 9000007,
+      "file": "worlds/hidden_subtype/world_v7_aquaculture_subtype_interior_dose_sign_f_9000007.json",
+      "sha256": "5fc18e6df6f1f591906686eb6cec13d4fd5c72207d1179c17c609c36a57c7210",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_battery_subtype_two_cause_9000008",
+      "archetype": "hidden_subtype",
+      "skin": "battery",
+      "seed": 9000008,
+      "file": "worlds/hidden_subtype/world_v7_battery_subtype_two_cause_9000008.json",
+      "sha256": "2cba06cd126084238a92c54045df390bfa83215c7970b2eb69c48e1799553607",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_catalysis_subtype_interior_dose_two_ca_9000009",
+      "archetype": "hidden_subtype",
+      "skin": "catalysis",
+      "seed": 9000009,
+      "file": "worlds/hidden_subtype/world_v7_catalysis_subtype_interior_dose_two_ca_9000009.json",
+      "sha256": "46dee1b9d4e5f8c8d84556412b93a37970e2dd73d6605f0f4f99cfd516469cc3",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_fermentation_subtype_interior_dose_sign_f_9000010",
+      "archetype": "hidden_subtype",
+      "skin": "fermentation",
+      "seed": 9000010,
+      "file": "worlds/hidden_subtype/world_v7_fermentation_subtype_interior_dose_sign_f_9000010.json",
+      "sha256": "7cb85492be419b03115e6be6a773c4199f228da3504cde77b89a40e4a83bcf0d",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_bioprocess_subtype_interior_dose_sign_f_9000011",
+      "archetype": "hidden_subtype",
+      "skin": "bioprocess",
+      "seed": 9000011,
+      "file": "worlds/hidden_subtype/world_v7_bioprocess_subtype_interior_dose_sign_f_9000011.json",
+      "sha256": "1404875cee222addf1150dc7392f9735dae5087ff6662706e077540bb88f55ad",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_bioprocess_surrogate_symptom_trap_10000001",
+      "archetype": "surrogate_trap",
+      "skin": "bioprocess",
+      "seed": 10000001,
+      "file": "worlds/surrogate_trap/world_v7_bioprocess_surrogate_symptom_trap_10000001.json",
+      "sha256": "65423b13841e3762e92a2efd004bbefeb1bf350979941cacc15c32f16637761c",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_datacenter_surrogate_interior_dose_sympto_10000002",
+      "archetype": "surrogate_trap",
+      "skin": "datacenter",
+      "seed": 10000002,
+      "file": "worlds/surrogate_trap/world_v7_datacenter_surrogate_interior_dose_sympto_10000002.json",
+      "sha256": "7e45d2ebcb3f87fb0bcc387ffa0990ac170553429e0d4352435f03af6b46c6b8",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_watertreatment_surrogate_interior_dose_sign_f_10000003",
+      "archetype": "surrogate_trap",
+      "skin": "watertreatment",
+      "seed": 10000003,
+      "file": "worlds/surrogate_trap/world_v7_watertreatment_surrogate_interior_dose_sign_f_10000003.json",
+      "sha256": "35a0292e83c67e16c8f43760d91fddb7b749c5baad20f5ee7a5393b31a6453e7",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_agronomy_surrogate_interior_dose_sympto_10000004",
+      "archetype": "surrogate_trap",
+      "skin": "agronomy",
+      "seed": 10000004,
+      "file": "worlds/surrogate_trap/world_v7_agronomy_surrogate_interior_dose_sympto_10000004.json",
+      "sha256": "289df86aa9bd45ca4b2a54f3d17529fdba886f65cc43d7c810f5c8563a94588e",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_clinical_surrogate_interior_dose_sympto_10000005",
+      "archetype": "surrogate_trap",
+      "skin": "clinical",
+      "seed": 10000005,
+      "file": "worlds/surrogate_trap/world_v7_clinical_surrogate_interior_dose_sympto_10000005.json",
+      "sha256": "84d3ecd61a4df6237c44d2703598fdd898298cd2b017eceb167b698a10522a97",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_semiconductor_surrogate_interior_dose_sign_f_10000006",
+      "archetype": "surrogate_trap",
+      "skin": "semiconductor",
+      "seed": 10000006,
+      "file": "worlds/surrogate_trap/world_v7_semiconductor_surrogate_interior_dose_sign_f_10000006.json",
+      "sha256": "adc19b184892fc1aae27388cca765291bb8ac80826628f21db2b2ead1b4af632",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_aquaculture_surrogate_interior_dose_sympto_10000007",
+      "archetype": "surrogate_trap",
+      "skin": "aquaculture",
+      "seed": 10000007,
+      "file": "worlds/surrogate_trap/world_v7_aquaculture_surrogate_interior_dose_sympto_10000007.json",
+      "sha256": "3464bd386bd9714da707bfd1c3734c928a303f31dfc6cfd6578145607f2e8e39",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_battery_surrogate_sign_flip_symptom_tr_10000008",
+      "archetype": "surrogate_trap",
+      "skin": "battery",
+      "seed": 10000008,
+      "file": "worlds/surrogate_trap/world_v7_battery_surrogate_sign_flip_symptom_tr_10000008.json",
+      "sha256": "8eae63c76d85be0d2a789f26607d3cc055131968ed1725bb025852f73d1308dc",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_catalysis_surrogate_symptom_trap_10000009",
+      "archetype": "surrogate_trap",
+      "skin": "catalysis",
+      "seed": 10000009,
+      "file": "worlds/surrogate_trap/world_v7_catalysis_surrogate_symptom_trap_10000009.json",
+      "sha256": "3f8d5fafaac731d2fcf0e3cc50efb6b37226f2e0c739934d8cd033d456069ccb",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_fermentation_surrogate_symptom_trap_10000010",
+      "archetype": "surrogate_trap",
+      "skin": "fermentation",
+      "seed": 10000010,
+      "file": "worlds/surrogate_trap/world_v7_fermentation_surrogate_symptom_trap_10000010.json",
+      "sha256": "5b0434b8910de0a5944bee13dd25872a8777848502741b41c83af4b0c5708699",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_bioprocess_instrument__11000001",
+      "archetype": "instrument_only",
+      "skin": "bioprocess",
+      "seed": 11000001,
+      "file": "worlds/instrument_only/world_v7_bioprocess_instrument__11000001.json",
+      "sha256": "e56745fc3087b46b8cf13ed40f22a28fcf59408d4ef720bcdfb39d8a696489c6",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_datacenter_instrument_sign_flip_11000002",
+      "archetype": "instrument_only",
+      "skin": "datacenter",
+      "seed": 11000002,
+      "file": "worlds/instrument_only/world_v7_datacenter_instrument_sign_flip_11000002.json",
+      "sha256": "c64f37c78ded989e5509be36e29d8cada878d1ef00e9c2a3a7f7bb7e48a229a1",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_watertreatment_instrument_sign_flip_11000003",
+      "archetype": "instrument_only",
+      "skin": "watertreatment",
+      "seed": 11000003,
+      "file": "worlds/instrument_only/world_v7_watertreatment_instrument_sign_flip_11000003.json",
+      "sha256": "1c433b0de54aa7e3d78b46f40e3467844f24cb1a8618843f79f21ca8173a20c1",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_agronomy_instrument_sign_flip_11000004",
+      "archetype": "instrument_only",
+      "skin": "agronomy",
+      "seed": 11000004,
+      "file": "worlds/instrument_only/world_v7_agronomy_instrument_sign_flip_11000004.json",
+      "sha256": "d5f77e921df0cbafbf0a0baca6ca0d52dd3ecae4358768bc6f8664f9cbae592d",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_clinical_instrument__11000005",
+      "archetype": "instrument_only",
+      "skin": "clinical",
+      "seed": 11000005,
+      "file": "worlds/instrument_only/world_v7_clinical_instrument__11000005.json",
+      "sha256": "60a5ad38548b7116431156ae35fe5f878430f35289ceddf230b0616196d8eb18",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_semiconductor_instrument__11000006",
+      "archetype": "instrument_only",
+      "skin": "semiconductor",
+      "seed": 11000006,
+      "file": "worlds/instrument_only/world_v7_semiconductor_instrument__11000006.json",
+      "sha256": "ea3c38b88bab4fad5a1edd00f21aa4670030c11a291bf86312e20a8da187d3c1",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_aquaculture_instrument_sign_flip_11000007",
+      "archetype": "instrument_only",
+      "skin": "aquaculture",
+      "seed": 11000007,
+      "file": "worlds/instrument_only/world_v7_aquaculture_instrument_sign_flip_11000007.json",
+      "sha256": "b404e43d76adb40be1bf2c10d944197671566233830257d8bfda3d9580921b26",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_battery_instrument__11000008",
+      "archetype": "instrument_only",
+      "skin": "battery",
+      "seed": 11000008,
+      "file": "worlds/instrument_only/world_v7_battery_instrument__11000008.json",
+      "sha256": "69ce58727c27d970722d11f3258b2c9f2dffa95fcf5b1cdb6b9cbf4ee0f8a7e0",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_catalysis_instrument__11000009",
+      "archetype": "instrument_only",
+      "skin": "catalysis",
+      "seed": 11000009,
+      "file": "worlds/instrument_only/world_v7_catalysis_instrument__11000009.json",
+      "sha256": "cc323766438e063c292558bd27cc4259291b989783e41168dd2679b318974589",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_fermentation_instrument__11000010",
+      "archetype": "instrument_only",
+      "skin": "fermentation",
+      "seed": 11000010,
+      "file": "worlds/instrument_only/world_v7_fermentation_instrument__11000010.json",
+      "sha256": "b0437419e3116ec31db35227be8f2472dea1e056190a3729b1d67b90679c6d85",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_bioprocess_competing__12000001",
+      "archetype": "competing_causes",
+      "skin": "bioprocess",
+      "seed": 12000001,
+      "file": "worlds/competing_causes/world_v7_bioprocess_competing__12000001.json",
+      "sha256": "190ef8d26c54686f2bb9ce17a518dcdb78eb5a4b1e286d7b559cca3adf079c48",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_datacenter_competing__12000002",
+      "archetype": "competing_causes",
+      "skin": "datacenter",
+      "seed": 12000002,
+      "file": "worlds/competing_causes/world_v7_datacenter_competing__12000002.json",
+      "sha256": "20df3646ed5affcb6d0470be583278cf9c685ee28c9c1824ba74930606f50158",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_watertreatment_competing__12000003",
+      "archetype": "competing_causes",
+      "skin": "watertreatment",
+      "seed": 12000003,
+      "file": "worlds/competing_causes/world_v7_watertreatment_competing__12000003.json",
+      "sha256": "7532dffa519854758620d39fbd1849b0280c710be39a7b09d0aab7f7d1e303bd",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_clinical_competing__12000005",
+      "archetype": "competing_causes",
+      "skin": "clinical",
+      "seed": 12000005,
+      "file": "worlds/competing_causes/world_v7_clinical_competing__12000005.json",
+      "sha256": "75de3359bfee9e68d0a16b2f96d59ce7bb3b4666c5553947248e0c06a2d1de0b",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_semiconductor_competing__12000006",
+      "archetype": "competing_causes",
+      "skin": "semiconductor",
+      "seed": 12000006,
+      "file": "worlds/competing_causes/world_v7_semiconductor_competing__12000006.json",
+      "sha256": "f18a00fd209aa9a1c7844d875db234a3bfcb066534e8fc3c9ee7fa99314f6eb9",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_aquaculture_competing__12000007",
+      "archetype": "competing_causes",
+      "skin": "aquaculture",
+      "seed": 12000007,
+      "file": "worlds/competing_causes/world_v7_aquaculture_competing__12000007.json",
+      "sha256": "cb6f1a6fc2473fd38287b1d838bc8bac6f79c9e9b0f06d768e3009765cf1d5cf",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_battery_competing__12000008",
+      "archetype": "competing_causes",
+      "skin": "battery",
+      "seed": 12000008,
+      "file": "worlds/competing_causes/world_v7_battery_competing__12000008.json",
+      "sha256": "41a0720fdc8d42318ad4b434900b6e35b405e4718d9294d29c8a5a4f934d0ef1",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_catalysis_competing__12000009",
+      "archetype": "competing_causes",
+      "skin": "catalysis",
+      "seed": 12000009,
+      "file": "worlds/competing_causes/world_v7_catalysis_competing__12000009.json",
+      "sha256": "9b69b2d671d31e539ae9adb1e756c59a71d1af1a245bc76aabe2a670b77f2c1e",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_fermentation_competing__12000010",
+      "archetype": "competing_causes",
+      "skin": "fermentation",
+      "seed": 12000010,
+      "file": "worlds/competing_causes/world_v7_fermentation_competing__12000010.json",
+      "sha256": "ba32172af9585697afc52a78f72d57bc4106eceb37fc111331b00c684e1dc0c6",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_bioprocess_competing__12000011",
+      "archetype": "competing_causes",
+      "skin": "bioprocess",
+      "seed": 12000011,
+      "file": "worlds/competing_causes/world_v7_bioprocess_competing__12000011.json",
+      "sha256": "ce7e889efb126ef4a7ddecc151d9b5022485aa5c5081dc8e8943341feaf9cb4d",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_bioprocess_synergy_interior_dose_two_ca_13000001",
+      "archetype": "synergy_pair",
+      "skin": "bioprocess",
+      "seed": 13000001,
+      "file": "worlds/synergy_pair/world_v7_bioprocess_synergy_interior_dose_two_ca_13000001.json",
+      "sha256": "0bc553247b572412d9b31368005e2a9e9837b714c881130ec7b0ad9350351a7f",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_datacenter_synergy_interior_dose_two_ca_13000002",
+      "archetype": "synergy_pair",
+      "skin": "datacenter",
+      "seed": 13000002,
+      "file": "worlds/synergy_pair/world_v7_datacenter_synergy_interior_dose_two_ca_13000002.json",
+      "sha256": "1ca9aeda81fe4ae02a9144dd92c65b1810f0192738adc5fcc9430073c16a0b58",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_watertreatment_synergy_interior_dose_two_ca_13000003",
+      "archetype": "synergy_pair",
+      "skin": "watertreatment",
+      "seed": 13000003,
+      "file": "worlds/synergy_pair/world_v7_watertreatment_synergy_interior_dose_two_ca_13000003.json",
+      "sha256": "cd379ab0c3b701fa5e8b49af34d604bf161b69673aeea197826b9b27d0f83743",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_agronomy_synergy_two_cause_13000004",
+      "archetype": "synergy_pair",
+      "skin": "agronomy",
+      "seed": 13000004,
+      "file": "worlds/synergy_pair/world_v7_agronomy_synergy_two_cause_13000004.json",
+      "sha256": "7ae05196ac1be65a64213b0fa563bd6c7caf8301320ab60dcb861bad66c20468",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_clinical_synergy_two_cause_13000005",
+      "archetype": "synergy_pair",
+      "skin": "clinical",
+      "seed": 13000005,
+      "file": "worlds/synergy_pair/world_v7_clinical_synergy_two_cause_13000005.json",
+      "sha256": "930c4ab676ad8aca6f7b4c6d29e7710a1e1683a0380a0d0c820c10a4a604c6b0",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_semiconductor_synergy_interior_dose_two_ca_13000006",
+      "archetype": "synergy_pair",
+      "skin": "semiconductor",
+      "seed": 13000006,
+      "file": "worlds/synergy_pair/world_v7_semiconductor_synergy_interior_dose_two_ca_13000006.json",
+      "sha256": "8bea95c33670a0bc313e101edba371099062ddf7106ab4ae0da66c778d56add4",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_aquaculture_synergy_two_cause_13000007",
+      "archetype": "synergy_pair",
+      "skin": "aquaculture",
+      "seed": 13000007,
+      "file": "worlds/synergy_pair/world_v7_aquaculture_synergy_two_cause_13000007.json",
+      "sha256": "12714797b3dbc4558b3223e629135ef1aa63f1c4f6c2058e2a3b0ca84a2d766d",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_battery_synergy_two_cause_13000008",
+      "archetype": "synergy_pair",
+      "skin": "battery",
+      "seed": 13000008,
+      "file": "worlds/synergy_pair/world_v7_battery_synergy_two_cause_13000008.json",
+      "sha256": "f54662bb9fdd68db33532eb45a01f76d90eeb8a5c5e644d7d832f0666b186d51",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_catalysis_synergy_two_cause_13000009",
+      "archetype": "synergy_pair",
+      "skin": "catalysis",
+      "seed": 13000009,
+      "file": "worlds/synergy_pair/world_v7_catalysis_synergy_two_cause_13000009.json",
+      "sha256": "06c4b88ad50279ed4d8177f02385fb3bdafe9418e21cac5fcbbe5acf4ec9b98b",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_fermentation_synergy_two_cause_13000010",
+      "archetype": "synergy_pair",
+      "skin": "fermentation",
+      "seed": 13000010,
+      "file": "worlds/synergy_pair/world_v7_fermentation_synergy_two_cause_13000010.json",
+      "sha256": "1955d64006047a449fbb18864cc82b28353022ab8fdf00d98741f5f99f1a3f18",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_bioprocess_dosewin_interior_dose_14000001",
+      "archetype": "dose_window",
+      "skin": "bioprocess",
+      "seed": 14000001,
+      "file": "worlds/dose_window/world_v7_bioprocess_dosewin_interior_dose_14000001.json",
+      "sha256": "36f347e37dda6b9d12989e3c5fbd97345ed8236f9420fc5ca535d8537117e92b",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_datacenter_dosewin_interior_dose_14000002",
+      "archetype": "dose_window",
+      "skin": "datacenter",
+      "seed": 14000002,
+      "file": "worlds/dose_window/world_v7_datacenter_dosewin_interior_dose_14000002.json",
+      "sha256": "a94800943fa843d4c6cfe85b6bb8a6055805fe0ed2173f39993088a053a21c51",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_watertreatment_dosewin_interior_dose_sign_f_14000003",
+      "archetype": "dose_window",
+      "skin": "watertreatment",
+      "seed": 14000003,
+      "file": "worlds/dose_window/world_v7_watertreatment_dosewin_interior_dose_sign_f_14000003.json",
+      "sha256": "d2fa7a5dc589ba11f92412680f4e74a0b916412a73063b05e9305e5f6bc88bb5",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_agronomy_dosewin_interior_dose_14000004",
+      "archetype": "dose_window",
+      "skin": "agronomy",
+      "seed": 14000004,
+      "file": "worlds/dose_window/world_v7_agronomy_dosewin_interior_dose_14000004.json",
+      "sha256": "f4afc94c8391ce192f302d5aec691137dbc670d17c5590a8377f2a9a720d0517",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_clinical_dosewin_interior_dose_14000005",
+      "archetype": "dose_window",
+      "skin": "clinical",
+      "seed": 14000005,
+      "file": "worlds/dose_window/world_v7_clinical_dosewin_interior_dose_14000005.json",
+      "sha256": "0a892c647943a822e8e067cf8011052c9e038e5305fea0c28fb86091f208e32b",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_semiconductor_dosewin_interior_dose_sign_f_14000006",
+      "archetype": "dose_window",
+      "skin": "semiconductor",
+      "seed": 14000006,
+      "file": "worlds/dose_window/world_v7_semiconductor_dosewin_interior_dose_sign_f_14000006.json",
+      "sha256": "ce8c0b1d69d5463077f1a4174c74fd6665e61921c99d584835fb4337824991cc",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_aquaculture_dosewin_interior_dose_14000007",
+      "archetype": "dose_window",
+      "skin": "aquaculture",
+      "seed": 14000007,
+      "file": "worlds/dose_window/world_v7_aquaculture_dosewin_interior_dose_14000007.json",
+      "sha256": "53af7ef98c38adebbd2dfa45275c07e2b1e2dfe42b4403620df6b04461b67484",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_battery_dosewin_interior_dose_sign_f_14000008",
+      "archetype": "dose_window",
+      "skin": "battery",
+      "seed": 14000008,
+      "file": "worlds/dose_window/world_v7_battery_dosewin_interior_dose_sign_f_14000008.json",
+      "sha256": "7c00733a57aaa041e1de2619f779f7b8067b68e85e48c9361f3627033619eb7a",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_catalysis_dosewin_interior_dose_sign_f_14000009",
+      "archetype": "dose_window",
+      "skin": "catalysis",
+      "seed": 14000009,
+      "file": "worlds/dose_window/world_v7_catalysis_dosewin_interior_dose_sign_f_14000009.json",
+      "sha256": "d3ed5b2b18f516a2947edbe806f333bcf440ff7f611c210236687340f6db5af7",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_fermentation_dosewin_interior_dose_sign_f_14000010",
+      "archetype": "dose_window",
+      "skin": "fermentation",
+      "seed": 14000010,
+      "file": "worlds/dose_window/world_v7_fermentation_dosewin_interior_dose_sign_f_14000010.json",
+      "sha256": "58f78799ea27a537430eafec9ad780507acef6c26455dd807d9a08e38f023c4e",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_bioprocess_reversal__15000001",
+      "archetype": "confounded_reversal",
+      "skin": "bioprocess",
+      "seed": 15000001,
+      "file": "worlds/confounded_reversal/world_v7_bioprocess_reversal__15000001.json",
+      "sha256": "0f4959d1337795d0ebab5b133aa1559c152d09569c881f5ccef4826351b80468",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_datacenter_reversal__15000002",
+      "archetype": "confounded_reversal",
+      "skin": "datacenter",
+      "seed": 15000002,
+      "file": "worlds/confounded_reversal/world_v7_datacenter_reversal__15000002.json",
+      "sha256": "07495ff1ee9c03e481ac00686c090464a7fdaad942a47fe3288ac6a431003c21",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_watertreatment_reversal__15000003",
+      "archetype": "confounded_reversal",
+      "skin": "watertreatment",
+      "seed": 15000003,
+      "file": "worlds/confounded_reversal/world_v7_watertreatment_reversal__15000003.json",
+      "sha256": "d8a0203256b3cb09afb3a15bb08bf0f5d8e35c3371c96236b3d68e26f2cbdc0d",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_agronomy_reversal__15000004",
+      "archetype": "confounded_reversal",
+      "skin": "agronomy",
+      "seed": 15000004,
+      "file": "worlds/confounded_reversal/world_v7_agronomy_reversal__15000004.json",
+      "sha256": "3ae0813d2f73e555ed28e07b9052e84d25658b39c694e3ae9a6d1a4a38ff82e7",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_clinical_reversal__15000005",
+      "archetype": "confounded_reversal",
+      "skin": "clinical",
+      "seed": 15000005,
+      "file": "worlds/confounded_reversal/world_v7_clinical_reversal__15000005.json",
+      "sha256": "9f9bdfbe53f9151b3079e4b25994ae7d572934058a85781a1f4152fbb50a91b2",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_semiconductor_reversal__15000006",
+      "archetype": "confounded_reversal",
+      "skin": "semiconductor",
+      "seed": 15000006,
+      "file": "worlds/confounded_reversal/world_v7_semiconductor_reversal__15000006.json",
+      "sha256": "dff03738aeb2dc6479b08f808489181e1193a7a148e9ea33b78dcaf43d0c9a1c",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_aquaculture_reversal__15000007",
+      "archetype": "confounded_reversal",
+      "skin": "aquaculture",
+      "seed": 15000007,
+      "file": "worlds/confounded_reversal/world_v7_aquaculture_reversal__15000007.json",
+      "sha256": "61eca83ef1dbd534a0dcf1da2d650791c5fb31c2692a2ec3d90ddaeeb5e35410",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_battery_reversal__15000008",
+      "archetype": "confounded_reversal",
+      "skin": "battery",
+      "seed": 15000008,
+      "file": "worlds/confounded_reversal/world_v7_battery_reversal__15000008.json",
+      "sha256": "1a5d9d207cf34d8d93938ac9ec6eef5c863238fc1fed3c5d77de5d812337ed56",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_catalysis_reversal__15000009",
+      "archetype": "confounded_reversal",
+      "skin": "catalysis",
+      "seed": 15000009,
+      "file": "worlds/confounded_reversal/world_v7_catalysis_reversal__15000009.json",
+      "sha256": "f9269d2be0fcc4307dfe751b58b11b10a622407618ccadc5b2deaf620c9c880e",
+      "audit_passed": true
+    },
+    {
+      "world_id": "v7_fermentation_reversal__15000010",
+      "archetype": "confounded_reversal",
+      "skin": "fermentation",
+      "seed": 15000010,
+      "file": "worlds/confounded_reversal/world_v7_fermentation_reversal__15000010.json",
+      "sha256": "44eae8908451df13088b802d483ff297964cea08238d5ba135f6142adb050123",
+      "audit_passed": true
+    }
+  ]
+}

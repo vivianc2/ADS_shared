@@ -1,0 +1,707 @@
+{
+  "schema_version": "rpg_scm_v7",
+  "world_id": "v7_watertreatment_surrogate_interior_dose_sign_f_10000003",
+  "domain": "watertreatment",
+  "meta": {
+    "seed": 10000003,
+    "features": [
+      "interior_dose",
+      "sign_flip",
+      "symptom_trap"
+    ],
+    "skin": "watertreatment",
+    "depth": 2
+  },
+  "scenario": "A water utility's water clarity score has dropped about 40% over the past month (more discoloration reaching customers). It began after crews increased line flushing following a main repair. Tap water looks faintly rusty at some addresses. Routine water-quality panels look broadly within range. The flushing program, disinfection, and chemical dosing are adjustable, and dosing equipment is available. You have a limited number of experiments; you may measure quantities and apply available controls or additives, alone or in combination. Determine what is really driving the drop and what to do about it.",
+  "scm": {
+    "variables": {
+      "BiofilmSloughingSusceptibility": {
+        "aliases": [
+          "susceptibility",
+          "batch susceptibility"
+        ],
+        "kind": "latent",
+        "dist": {
+          "normal": [
+            55,
+            20
+          ]
+        }
+      },
+      "SeasonalDemand": {
+        "aliases": [
+          "seasonal demand",
+          "demand swing"
+        ],
+        "kind": "latent",
+        "dist": {
+          "normal": [
+            50,
+            16
+          ]
+        }
+      },
+      "LineFlushRate": {
+        "aliases": [
+          "line flush rate",
+          "flushing intensity"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            40,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "LineFlushRateHarmAxis": {
+        "aliases": [
+          "harm axis"
+        ],
+        "kind": "latent",
+        "parents": [
+          "LineFlushRate"
+        ],
+        "mech": {
+          "form": "sign_flip",
+          "of": "LineFlushRate",
+          "knee": 45,
+          "lo_gain": 0.05,
+          "hi_gain": 0.9,
+          "intercept": 2.0
+        }
+      },
+      "BiofilmSloughing": {
+        "aliases": [
+          "biofilm sloughing",
+          "biofilm detachment"
+        ],
+        "kind": "latent",
+        "parents": [
+          "LineFlushRateHarmAxis",
+          "BiofilmSloughingSusceptibility"
+        ],
+        "mech": {
+          "form": "interaction",
+          "a": "LineFlushRateHarmAxis",
+          "b": "BiofilmSloughingSusceptibility",
+          "gain": 260.0,
+          "scale": 100.0,
+          "intercept": 3.0
+        },
+        "noise": {
+          "normal": [
+            0,
+            1.5
+          ]
+        }
+      },
+      "TurbidityLoad": {
+        "aliases": [
+          "turbidity load",
+          "suspended solids"
+        ],
+        "kind": "latent",
+        "parents": [
+          "BiofilmSloughing"
+        ],
+        "mech": {
+          "form": "hill",
+          "of": "BiofilmSloughing",
+          "vmax": 70,
+          "k": 35,
+          "n": 2
+        }
+      },
+      "IronParticulate": {
+        "aliases": [
+          "iron particulate",
+          "particulate load"
+        ],
+        "kind": "latent",
+        "parents": [
+          "TurbidityLoad"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "TurbidityLoad": 0.9
+          },
+          "intercept": 5
+        }
+      },
+      "UnderlyingWaterClarityScore": {
+        "aliases": [
+          "underlying true objective"
+        ],
+        "kind": "latent",
+        "parents": [
+          "IronParticulate",
+          "SeasonalDemand"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "IronParticulate": -0.9,
+            "SeasonalDemand": 0.2
+          },
+          "intercept": 15
+        }
+      },
+      "WaterClarityScore": {
+        "aliases": [
+          "water clarity score",
+          "clarity index",
+          "clearness rating"
+        ],
+        "kind": "outcome",
+        "parents": [
+          "UnderlyingWaterClarityScore"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "UnderlyingWaterClarityScore": 1.0
+          },
+          "intercept": 0
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "TurbidityNTU": {
+        "aliases": [
+          "turbidity ntu",
+          "water turbidity",
+          "cloudiness"
+        ],
+        "kind": "observable",
+        "parents": [
+          "IronParticulate"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "IronParticulate": 0.8
+          },
+          "intercept": 5
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            8.61
+          ]
+        }
+      },
+      "PressureReading": {
+        "aliases": [
+          "line pressure",
+          "system pressure"
+        ],
+        "kind": "observable",
+        "parents": [
+          "SeasonalDemand"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "SeasonalDemand": 0.7
+          },
+          "intercept": 40
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            4
+          ]
+        }
+      },
+      "UVDose": {
+        "aliases": [
+          "uv dose",
+          "uv disinfection"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "HardnessCaCO3": {
+        "aliases": [
+          "hardness",
+          "calcium carbonate"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "ContactTime": {
+        "aliases": [
+          "contact time",
+          "detention time"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "BackwashRate": {
+        "aliases": [
+          "backwash rate",
+          "filter backwash"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "PumpCycles": {
+        "aliases": [
+          "pump cycles",
+          "pump starts"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "TankLevel": {
+        "aliases": [
+          "tank level",
+          "reservoir level"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "WaterTemp": {
+        "aliases": [
+          "water temperature",
+          "supply temperature"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "FluorideLevel": {
+        "aliases": [
+          "fluoride level",
+          "fluoridation"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "FilterHeadloss": {
+        "aliases": [
+          "filter headloss",
+          "filter pressure drop"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      }
+    },
+    "actuators": {
+      "LineFlushRate": {
+        "aliases": [
+          "line flush rate",
+          "flushing intensity"
+        ],
+        "target": "LineFlushRate",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 40,
+        "description": "controller for LineFlushRate"
+      },
+      "PhStabilizer": {
+        "aliases": [
+          "ph stabilizer",
+          "alkalinity adjustment"
+        ],
+        "target": "BiofilmSloughing",
+        "op": "scale",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 0,
+        "expr": "1-sat(d;k=0.66)",
+        "description": "a continuous dosing control",
+        "side_effect": {
+          "target": "UnderlyingWaterClarityScore",
+          "expr": "-overstrip(d;thr=0.66,gain=30)"
+        }
+      },
+      "ClarifyingPolymer": {
+        "aliases": [
+          "clarifying polymer",
+          "coagulant aid"
+        ],
+        "target": "WaterClarityScore",
+        "op": "add",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 0,
+        "expr": "transient_boost(d)",
+        "description": "an adjustable process control"
+      },
+      "set_UVDose": {
+        "aliases": [
+          "set uv dose",
+          "set uv disinfection",
+          "adjust UVDose"
+        ],
+        "target": "UVDose",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for UVDose"
+      },
+      "set_HardnessCaCO3": {
+        "aliases": [
+          "set hardness",
+          "set calcium carbonate",
+          "adjust HardnessCaCO3"
+        ],
+        "target": "HardnessCaCO3",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for HardnessCaCO3"
+      },
+      "set_ContactTime": {
+        "aliases": [
+          "set contact time",
+          "set detention time",
+          "adjust ContactTime"
+        ],
+        "target": "ContactTime",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for ContactTime"
+      },
+      "set_BackwashRate": {
+        "aliases": [
+          "set backwash rate",
+          "set filter backwash",
+          "adjust BackwashRate"
+        ],
+        "target": "BackwashRate",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for BackwashRate"
+      },
+      "set_PumpCycles": {
+        "aliases": [
+          "set pump cycles",
+          "set pump starts",
+          "adjust PumpCycles"
+        ],
+        "target": "PumpCycles",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for PumpCycles"
+      }
+    },
+    "outcome": "WaterClarityScore",
+    "higher_is_better": true,
+    "goal": "UnderlyingWaterClarityScore"
+  },
+  "ground_truth": {
+    "true_root": "BiofilmSloughing",
+    "true_mechanism_proxy": "TurbidityNTU",
+    "confounded_decoys": [
+      "PressureReading"
+    ],
+    "targeted_actuator": "PhStabilizer",
+    "symptom_trap_actuator": "ClarifyingPolymer",
+    "co_actuators": null,
+    "selection_decoy": null,
+    "_selection_nodes": [],
+    "subtype_policy": null,
+    "latent_plain_name": "a hidden biofilm sloughing that propagates through turbidity load, iron particulate to the outcome",
+    "naive_interventions": [
+      {
+        "LineFlushRate": 100
+      },
+      {
+        "set_UVDose": 100
+      },
+      {
+        "set_HardnessCaCO3": 100
+      },
+      {
+        "ClarifyingPolymer": 100
+      }
+    ],
+    "_features": [
+      "interior_dose",
+      "sign_flip",
+      "symptom_trap"
+    ],
+    "_skin": "watertreatment",
+    "_depth": 2,
+    "_archetype": "surrogate_trap",
+    "_seed": 10000003
+  },
+  "oracle": {
+    "gold": {
+      "intervention": {
+        "LineFlushRate": 0.0,
+        "PhStabilizer": 66.0
+      },
+      "expected_utility": 20.495444262135386,
+      "baseline_utility": 13.944525734294812,
+      "active_actuators": [
+        "LineFlushRate",
+        "PhStabilizer"
+      ]
+    },
+    "counterfactual_battery": {
+      "true_mechanism_proxy": "TurbidityNTU",
+      "valid_mechanism_proxies": [
+        "TurbidityNTU"
+      ],
+      "lenient_mechanism_proxies": [
+        "TurbidityNTU"
+      ],
+      "confounded_decoys": [
+        "PressureReading"
+      ],
+      "actuator_sign_predictions": {
+        "LineFlushRate": "-",
+        "PhStabilizer": "-",
+        "ClarifyingPolymer": "0",
+        "set_UVDose": "0",
+        "set_HardnessCaCO3": "0",
+        "set_ContactTime": "0",
+        "set_BackwashRate": "0",
+        "set_PumpCycles": "0"
+      },
+      "targeted_actuator": "PhStabilizer",
+      "symptom_trap_actuator": "ClarifyingPolymer"
+    },
+    "calibration": {
+      "proxy_assay_noise": 8.61,
+      "proxy_corr": 0.521,
+      "decoy_corr": 0.356
+    },
+    "audits": {
+      "decoy": {
+        "passed": true,
+        "decoys": {
+          "PressureReading": {
+            "obs_corr": 0.356,
+            "clamp_do_effect": 0.0,
+            "ok": true
+          }
+        }
+      },
+      "proxy_signal": {
+        "passed": true,
+        "proxy_outcome_corr": -0.521,
+        "obs_ok": true,
+        "interventional_shift_sd": 0.55,
+        "interv_ok": false,
+        "band": [
+          0.35,
+          0.75
+        ]
+      },
+      "distractor_inertness": {
+        "passed": true,
+        "n_inert_checked": 6,
+        "violations": []
+      },
+      "gold_selfconsistency": {
+        "passed": true,
+        "gold_utility": 20.5,
+        "beating_perturbations": []
+      },
+      "counterintuitiveness": {
+        "passed": true,
+        "baseline_utility": 13.93,
+        "gold_utility": 20.5,
+        "naive_results": [
+          {
+            "naive": {
+              "LineFlushRate": 100
+            },
+            "utility": -24.44,
+            "gain_over_baseline": -38.37,
+            "fraction_of_gold_benefit": -5.844,
+            "helps": false
+          },
+          {
+            "naive": {
+              "set_UVDose": 100
+            },
+            "utility": 13.93,
+            "gain_over_baseline": 0.0,
+            "fraction_of_gold_benefit": 0.0,
+            "helps": false
+          },
+          {
+            "naive": {
+              "set_HardnessCaCO3": 100
+            },
+            "utility": 13.93,
+            "gain_over_baseline": 0.0,
+            "fraction_of_gold_benefit": 0.0,
+            "helps": false
+          },
+          {
+            "naive": {
+              "ClarifyingPolymer": 100
+            },
+            "utility": 13.93,
+            "gain_over_baseline": 0.0,
+            "fraction_of_gold_benefit": 0.0,
+            "helps": false
+          }
+        ],
+        "note": "obvious first move must not meaningfully help"
+      }
+    }
+  }
+}

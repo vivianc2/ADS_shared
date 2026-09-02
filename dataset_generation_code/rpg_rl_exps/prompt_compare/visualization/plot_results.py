@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import json
+import math
 import os
 from pathlib import Path
 
@@ -17,6 +19,13 @@ import numpy as np  # noqa: E402
 
 PROMPTS = ("p1", "p2", "p3")
 REWARDS = ("r1", "r2", "r3")
+SCORE_COLUMNS = ("config", "avg_score", "part A", "part B", "best-of-8")
+REWARD_COLUMNS = (
+    "config",
+    "r1", "r1 in-grp var",
+    "r2", "r2 in-grp var",
+    "r3", "r3 in-grp var",
+)
 
 
 def _save(fig, destination: Path) -> None:
@@ -34,7 +43,13 @@ def _annotated_heatmap(data, row_labels, column_labels, title, *, vmin, vmax,
     height = max(4.8, 0.55 * len(row_labels) + 2.0)
     fig, axis = plt.subplots(figsize=(width, height))
     image = axis.imshow(array, aspect="auto", cmap=cmap, vmin=vmin, vmax=vmax)
-    axis.set_xticks(range(len(column_labels)), labels=column_labels, rotation=45, ha="right")
+    rotate_labels = len(column_labels) > len(PROMPTS)
+    axis.set_xticks(
+        range(len(column_labels)),
+        labels=column_labels,
+        rotation=45 if rotate_labels else 0,
+        ha="right" if rotate_labels else "center",
+    )
     axis.set_yticks(range(len(row_labels)), labels=row_labels)
     axis.set_title(title)
     for row in range(array.shape[0]):
@@ -51,12 +66,112 @@ def _annotated_heatmap(data, row_labels, column_labels, title, *, vmin, vmax,
     _save(fig, destination)
 
 
-def _config_matrix(rows, metric: str):
+def _require_reward_invariant(values, label: str) -> float:
+    numbers = [float(value) for value in values]
+    reference = numbers[0]
+    if any(
+        not math.isclose(value, reference, rel_tol=0.0, abs_tol=1e-12)
+        for value in numbers[1:]
+    ):
+        raise ValueError(f"{label} unexpectedly differs across reward functions")
+    return reference
+
+
+def _prompt_score_rows(rows):
     by_id = {row["config_id"]: row for row in rows}
+    output = []
+    for prompt in PROMPTS:
+        prompt_rows = [by_id[f"{prompt}_{reward}"] for reward in REWARDS]
+        output.append([
+            prompt,
+            _require_reward_invariant(
+                [row["avg_score"] for row in prompt_rows], f"{prompt}.avg_score"
+            ),
+            _require_reward_invariant(
+                [row["avg_part_a"] for row in prompt_rows], f"{prompt}.avg_part_a"
+            ),
+            _require_reward_invariant(
+                [row["avg_part_b"] for row in prompt_rows], f"{prompt}.avg_part_b"
+            ),
+            _require_reward_invariant(
+                [row["best_of_8_score"] for row in prompt_rows],
+                f"{prompt}.best_of_8_score",
+            ),
+        ])
+    return output
+
+
+def _prompt_reward_rows(rows):
+    by_id = {row["config_id"]: row for row in rows}
+    output = []
+    for prompt in PROMPTS:
+        values = [prompt]
+        for reward in REWARDS:
+            row = by_id[f"{prompt}_{reward}"]
+            values.extend([
+                float(row["reward_mean"]),
+                float(row["within_group_reward_variance"]),
+            ])
+        output.append(values)
+    return output
+
+
+def _archetype_prompt_matrix(rows, archetypes, metric: str):
+    by_cell = {
+        (row["archetype"], row["config_id"]): row
+        for row in rows
+    }
     return [
-        [float(by_id[f"{prompt}_{reward}"][metric]) for reward in REWARDS]
-        for prompt in PROMPTS
+        [
+            _require_reward_invariant(
+                [
+                    by_cell[(archetype, f"{prompt}_{reward}")][metric]
+                    for reward in REWARDS
+                ],
+                f"{archetype}.{prompt}.{metric}",
+            )
+            for prompt in PROMPTS
+        ]
+        for archetype in archetypes
     ]
+
+
+def _write_csv_sheet(destination: Path, columns, rows) -> None:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary = destination.with_name(f".{destination.name}.tmp")
+    with temporary.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(columns)
+        writer.writerows(rows)
+    os.replace(temporary, destination)
+
+
+def _render_sheet(columns, rows, title: str, destination: Path) -> None:
+    width = max(8.0, 1.65 * len(columns))
+    fig, axis = plt.subplots(figsize=(width, 2.7))
+    axis.axis("off")
+    display_rows = [
+        [value if isinstance(value, str) else f"{float(value):.4f}" for value in row]
+        for row in rows
+    ]
+    table = axis.table(
+        cellText=display_rows,
+        colLabels=columns,
+        cellLoc="center",
+        colLoc="center",
+        bbox=(0.0, 0.0, 1.0, 0.78),
+    )
+    table.auto_set_font_size(False)
+    table.set_fontsize(10)
+    for (row, _column), cell in table.get_celld().items():
+        cell.set_edgecolor("#d0d7de")
+        if row == 0:
+            cell.set_facecolor("#4472c4")
+            cell.set_text_props(color="white", weight="bold")
+        elif row % 2 == 0:
+            cell.set_facecolor("#f3f6fa")
+    axis.set_title(title, fontsize=14, weight="bold", pad=12)
+    _save(fig, destination)
 
 
 def plot_all(stats_path: Path, figures_dir: Path | None = None) -> list[Path]:
@@ -68,66 +183,36 @@ def plot_all(stats_path: Path, figures_dir: Path | None = None) -> list[Path]:
     figures_dir.mkdir(parents=True, exist_ok=True)
     written = []
 
-    destination = figures_dir / "overall_avg_score_heatmap.png"
-    _annotated_heatmap(
-        _config_matrix(stats["overall"], "avg_score"), PROMPTS, REWARDS,
-        "Overall average evaluation score", vmin=0.0, vmax=1.0,
-        colorbar_label="Average score", destination=destination,
-    )
-    written.append(destination)
+    score_rows = _prompt_score_rows(stats["overall"])
+    reward_rows = _prompt_reward_rows(stats["overall"])
 
-    destination = figures_dir / "overall_best_of_8_heatmap.png"
-    _annotated_heatmap(
-        _config_matrix(stats["overall"], "best_of_8_score"), PROMPTS, REWARDS,
-        "Average per-world best-of-eight evaluation score", vmin=0.0, vmax=1.0,
-        colorbar_label="Best-of-eight score", destination=destination,
+    destination = figures_dir / "prompt_score_summary.png"
+    _render_sheet(
+        SCORE_COLUMNS, score_rows, "Evaluation metrics by prompt", destination
     )
     written.append(destination)
+    _write_csv_sheet(figures_dir / "prompt_score_summary.csv", SCORE_COLUMNS, score_rows)
 
-    config_order = [f"{prompt}_{reward}" for prompt in PROMPTS for reward in REWARDS]
-    overall = {row["config_id"]: row for row in stats["overall"]}
-    x = np.arange(len(config_order))
-    fig, axes = plt.subplots(2, 1, figsize=(10, 7), sharex=True)
-    axes[0].bar(x, [overall[key]["reward_mean"] for key in config_order], color="#4472c4")
-    axes[0].set_ylabel("Candidate reward mean")
-    axes[0].set_ylim(-0.25, 1.0)
-    axes[0].axhline(0.0, color="black", linewidth=0.7)
-    axes[0].grid(axis="y", alpha=0.25)
-    axes[1].bar(
-        x,
-        [overall[key]["within_group_reward_variance"] for key in config_order],
-        color="#ed7d31",
+    destination = figures_dir / "prompt_reward_summary.png"
+    _render_sheet(
+        REWARD_COLUMNS, reward_rows, "Reward behavior by prompt", destination
     )
-    axes[1].set_ylabel("Mean within-group variance")
-    axes[1].set_ylim(0.0, 0.4)
-    axes[1].set_xticks(x, labels=config_order, rotation=45, ha="right")
-    axes[1].grid(axis="y", alpha=0.25)
-    fig.suptitle("Candidate reward behavior by configuration")
-    fig.tight_layout()
-    destination = figures_dir / "reward_summary.png"
-    _save(fig, destination)
     written.append(destination)
+    _write_csv_sheet(figures_dir / "prompt_reward_summary.csv", REWARD_COLUMNS, reward_rows)
 
     archetypes = []
     for row in stats["per_archetype"]:
         if row["archetype"] not in archetypes:
             archetypes.append(row["archetype"])
-    by_cell = {
-        (row["archetype"], row["config_id"]): row
-        for row in stats["per_archetype"]
-    }
     for metric, filename, title, label in (
         ("avg_score", "archetype_avg_score_heatmap.png", "Average score by archetype", "Average score"),
         ("avg_part_a", "archetype_avg_part_a_heatmap.png", "Part A by archetype", "Average Part A"),
         ("avg_part_b", "archetype_avg_part_b_heatmap.png", "Part B by archetype", "Average Part B"),
     ):
-        data = [
-            [float(by_cell[(archetype, config)][metric]) for config in config_order]
-            for archetype in archetypes
-        ]
+        data = _archetype_prompt_matrix(stats["per_archetype"], archetypes, metric)
         destination = figures_dir / filename
         _annotated_heatmap(
-            data, archetypes, config_order, title, vmin=0.0, vmax=1.0,
+            data, archetypes, PROMPTS, title, vmin=0.0, vmax=1.0,
             colorbar_label=label, destination=destination,
         )
         written.append(destination)

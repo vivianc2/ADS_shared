@@ -90,14 +90,20 @@ def read_jsonl(path: Path) -> list[dict[str, Any]]:
     return records
 
 
-def completed_final_record(path: Path) -> dict[str, Any] | None:
+def completed_rollout_records(path: Path) -> list[dict[str, Any]] | None:
+    """Read one complete JSONL artifact once, returning all of its records."""
     try:
         records = read_jsonl(path)
     except (OSError, ValueError, json.JSONDecodeError):
         return None
     if not records or records[-1].get("record_type") != "terminal":
         return None
-    return records[-1] if records[-1].get("complete") is True else None
+    return records if records[-1].get("complete") is True else None
+
+
+def completed_final_record(path: Path) -> dict[str, Any] | None:
+    records = completed_rollout_records(path)
+    return records[-1] if records is not None else None
 
 
 def require_finite(value: Any, label: str) -> float:
@@ -107,4 +113,3 @@ def require_finite(value: Any, label: str) -> float:
     if not math.isfinite(number):
         raise ValueError(f"{label} is not finite: {value!r}")
     return number
-

@@ -1,0 +1,680 @@
+{
+  "schema_version": "rpg_scm_v7",
+  "world_id": "v7_catalysis_dosewin_interior_dose_sign_f_14000009",
+  "domain": "catalysis",
+  "meta": {
+    "seed": 14000009,
+    "features": [
+      "interior_dose",
+      "sign_flip"
+    ],
+    "skin": "catalysis",
+    "depth": 2
+  },
+  "scenario": "A continuous catalytic reactor unit running a fixed-bed hydrogenation has seen reactor conversion fall about 20% over the past month, staying low run after run. The decline followed a switch to a new feedstock supplier after a routine catalyst reload. The process team's leading theories are that the reactor is running too cool or at the wrong pressure, so they favor retuning temperature and pressure. Effluent analysis has shown a slightly elevated byproduct fraction. Routine unit data read broadly within range. The feed, temperature, purification, and regeneration systems are all adjustable, and polishing and regeneration options are available. You have a limited number of experiments; you may measure quantities and apply available controls or treatments, alone or in combination. Determine what is really driving the loss and what to do about it.",
+  "scm": {
+    "variables": {
+      "CatalystPoisoningSusceptibility": {
+        "aliases": [
+          "susceptibility",
+          "batch susceptibility"
+        ],
+        "kind": "latent",
+        "dist": {
+          "normal": [
+            55,
+            20
+          ]
+        }
+      },
+      "CatalystBatchAge": {
+        "aliases": [
+          "catalyst batch age",
+          "charge lifetime"
+        ],
+        "kind": "latent",
+        "dist": {
+          "normal": [
+            50,
+            16
+          ]
+        }
+      },
+      "InletTemperature": {
+        "aliases": [
+          "inlet temperature",
+          "feed preheat"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            40,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "InletTemperatureHarmAxis": {
+        "aliases": [
+          "harm axis"
+        ],
+        "kind": "latent",
+        "parents": [
+          "InletTemperature"
+        ],
+        "mech": {
+          "form": "sign_flip",
+          "of": "InletTemperature",
+          "knee": 45,
+          "lo_gain": 0.05,
+          "hi_gain": 0.9,
+          "intercept": 2.0
+        }
+      },
+      "CatalystPoisoning": {
+        "aliases": [
+          "catalyst poisoning",
+          "active-site poisoning",
+          "poison adsorption"
+        ],
+        "kind": "latent",
+        "parents": [
+          "InletTemperatureHarmAxis",
+          "CatalystPoisoningSusceptibility"
+        ],
+        "mech": {
+          "form": "interaction",
+          "a": "InletTemperatureHarmAxis",
+          "b": "CatalystPoisoningSusceptibility",
+          "gain": 260.0,
+          "scale": 100.0,
+          "intercept": 3.0
+        },
+        "noise": {
+          "normal": [
+            0,
+            1.5
+          ]
+        }
+      },
+      "CokeDeposition": {
+        "aliases": [
+          "coke deposition",
+          "carbon fouling"
+        ],
+        "kind": "latent",
+        "parents": [
+          "CatalystPoisoning"
+        ],
+        "mech": {
+          "form": "hill",
+          "of": "CatalystPoisoning",
+          "vmax": 70,
+          "k": 35,
+          "n": 2
+        }
+      },
+      "CatalystSintering": {
+        "aliases": [
+          "catalyst sintering",
+          "metal-particle coarsening"
+        ],
+        "kind": "latent",
+        "parents": [
+          "CokeDeposition"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "CokeDeposition": 0.9
+          },
+          "intercept": 5
+        }
+      },
+      "UnderlyingConversionEfficiency": {
+        "aliases": [
+          "underlying true objective"
+        ],
+        "kind": "latent",
+        "parents": [
+          "CatalystSintering",
+          "CatalystBatchAge"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "CatalystSintering": -0.9,
+            "CatalystBatchAge": 0.2
+          },
+          "intercept": 15
+        }
+      },
+      "ConversionEfficiency": {
+        "aliases": [
+          "conversion efficiency",
+          "reactor conversion",
+          "process conversion"
+        ],
+        "kind": "outcome",
+        "parents": [
+          "UnderlyingConversionEfficiency"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "UnderlyingConversionEfficiency": 1.0
+          },
+          "intercept": 0
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "CatalystSurfaceArea": {
+        "aliases": [
+          "catalyst surface area",
+          "active-site density"
+        ],
+        "kind": "observable",
+        "parents": [
+          "CatalystSintering"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "CatalystSintering": 0.8
+          },
+          "intercept": 5
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            8.61
+          ]
+        }
+      },
+      "ReactorPressure": {
+        "aliases": [
+          "reactor pressure",
+          "system pressure"
+        ],
+        "kind": "observable",
+        "parents": [
+          "CatalystBatchAge"
+        ],
+        "mech": {
+          "form": "linear",
+          "weights": {
+            "CatalystBatchAge": 0.7
+          },
+          "intercept": 40
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            4
+          ]
+        }
+      },
+      "AgitationCat": {
+        "aliases": [
+          "agitation rate",
+          "mixing intensity"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "ParticleSizeCat": {
+        "aliases": [
+          "catalyst particle size",
+          "pellet size"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "RecycleGasPurity": {
+        "aliases": [
+          "recycle-gas purity",
+          "loop purity"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "PurgeRate": {
+        "aliases": [
+          "purge rate",
+          "vent rate"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "CoolantFlow": {
+        "aliases": [
+          "coolant flow",
+          "utility flow"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "PreheaterDuty": {
+        "aliases": [
+          "preheater duty",
+          "heat input"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "RecycleRatio": {
+        "aliases": [
+          "recycle ratio",
+          "recycle fraction"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "BedHeight": {
+        "aliases": [
+          "bed height",
+          "catalyst-bed depth"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "QuenchFlow": {
+        "aliases": [
+          "quench flow",
+          "quench injection"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      },
+      "InertDiluent": {
+        "aliases": [
+          "inert diluent",
+          "diluent fraction"
+        ],
+        "kind": "observable",
+        "dist": {
+          "normal": [
+            50,
+            12
+          ]
+        },
+        "measurable": true,
+        "assay_noise": {
+          "normal": [
+            0,
+            3
+          ]
+        }
+      }
+    },
+    "actuators": {
+      "InletTemperature": {
+        "aliases": [
+          "inlet temperature",
+          "feed preheat"
+        ],
+        "target": "InletTemperature",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 40,
+        "description": "controller for InletTemperature"
+      },
+      "GuardBedAdsorbent": {
+        "aliases": [
+          "guard-bed adsorbent",
+          "poison-scavenger bed",
+          "sacrificial adsorbent"
+        ],
+        "target": "CatalystPoisoning",
+        "op": "scale",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 0,
+        "expr": "1-sat(d;k=0.66)",
+        "description": "a continuous dosing control",
+        "side_effect": {
+          "target": "UnderlyingConversionEfficiency",
+          "expr": "-overstrip(d;thr=0.66,gain=30)"
+        }
+      },
+      "set_AgitationCat": {
+        "aliases": [
+          "set agitation rate",
+          "set mixing intensity",
+          "adjust AgitationCat"
+        ],
+        "target": "AgitationCat",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for AgitationCat"
+      },
+      "set_ParticleSizeCat": {
+        "aliases": [
+          "set catalyst particle size",
+          "set pellet size",
+          "adjust ParticleSizeCat"
+        ],
+        "target": "ParticleSizeCat",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for ParticleSizeCat"
+      },
+      "set_RecycleGasPurity": {
+        "aliases": [
+          "set recycle-gas purity",
+          "set loop purity",
+          "adjust RecycleGasPurity"
+        ],
+        "target": "RecycleGasPurity",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for RecycleGasPurity"
+      },
+      "set_PurgeRate": {
+        "aliases": [
+          "set purge rate",
+          "set vent rate",
+          "adjust PurgeRate"
+        ],
+        "target": "PurgeRate",
+        "op": "set",
+        "dtype": "continuous",
+        "range": [
+          0,
+          100
+        ],
+        "default": 50,
+        "description": "control for PurgeRate"
+      }
+    },
+    "outcome": "ConversionEfficiency",
+    "higher_is_better": true,
+    "goal": "UnderlyingConversionEfficiency"
+  },
+  "ground_truth": {
+    "true_root": "CatalystPoisoning",
+    "true_mechanism_proxy": "CatalystSurfaceArea",
+    "confounded_decoys": [
+      "ReactorPressure"
+    ],
+    "targeted_actuator": "GuardBedAdsorbent",
+    "symptom_trap_actuator": "GuardBedAdsorbent",
+    "co_actuators": null,
+    "selection_decoy": null,
+    "_selection_nodes": [],
+    "subtype_policy": null,
+    "latent_plain_name": "a hidden catalyst poisoning that propagates through coke deposition, catalyst sintering to the outcome",
+    "naive_interventions": [
+      {
+        "InletTemperature": 100
+      },
+      {
+        "set_AgitationCat": 100
+      },
+      {
+        "set_ParticleSizeCat": 100
+      }
+    ],
+    "_features": [
+      "interior_dose",
+      "sign_flip"
+    ],
+    "_skin": "catalysis",
+    "_depth": 2,
+    "_archetype": "dose_window",
+    "_seed": 14000009
+  },
+  "oracle": {
+    "gold": {
+      "intervention": {
+        "InletTemperature": 0.0,
+        "GuardBedAdsorbent": 66.0
+      },
+      "expected_utility": 20.495444262135386,
+      "baseline_utility": 13.944525734294812,
+      "active_actuators": [
+        "InletTemperature",
+        "GuardBedAdsorbent"
+      ]
+    },
+    "counterfactual_battery": {
+      "true_mechanism_proxy": "CatalystSurfaceArea",
+      "valid_mechanism_proxies": [
+        "CatalystSurfaceArea"
+      ],
+      "lenient_mechanism_proxies": [
+        "CatalystSurfaceArea"
+      ],
+      "confounded_decoys": [
+        "ReactorPressure"
+      ],
+      "actuator_sign_predictions": {
+        "InletTemperature": "-",
+        "GuardBedAdsorbent": "-",
+        "set_AgitationCat": "0",
+        "set_ParticleSizeCat": "0",
+        "set_RecycleGasPurity": "0",
+        "set_PurgeRate": "0"
+      },
+      "targeted_actuator": "GuardBedAdsorbent",
+      "symptom_trap_actuator": "GuardBedAdsorbent"
+    },
+    "calibration": {
+      "proxy_assay_noise": 8.61,
+      "proxy_corr": 0.521,
+      "decoy_corr": 0.356
+    },
+    "audits": {
+      "decoy": {
+        "passed": true,
+        "decoys": {
+          "ReactorPressure": {
+            "obs_corr": 0.356,
+            "clamp_do_effect": 0.0,
+            "ok": true
+          }
+        }
+      },
+      "proxy_signal": {
+        "passed": true,
+        "proxy_outcome_corr": -0.521,
+        "obs_ok": true,
+        "interventional_shift_sd": 0.55,
+        "interv_ok": false,
+        "band": [
+          0.35,
+          0.75
+        ]
+      },
+      "distractor_inertness": {
+        "passed": true,
+        "n_inert_checked": 4,
+        "violations": []
+      },
+      "gold_selfconsistency": {
+        "passed": true,
+        "gold_utility": 20.5,
+        "beating_perturbations": []
+      },
+      "counterintuitiveness": {
+        "passed": true,
+        "baseline_utility": 13.93,
+        "gold_utility": 20.5,
+        "naive_results": [
+          {
+            "naive": {
+              "InletTemperature": 100
+            },
+            "utility": -24.44,
+            "gain_over_baseline": -38.37,
+            "fraction_of_gold_benefit": -5.844,
+            "helps": false
+          },
+          {
+            "naive": {
+              "set_AgitationCat": 100
+            },
+            "utility": 13.93,
+            "gain_over_baseline": 0.0,
+            "fraction_of_gold_benefit": 0.0,
+            "helps": false
+          },
+          {
+            "naive": {
+              "set_ParticleSizeCat": 100
+            },
+            "utility": 13.93,
+            "gain_over_baseline": 0.0,
+            "fraction_of_gold_benefit": 0.0,
+            "helps": false
+          }
+        ],
+        "note": "obvious first move must not meaningfully help"
+      }
+    }
+  }
+}

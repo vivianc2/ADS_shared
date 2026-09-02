@@ -24,7 +24,9 @@ from candidates import (  # noqa: E402
     PROMPTS,
     REWARDS,
     configuration_definitions,
+    evaluate_candidate_rewards,
     evaluate_terminal,
+    prompt_definitions,
 )
 from env import RPGEnv  # noqa: E402
 from generate_v7 import audit, to_record  # noqa: E402
@@ -32,20 +34,26 @@ from run_agent_v6 import load_world_file  # noqa: E402
 from sampler import ARCHETYPES as SAMPLER_ARCHETYPES, sample_world  # noqa: E402
 from skins import skin_names  # noqa: E402
 
-from servers import SamplingSettings, VLLMClient  # noqa: E402
+from servers import (  # noqa: E402
+    ChatTemplateTokenCounter,
+    ContextLengthExceededError,
+    Generation,
+    InputLengthExceededError,
+    SamplingSettings,
+    VLLMClient,
+)
 from storage import (  # noqa: E402
     atomic_write_json,
     atomic_write_jsonl,
     canonical_json,
-    completed_final_record,
-    read_jsonl,
+    completed_rollout_records,
     require_finite,
     sha256_bytes,
     sha256_file,
 )
 
 
-SCHEMA_VERSION = "prompt_compare_v1"
+SCHEMA_VERSION = "prompt_compare_v3"
 EXPECTED_ARCHETYPES = (
     "confounded_chain",
     "collider_selection",
@@ -65,13 +73,17 @@ if tuple(SAMPLER_ARCHETYPES) != EXPECTED_ARCHETYPES:
 
 RUN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 REQUIRED_FIGURES = (
-    "overall_avg_score_heatmap.png",
-    "overall_best_of_8_heatmap.png",
-    "reward_summary.png",
+    "prompt_score_summary.png",
+    "prompt_reward_summary.png",
     "archetype_avg_score_heatmap.png",
     "archetype_avg_part_a_heatmap.png",
     "archetype_avg_part_b_heatmap.png",
 )
+REQUIRED_SHEETS = (
+    "prompt_score_summary.csv",
+    "prompt_reward_summary.csv",
+)
+CONTEXT_LIMIT_ACTION = '<action type="give_up">{}</action>'
 
 
 class IncompleteRunError(RuntimeError):
@@ -109,7 +121,7 @@ def run_directory(runs_root: Path, run_id: str) -> Path:
 
 def derive_rollout_seed(master_seed: int, world_id: str, prompt_id: str,
                         rollout_index: int) -> int:
-    """Stable seed deliberately independent of reward_id."""
+    """Stable seed for one prompt rollout, independent of post-hoc reward choice."""
     encoded = canonical_json({
         "master_seed": int(master_seed),
         "world_id": world_id,
@@ -125,6 +137,7 @@ def _science_payload(args, sampling: SamplingSettings) -> dict[str, Any]:
     # so it exercises the same batching, variance, and best-of-eight paths.
     rollouts_per_group = 8
     configurations = configuration_definitions()
+    prompts = prompt_definitions()
     return {
         "schema_version": SCHEMA_VERSION,
         "master_seed": int(args.seed),
@@ -133,6 +146,12 @@ def _science_payload(args, sampling: SamplingSettings) -> dict[str, Any]:
         "model": args.model,
         "served_model_name": args.served_model_name or args.model,
         "chat_template": "model default via vLLM OpenAI chat API",
+        "conversation": {
+            "history_mode": "full_episode_openai_messages",
+            "assistant_message_source": "environment_parser_input",
+            "input_length_policy": "client_chat_template_stop_before_request",
+            "context_overflow": "recorded_zero_reward_server_fallback_no_retry",
+        },
         "inference": {
             "dtype": args.dtype,
             "max_model_len": int(args.max_model_len),
@@ -149,15 +168,25 @@ def _science_payload(args, sampling: SamplingSettings) -> dict[str, Any]:
             "worlds_per_archetype": worlds_per_archetype,
             "worlds": len(EXPECTED_ARCHETYPES) * worlds_per_archetype,
             "configurations": len(configurations),
+            "prompt_configurations": len(prompts),
+            "reward_configurations": len(REWARDS),
             "rollouts_per_group": rollouts_per_group,
             "episodes": (
                 len(EXPECTED_ARCHETYPES)
                 * worlds_per_archetype
-                * len(configurations)
+                * len(prompts)
                 * rollouts_per_group
+            ),
+            "reward_evaluations": (
+                len(EXPECTED_ARCHETYPES)
+                * worlds_per_archetype
+                * len(prompts)
+                * rollouts_per_group
+                * len(REWARDS)
             ),
         },
         "archetypes": list(EXPECTED_ARCHETYPES),
+        "prompts": prompts,
         "configurations": configurations,
     }
 
@@ -176,6 +205,17 @@ def _validate_world_artifacts(run_dir: Path, manifest: dict[str, Any]) -> None:
         raise RuntimeError(
             f"manifest configuration matrix is {config_ids}, expected {expected_config_ids}"
         )
+    prompt_ids = [item.get("prompt_id") for item in science.get("prompts", [])]
+    if prompt_ids != list(PROMPTS):
+        raise RuntimeError(
+            f"manifest prompt inference matrix is {prompt_ids}, expected {list(PROMPTS)}"
+        )
+    for prompt in science["prompts"]:
+        system_prompt = prompt.get("system_prompt")
+        if not isinstance(system_prompt, str):
+            raise RuntimeError(f"manifest prompt {prompt['prompt_id']} has no text")
+        if prompt.get("prompt_sha256") != sha256_bytes(system_prompt.encode("utf-8")):
+            raise RuntimeError(f"manifest prompt hash mismatch for {prompt['prompt_id']}")
     expected = science["expected"]
     entries = manifest.get("worlds", [])
     if len(entries) != expected["worlds"]:
@@ -323,14 +363,14 @@ def prepare_run(args, sampling: SamplingSettings) -> tuple[Path, dict[str, Any]]
     return run_dir, manifest
 
 
-def output_path(run_dir: Path, world: dict[str, Any], config_id: str,
+def output_path(run_dir: Path, world: dict[str, Any], prompt_id: str,
                 rollout_index: int) -> Path:
     return (
         run_dir
         / "outputs"
         / world["archetype"]
         / world["world_id"]
-        / config_id
+        / prompt_id
         / f"rollout_{rollout_index:02d}.jsonl"
     )
 
@@ -350,22 +390,52 @@ def _transcript_hash(turn_records: Iterable[dict[str, Any]]) -> str:
     return sha256_bytes(canonical_json(paired_fields).encode("utf-8"))
 
 
+def _request_messages_hash(messages: list[dict[str, str]]) -> str:
+    return sha256_bytes(canonical_json(messages).encode("utf-8"))
+
+
+def _assistant_history_content(record: dict[str, Any]) -> str:
+    if record.get("synthetic_action"):
+        if record.get("finish_reason") not in {"length", "context_length"}:
+            raise ValueError("synthetic action does not identify a length limit")
+        return CONTEXT_LIMIT_ACTION
+    raw = record["raw_model_response"]
+    if not record.get("parser_input_synthesized"):
+        return raw
+    reasoning = record.get("reasoning_content")
+    if not isinstance(reasoning, str) or not reasoning:
+        raise ValueError("synthesized parser input has no reasoning content")
+    return f"<reasoning>{reasoning}</reasoning>\n{raw}"
+
+
 def run_episode(run_dir: Path, manifest: dict[str, Any], world_meta: dict[str, Any],
-                config: dict[str, Any], rollout_index: int, client: VLLMClient) -> str:
-    destination = output_path(run_dir, world_meta, config["config_id"], rollout_index)
-    completed = completed_final_record(destination)
-    if completed is not None:
-        return "skipped"
+                prompt: dict[str, Any], rollout_index: int, client: VLLMClient) -> str:
+    prompt_id = prompt["prompt_id"]
+    destination = output_path(run_dir, world_meta, prompt_id, rollout_index)
+    completed_records = completed_rollout_records(destination)
+    if completed_records is not None:
+        try:
+            validate_rollout_records(
+                completed_records,
+                manifest,
+                world_meta,
+                prompt,
+                rollout_index,
+            )
+        except ValueError:
+            pass
+        else:
+            return "skipped"
 
     world, precomputed = load_world_file(str(run_dir / world_meta["file"]))
     science = manifest["science"]
     env_cfg = science["environment"]
     seed = derive_rollout_seed(
-        science["master_seed"], world_meta["world_id"], config["prompt_id"],
+        science["master_seed"], world_meta["world_id"], prompt_id,
         rollout_index,
     )
     data_dir = (
-        run_dir / "logs" / "episode_data" / config["config_id"]
+        run_dir / "logs" / "episode_data" / prompt_id
         / world_meta["world_id"] / f"rollout_{rollout_index:02d}"
     )
     env = RPGEnv(
@@ -376,18 +446,52 @@ def run_episode(run_dir: Path, manifest: dict[str, Any], world_meta: dict[str, A
         budget=env_cfg["budget"],
         catalog_seed=world_meta["seed"],
         data_dir=str(data_dir),
-        system_prompt=PROMPTS[config["prompt_id"]],
-        reward_fn=REWARDS[config["reward_id"]],
+        system_prompt=prompt["system_prompt"],
+        reward_fn=REWARDS["r1"],
     )
 
     observation = env.reset()
+    messages: list[dict[str, str]] = [
+        {"role": "system", "content": env.system_prompt},
+    ]
     turn_records: list[dict[str, Any]] = []
     done = False
-    candidate_reward = 0.0
+    terminal_reward = 0.0
     info: dict[str, Any] = {}
+    context_limit_error: str | None = None
+    length_limit_source: str | None = None
     while not done:
-        generation = client.generate(env.system_prompt, observation, seed)
-        next_observation, candidate_reward, done, info = env.step(generation.action_text)
+        messages.append({"role": "user", "content": observation})
+        request_messages = [dict(message) for message in messages]
+        try:
+            generation = client.generate(request_messages, seed)
+        except InputLengthExceededError as exc:
+            context_limit_error = str(exc)
+            length_limit_source = "client_input"
+            generation = Generation(
+                raw_text="",
+                action_text=CONTEXT_LIMIT_ACTION,
+                reasoning_content=None,
+                finish_reason="length",
+                usage={},
+                attempts=0,
+                latency_s=0.0,
+                prompt_tokens=exc.prompt_tokens,
+            )
+        except ContextLengthExceededError as exc:
+            context_limit_error = str(exc)
+            length_limit_source = "server_context"
+            generation = Generation(
+                raw_text="",
+                action_text=CONTEXT_LIMIT_ACTION,
+                reasoning_content=None,
+                finish_reason="context_length",
+                usage={},
+                attempts=1,
+                latency_s=0.0,
+                prompt_tokens=exc.prompt_tokens,
+            )
+        next_observation, terminal_reward, done, info = env.step(generation.action_text)
         action_type = env.turns[-1].get("action_type") if env.turns else None
         turn_records.append({
             "schema_version": SCHEMA_VERSION,
@@ -395,22 +499,26 @@ def run_episode(run_dir: Path, manifest: dict[str, Any], world_meta: dict[str, A
             "run_id": manifest["run_id"],
             "world_id": world_meta["world_id"],
             "archetype": world_meta["archetype"],
-            "config_id": config["config_id"],
-            "prompt_id": config["prompt_id"],
-            "reward_id": config["reward_id"],
+            "prompt_id": prompt_id,
             "rollout_index": rollout_index,
             "turn_index": len(turn_records),
             "request_seed": seed,
+            "request_message_count": len(request_messages),
+            "request_messages_sha256": _request_messages_hash(request_messages),
+            "request_prompt_tokens": getattr(generation, "prompt_tokens", None),
             "observation": observation,
             "raw_model_response": generation.raw_text,
             "reasoning_content": generation.reasoning_content,
             "parser_input_synthesized": generation.action_text != generation.raw_text,
+            "synthetic_action": length_limit_source is not None,
+            "request_error": context_limit_error,
             "parsed_action_type": action_type,
             "finish_reason": generation.finish_reason,
             "timing": {"latency_s": generation.latency_s},
             "transport_attempts": generation.attempts,
             "usage": generation.usage,
         })
+        messages.append({"role": "assistant", "content": generation.action_text})
         observation = next_observation
 
     terminal_turn = env.turns[-1] if env.turns else {}
@@ -423,8 +531,24 @@ def run_episode(run_dir: Path, manifest: dict[str, Any], world_meta: dict[str, A
         precomputed["battery"],
         n_interventions=int(info.get("n_interventions", 0)),
     )
+    candidate_rewards = evaluate_candidate_rewards(
+        answer_struct,
+        world,
+        env.cat,
+        precomputed["gold"],
+        precomputed["battery"],
+        n_interventions=int(info.get("n_interventions", 0)),
+    )
+    if not math.isclose(
+        candidate_rewards["r1"], float(terminal_reward), rel_tol=0.0, abs_tol=1e-12
+    ):
+        raise RuntimeError("terminal r1 reward disagrees with the environment return value")
     last_action = turn_records[-1].get("parsed_action_type") if turn_records else None
-    if info.get("forced"):
+    if length_limit_source == "client_input":
+        termination_reason = "input_length"
+    elif length_limit_source == "server_context":
+        termination_reason = "context_limit"
+    elif info.get("forced"):
         termination_reason = "turn_cap"
     elif last_action == "give_up":
         termination_reason = "give_up"
@@ -439,13 +563,11 @@ def run_episode(run_dir: Path, manifest: dict[str, Any], world_meta: dict[str, A
         "run_id": manifest["run_id"],
         "world_id": world_meta["world_id"],
         "archetype": world_meta["archetype"],
-        "config_id": config["config_id"],
-        "prompt_id": config["prompt_id"],
-        "reward_id": config["reward_id"],
+        "prompt_id": prompt_id,
         "rollout_index": rollout_index,
         "request_seed": seed,
         "sampling": science["sampling"],
-        "candidate_reward": float(candidate_reward),
+        "candidate_rewards": candidate_rewards,
         "candidate_part_a": float(info.get("part_a", 0.0)),
         "candidate_part_b": float(info.get("part_b", 0.0)),
         "invalid_id_fraction": float(info.get("invalid_id_fraction", 0.0)),
@@ -457,6 +579,7 @@ def run_episode(run_dir: Path, manifest: dict[str, Any], world_meta: dict[str, A
         "evaluation_accepted": evaluation["accepted"],
         "evaluation_error": evaluation["evaluation_error"],
         "termination_reason": termination_reason,
+        "context_limit_error": context_limit_error,
         "intervention_count": int(info.get("n_interventions", 0)),
         "experiment_count": int(info.get("queries_used", 0)),
         "turn_count": int(info.get("turns", len(turn_records))),
@@ -473,10 +596,23 @@ def run_rollouts(run_dir: Path, manifest: dict[str, Any], base_urls: tuple[str, 
         raise ValueError("exactly three worker base URLs are required")
     science = manifest["science"]
     served_name = science["served_model_name"]
-    clients = [VLLMClient(url, served_name, sampling, api_key=api_key) for url in base_urls]
+    token_counter = ChatTemplateTokenCounter(
+        science["model"],
+        enable_thinking=sampling.enable_thinking,
+    )
+    clients = [
+        VLLMClient(
+            url,
+            served_name,
+            sampling,
+            api_key=api_key,
+            token_counter=token_counter,
+        )
+        for url in base_urls
+    ]
     groups = [
-        (config, world)
-        for config in science["configurations"]
+        (prompt, world)
+        for prompt in science["prompts"]
         for world in manifest["worlds"]
     ]
     buckets = [groups[index::3] for index in range(3)]
@@ -495,11 +631,11 @@ def run_rollouts(run_dir: Path, manifest: dict[str, Any], base_urls: tuple[str, 
     def worker(worker_index: int) -> list[dict[str, Any]]:
         errors = []
         client = clients[worker_index]
-        for config, world in buckets[worker_index]:
+        for prompt, world in buckets[worker_index]:
             with ThreadPoolExecutor(max_workers=rollouts_per_group) as group_pool:
                 futures = {
                     group_pool.submit(
-                        run_episode, run_dir, manifest, world, config, rollout_index, client
+                        run_episode, run_dir, manifest, world, prompt, rollout_index, client
                     ): rollout_index
                     for rollout_index in range(rollouts_per_group)
                 }
@@ -516,11 +652,11 @@ def run_rollouts(run_dir: Path, manifest: dict[str, Any], base_urls: tuple[str, 
                             "base_url": base_urls[worker_index],
                             "world_id": world["world_id"],
                             "archetype": world["archetype"],
-                            "config_id": config["config_id"],
+                            "prompt_id": prompt["prompt_id"],
                             "rollout_index": rollout_index,
                             "request_seed": derive_rollout_seed(
                                 science["master_seed"], world["world_id"],
-                                config["prompt_id"], rollout_index,
+                                prompt["prompt_id"], rollout_index,
                             ),
                             "error_type": type(exc).__name__,
                             "error": str(exc),
@@ -549,13 +685,11 @@ TERMINAL_REQUIRED = (
     "world_id",
     "run_id",
     "archetype",
-    "config_id",
     "prompt_id",
-    "reward_id",
     "rollout_index",
     "request_seed",
     "sampling",
-    "candidate_reward",
+    "candidate_rewards",
     "candidate_part_a",
     "candidate_part_b",
     "invalid_id_fraction",
@@ -567,6 +701,7 @@ TERMINAL_REQUIRED = (
     "evaluation_accepted",
     "evaluation_error",
     "termination_reason",
+    "context_limit_error",
     "intervention_count",
     "experiment_count",
     "turn_count",
@@ -583,11 +718,14 @@ def _population_variance(values: list[float]) -> float:
     return float(statistics.pvariance(values))
 
 
-def summarize_world_rollouts(values: list[dict[str, Any]]) -> dict[str, float | int]:
+def summarize_world_rollouts(values: list[dict[str, Any]],
+                             reward_id: str) -> dict[str, float | int]:
     """Apply the exact per-world definitions to one completed rollout group."""
     if not values:
         raise ValueError("cannot summarize an empty rollout group")
-    rewards = [float(value["candidate_reward"]) for value in values]
+    if reward_id not in REWARDS:
+        raise ValueError(f"unknown reward id: {reward_id}")
+    rewards = [float(value["candidate_rewards"][reward_id]) for value in values]
     scores = [float(value["score"]) for value in values]
     return {
         "n_rollouts": len(values),
@@ -606,11 +744,23 @@ def validate_terminal_schema(final: dict[str, Any]) -> None:
         raise ValueError(f"terminal record missing keys {absent}")
     if final.get("record_type") != "terminal" or final.get("complete") is not True:
         raise ValueError("final record is not a completed terminal summary")
-    for metric in ("candidate_reward", "score", "part_a", "part_b"):
+    context_error = final["context_limit_error"]
+    if final.get("termination_reason") in {"input_length", "context_limit"}:
+        if not isinstance(context_error, str) or not context_error:
+            raise ValueError("length-limit terminal has no error detail")
+    elif context_error is not None:
+        raise ValueError("non-length terminal unexpectedly has a context-limit error")
+    for metric in ("score", "part_a", "part_b"):
         require_finite(final[metric], metric)
-    candidate_reward = float(final["candidate_reward"])
-    if candidate_reward < -0.25 or candidate_reward > 1.0:
-        raise ValueError(f"candidate_reward={candidate_reward} is outside [-0.25, 1]")
+    rewards = final["candidate_rewards"]
+    if not isinstance(rewards, dict) or set(rewards) != set(REWARDS):
+        raise ValueError("candidate_rewards must contain exactly r1, r2, and r3")
+    for reward_id, value in rewards.items():
+        number = require_finite(value, f"candidate_rewards.{reward_id}")
+        if number < -0.25 or number > 1.0:
+            raise ValueError(
+                f"candidate_rewards.{reward_id}={number} is outside [-0.25, 1]"
+            )
     for metric in (
         "candidate_part_a", "candidate_part_b", "invalid_id_fraction",
         "score", "part_a", "part_b",
@@ -618,6 +768,204 @@ def validate_terminal_schema(final: dict[str, Any]) -> None:
         number = require_finite(final[metric], metric)
         if number < 0.0 or number > 1.0:
             raise ValueError(f"{metric}={number} is outside [0, 1]")
+    candidate_part_a = float(final["candidate_part_a"])
+    candidate_part_b = float(final["candidate_part_b"])
+    invalid_fraction = float(final["invalid_id_fraction"])
+    expected_rewards = {
+        "r1": 0.5 * candidate_part_a + 0.5 * candidate_part_b - 0.25 * invalid_fraction,
+        "r2": candidate_part_a - 0.25 * invalid_fraction,
+        "r3": candidate_part_b - 0.25 * invalid_fraction,
+    }
+    for reward_id, expected_reward in expected_rewards.items():
+        if not math.isclose(
+            float(rewards[reward_id]), expected_reward, rel_tol=0.0, abs_tol=1e-12
+        ):
+            raise ValueError(
+                f"candidate_rewards.{reward_id} disagrees with its stored components"
+            )
+
+
+def _validate_rollout_records(
+    records: list[dict[str, Any]],
+    manifest: dict[str, Any],
+    world: dict[str, Any],
+    prompt: dict[str, Any],
+    rollout_index: int,
+) -> dict[str, Any]:
+    if not records:
+        raise ValueError("rollout JSONL has no records")
+    final = records[-1]
+    turns = records[:-1]
+    validate_terminal_schema(final)
+
+    science = manifest["science"]
+    prompt_id = prompt["prompt_id"]
+    wanted_seed = derive_rollout_seed(
+        science["master_seed"],
+        world["world_id"],
+        prompt_id,
+        rollout_index,
+    )
+    expected_terminal_fields = {
+        "schema_version": SCHEMA_VERSION,
+        "run_id": manifest["run_id"],
+        "world_id": world["world_id"],
+        "archetype": world["archetype"],
+        "prompt_id": prompt_id,
+        "rollout_index": rollout_index,
+        "request_seed": wanted_seed,
+        "sampling": science["sampling"],
+    }
+    if any(final.get(key) != value for key, value in expected_terminal_fields.items()):
+        raise ValueError("terminal identifiers or settings do not match the manifest/path")
+    if final["turn_count"] != len(turns):
+        raise ValueError("terminal turn_count does not match JSONL turns")
+    if final["transcript_sha256"] != _transcript_hash(turns):
+        raise ValueError("terminal transcript hash does not match turn records")
+
+    for count_name in ("intervention_count", "experiment_count", "turn_count"):
+        count = final[count_name]
+        if isinstance(count, bool) or not isinstance(count, int) or count < 0:
+            raise ValueError(f"terminal {count_name} is not a nonnegative integer")
+    if final["intervention_count"] > final["experiment_count"]:
+        raise ValueError("intervention_count exceeds experiment_count")
+    if final["experiment_count"] > science["environment"]["budget"]:
+        raise ValueError("experiment_count exceeds environment budget")
+    if not 1 <= final["turn_count"] <= science["environment"]["max_turns"]:
+        raise ValueError("turn_count is outside the environment turn range")
+
+    request_history: list[dict[str, str]] = [
+        {"role": "system", "content": prompt["system_prompt"]},
+    ]
+    malformed_actions = 0
+    length_finishes = 0
+    successful_transport_retries = 0
+    synthetic_turns = 0
+    max_input_tokens = science["sampling"]["max_input_tokens"]
+    for turn_index, record in enumerate(turns):
+        if record.get("record_type") != "turn":
+            raise ValueError(f"record {turn_index} is not a turn record")
+        expected_turn_fields = {
+            "schema_version": SCHEMA_VERSION,
+            "run_id": manifest["run_id"],
+            "world_id": world["world_id"],
+            "archetype": world["archetype"],
+            "prompt_id": prompt_id,
+            "rollout_index": rollout_index,
+            "turn_index": turn_index,
+            "request_seed": wanted_seed,
+        }
+        for key, wanted in expected_turn_fields.items():
+            if record.get(key) != wanted:
+                raise ValueError(f"turn {turn_index} has incorrect {key}")
+        if not isinstance(record.get("observation"), str):
+            raise ValueError(f"turn {turn_index} observation is not text")
+        if not isinstance(record.get("raw_model_response"), str):
+            raise ValueError(f"turn {turn_index} raw response is not text")
+        reasoning = record.get("reasoning_content")
+        if reasoning is not None and not isinstance(reasoning, str):
+            raise ValueError(f"turn {turn_index} reasoning content is not text")
+        if not isinstance(record.get("parser_input_synthesized"), bool):
+            raise ValueError(f"turn {turn_index} parser synthesis flag is not boolean")
+        if not isinstance(record.get("synthetic_action"), bool):
+            raise ValueError(f"turn {turn_index} synthetic-action flag is not boolean")
+
+        request_error = record.get("request_error")
+        if record["synthetic_action"]:
+            synthetic_turns += 1
+            if turn_index != len(turns) - 1:
+                raise ValueError("only the final turn may be a synthetic length fallback")
+            if not isinstance(request_error, str) or not request_error:
+                raise ValueError(f"turn {turn_index} synthetic action has no request error")
+            if record.get("parsed_action_type") != "give_up":
+                raise ValueError(f"turn {turn_index} length fallback is not give_up")
+            finish_reason = record.get("finish_reason")
+            if finish_reason not in {"length", "context_length"}:
+                raise ValueError(f"turn {turn_index} synthetic action has invalid finish reason")
+            expected_reason = (
+                "input_length" if finish_reason == "length" else "context_limit"
+            )
+            if final["termination_reason"] != expected_reason:
+                raise ValueError(
+                    f"turn {turn_index} length fallback disagrees with terminal"
+                )
+        elif request_error is not None:
+            raise ValueError(f"turn {turn_index} has an unexpected request error")
+
+        request_history.append({"role": "user", "content": record["observation"]})
+        if record.get("request_message_count") != len(request_history):
+            raise ValueError(f"turn {turn_index} request message count is incorrect")
+        if record.get("request_messages_sha256") != _request_messages_hash(request_history):
+            raise ValueError(f"turn {turn_index} request history hash is incorrect")
+
+        prompt_tokens = record.get("request_prompt_tokens")
+        if (
+            isinstance(prompt_tokens, bool)
+            or not isinstance(prompt_tokens, int)
+            or prompt_tokens < 1
+        ):
+            raise ValueError(f"turn {turn_index} request prompt-token count is invalid")
+        attempts = record.get("transport_attempts")
+        if isinstance(attempts, bool) or not isinstance(attempts, int) or attempts < 0:
+            raise ValueError(f"turn {turn_index} transport-attempt count is invalid")
+        if record["synthetic_action"] and record["finish_reason"] == "length":
+            if prompt_tokens <= max_input_tokens:
+                raise ValueError(f"turn {turn_index} input stop did not exceed its limit")
+            if attempts != 0:
+                raise ValueError(f"turn {turn_index} client input stop reached transport")
+        else:
+            if prompt_tokens > max_input_tokens:
+                raise ValueError(f"turn {turn_index} oversized prompt was sent to the server")
+            if attempts < 1:
+                raise ValueError(f"turn {turn_index} server request has no transport attempt")
+
+        request_history.append({
+            "role": "assistant",
+            "content": _assistant_history_content(record),
+        })
+        latency = require_finite(
+            record.get("timing", {}).get("latency_s"),
+            f"turn {turn_index} latency",
+        )
+        if latency < 0:
+            raise ValueError(f"turn {turn_index} latency is negative")
+        if record.get("parsed_action_type") is None:
+            malformed_actions += 1
+        if record.get("finish_reason") == "length":
+            length_finishes += 1
+        successful_transport_retries += max(0, attempts - 1)
+
+    length_terminal = final["termination_reason"] in {"input_length", "context_limit"}
+    if length_terminal != (synthetic_turns == 1):
+        raise ValueError("synthetic length action and terminal reason are inconsistent")
+    return {
+        "final": final,
+        "malformed_actions": malformed_actions,
+        "length_finishes": length_finishes,
+        "successful_transport_retries": successful_transport_retries,
+    }
+
+
+def validate_rollout_records(
+    records: list[dict[str, Any]],
+    manifest: dict[str, Any],
+    world: dict[str, Any],
+    prompt: dict[str, Any],
+    rollout_index: int,
+) -> dict[str, Any]:
+    """Validate one complete rollout identically for resume and aggregation."""
+    try:
+        return _validate_rollout_records(
+            records,
+            manifest,
+            world,
+            prompt,
+            rollout_index,
+        )
+    except ValueError:
+        raise
+    except (IndexError, KeyError, TypeError) as exc:
+        raise ValueError(f"malformed rollout record: {exc}") from exc
 
 
 def _load_error_log(run_dir: Path) -> list[dict[str, Any]]:
@@ -636,6 +984,7 @@ def build_stats(run_dir: Path) -> dict[str, Any]:
     _validate_world_artifacts(run_dir, manifest)
     science = manifest["science"]
     configs = science["configurations"]
+    prompts = science["prompts"]
     rollouts_per_group = science["expected"]["rollouts_per_group"]
     terminals: dict[tuple[str, str, int], dict[str, Any]] = {}
     missing_paths: list[str] = []
@@ -644,91 +993,32 @@ def build_stats(run_dir: Path) -> dict[str, Any]:
     length_finishes = 0
     successful_transport_retries = 0
 
-    for config in configs:
+    for prompt in prompts:
         for world in manifest["worlds"]:
             for rollout_index in range(rollouts_per_group):
-                path = output_path(run_dir, world, config["config_id"], rollout_index)
+                path = output_path(run_dir, world, prompt["prompt_id"], rollout_index)
                 relative = path.relative_to(run_dir).as_posix()
-                final = completed_final_record(path)
-                if final is None:
+                records = completed_rollout_records(path)
+                if records is None:
                     missing_paths.append(relative)
                     continue
                 try:
-                    records = read_jsonl(path)
-                    validate_terminal_schema(final)
-                    if (
-                        final["world_id"] != world["world_id"]
-                        or final["config_id"] != config["config_id"]
-                        or final["rollout_index"] != rollout_index
-                    ):
-                        raise ValueError("terminal identifiers do not match output path")
-                    if final["schema_version"] != SCHEMA_VERSION or final["run_id"] != manifest["run_id"]:
-                        raise ValueError("terminal schema/run identifiers do not match manifest")
-                    wanted_seed = derive_rollout_seed(
-                        science["master_seed"], world["world_id"], config["prompt_id"],
+                    validated = validate_rollout_records(
+                        records,
+                        manifest,
+                        world,
+                        prompt,
                         rollout_index,
                     )
-                    if final["request_seed"] != wanted_seed:
-                        raise ValueError("stored request seed does not match deterministic seed")
-                    if final["prompt_id"] != config["prompt_id"] or final["reward_id"] != config["reward_id"]:
-                        raise ValueError("terminal prompt/reward ids do not match configuration")
-                    if final["archetype"] != world["archetype"]:
-                        raise ValueError("terminal archetype does not match world manifest")
-                    if final["sampling"] != science["sampling"]:
-                        raise ValueError("terminal sampling settings do not match manifest")
-                    if final["turn_count"] != len(records) - 1:
-                        raise ValueError("terminal turn_count does not match JSONL turns")
-                    if final["transcript_sha256"] != _transcript_hash(records[:-1]):
-                        raise ValueError("terminal transcript hash does not match turn records")
-                    for count_name in ("intervention_count", "experiment_count", "turn_count"):
-                        count = final[count_name]
-                        if isinstance(count, bool) or not isinstance(count, int) or count < 0:
-                            raise ValueError(f"terminal {count_name} is not a nonnegative integer")
-                    if final["intervention_count"] > final["experiment_count"]:
-                        raise ValueError("intervention_count exceeds experiment_count")
-                    if final["experiment_count"] > science["environment"]["budget"]:
-                        raise ValueError("experiment_count exceeds environment budget")
-                    if not 1 <= final["turn_count"] <= science["environment"]["max_turns"]:
-                        raise ValueError("turn_count is outside the environment turn range")
-                    for turn_index, record in enumerate(records[:-1]):
-                        if record.get("record_type") != "turn":
-                            raise ValueError(f"record {turn_index} is not a turn record")
-                        for key, wanted in (
-                            ("schema_version", SCHEMA_VERSION),
-                            ("run_id", manifest["run_id"]),
-                            ("world_id", world["world_id"]),
-                            ("archetype", world["archetype"]),
-                            ("config_id", config["config_id"]),
-                            ("prompt_id", config["prompt_id"]),
-                            ("reward_id", config["reward_id"]),
-                            ("rollout_index", rollout_index),
-                            ("turn_index", turn_index),
-                            ("request_seed", wanted_seed),
-                        ):
-                            if record.get(key) != wanted:
-                                raise ValueError(f"turn {turn_index} has incorrect {key}")
-                        if not isinstance(record.get("observation"), str):
-                            raise ValueError(f"turn {turn_index} observation is not text")
-                        if not isinstance(record.get("raw_model_response"), str):
-                            raise ValueError(f"turn {turn_index} raw response is not text")
-                        latency = require_finite(
-                            record.get("timing", {}).get("latency_s"),
-                            f"turn {turn_index} latency",
-                        )
-                        if latency < 0:
-                            raise ValueError(f"turn {turn_index} latency is negative")
-                        if record.get("parsed_action_type") is None:
-                            malformed_actions += 1
-                        if record.get("finish_reason") == "length":
-                            length_finishes += 1
-                        successful_transport_retries += max(
-                            0, int(record.get("transport_attempts", 1)) - 1
-                        )
-                except (OSError, ValueError, json.JSONDecodeError) as exc:
+                except ValueError as exc:
                     invalid_files.append({"path": relative, "error": str(exc)})
                     missing_paths.append(relative)
                     continue
-                terminals[(config["config_id"], world["world_id"], rollout_index)] = final
+                final = validated["final"]
+                malformed_actions += validated["malformed_actions"]
+                length_finishes += validated["length_finishes"]
+                successful_transport_retries += validated["successful_transport_retries"]
+                terminals[(prompt["prompt_id"], world["world_id"], rollout_index)] = final
 
     expected_episodes = science["expected"]["episodes"]
     complete = not missing_paths and len(terminals) == expected_episodes
@@ -739,9 +1029,13 @@ def build_stats(run_dir: Path) -> dict[str, Any]:
         "actual_worlds": len(manifest["worlds"]),
         "expected_configurations": science["expected"]["configurations"],
         "actual_configurations": len(configs),
+        "expected_prompt_configurations": science["expected"]["prompt_configurations"],
+        "actual_prompt_configurations": len(prompts),
         "expected_rollouts_per_group": rollouts_per_group,
         "expected_episodes": expected_episodes,
         "completed_episodes": len(terminals),
+        "expected_reward_evaluations": science["expected"]["reward_evaluations"],
+        "completed_reward_evaluations": len(terminals) * len(REWARDS),
         "missing_count": len(missing_paths),
         "missing_paths": missing_paths,
         "invalid_files": invalid_files,
@@ -758,6 +1052,7 @@ def build_stats(run_dir: Path) -> dict[str, Any]:
             "rpg_synergy_soft": science["rpg_synergy_soft"],
             "sampling": science["sampling"],
             "inference": science["inference"],
+            "conversation": science["conversation"],
             "environment": science["environment"],
             "smoke_test": science["expected"]["smoke_test"],
             "science_fingerprint": manifest["science_fingerprint"],
@@ -780,8 +1075,23 @@ def build_stats(run_dir: Path) -> dict[str, Any]:
             "evaluation_errors": sum(
                 bool(item.get("evaluation_error")) for item in terminals.values()
             ),
+            "context_length_terminations": sum(
+                item.get("termination_reason") in {"input_length", "context_limit"}
+                for item in terminals.values()
+            ),
+            "input_length_terminations": sum(
+                item.get("termination_reason") == "input_length"
+                for item in terminals.values()
+            ),
+            "server_context_length_terminations": sum(
+                item.get("termination_reason") == "context_limit"
+                for item in terminals.values()
+            ),
         },
-        "pairing": {"warning_count": 0, "warnings": []},
+        "reward_application": {
+            "mode": "post_hoc_shared_rollout",
+            "rewards_per_terminal": len(REWARDS),
+        },
         "completeness": completeness,
     }
     if not complete:
@@ -792,10 +1102,10 @@ def build_stats(run_dir: Path) -> dict[str, Any]:
         config_id = config["config_id"]
         for world in manifest["worlds"]:
             values = [
-                terminals[(config_id, world["world_id"], index)]
+                terminals[(config["prompt_id"], world["world_id"], index)]
                 for index in range(rollouts_per_group)
             ]
-            summary = summarize_world_rollouts(values)
+            summary = summarize_world_rollouts(values, config["reward_id"])
             per_world.append({
                 "config_id": config_id,
                 "prompt_id": config["prompt_id"],
@@ -812,8 +1122,8 @@ def build_stats(run_dir: Path) -> dict[str, Any]:
         for archetype in EXPECTED_ARCHETYPES:
             values = [
                 terminal
-                for (candidate_config, world_id, _), terminal in terminals.items()
-                if candidate_config == config_id
+                for (candidate_prompt, world_id, _), terminal in terminals.items()
+                if candidate_prompt == config["prompt_id"]
                 and next(
                     world["archetype"] for world in manifest["worlds"]
                     if world["world_id"] == world_id
@@ -835,8 +1145,8 @@ def build_stats(run_dir: Path) -> dict[str, Any]:
     for config in configs:
         config_id = config["config_id"]
         values = [
-            terminal for (candidate_config, _, _), terminal in terminals.items()
-            if candidate_config == config_id
+            terminal for (candidate_prompt, _, _), terminal in terminals.items()
+            if candidate_prompt == config["prompt_id"]
         ]
         world_rows = [row for row in per_world if row["config_id"] == config_id]
         overall.append({
@@ -844,7 +1154,10 @@ def build_stats(run_dir: Path) -> dict[str, Any]:
             "prompt_id": config["prompt_id"],
             "reward_id": config["reward_id"],
             "n_rollouts": len(values),
-            "reward_mean": _mean(float(value["candidate_reward"]) for value in values),
+            "reward_mean": _mean(
+                float(value["candidate_rewards"][config["reward_id"]])
+                for value in values
+            ),
             "within_group_reward_variance": _mean(
                 float(row["reward_variance"]) for row in world_rows
             ),
@@ -855,32 +1168,6 @@ def build_stats(run_dir: Path) -> dict[str, Any]:
         })
     stats["overall"] = overall
 
-    pairing_warnings = []
-    for prompt_id in PROMPTS:
-        for world in manifest["worlds"]:
-            for rollout_index in range(rollouts_per_group):
-                hashes = {
-                    reward_id: terminals[(f"{prompt_id}_{reward_id}", world["world_id"], rollout_index)][
-                        "transcript_sha256"
-                    ]
-                    for reward_id in REWARDS
-                }
-                if len(set(hashes.values())) != 1:
-                    pairing_warnings.append({
-                        "prompt_id": prompt_id,
-                        "world_id": world["world_id"],
-                        "archetype": world["archetype"],
-                        "rollout_index": rollout_index,
-                        "request_seed": derive_rollout_seed(
-                            science["master_seed"], world["world_id"], prompt_id,
-                            rollout_index,
-                        ),
-                        "transcript_hashes": hashes,
-                    })
-    stats["pairing"] = {
-        "warning_count": len(pairing_warnings),
-        "warnings": pairing_warnings,
-    }
     return stats
 
 
@@ -926,6 +1213,16 @@ def validate_run(run_dir: Path, *, require_figures: bool = True) -> dict[str, An
         raise ValueError("per_archetype record count is incorrect")
     if len(stats["overall"]) != expected["configurations"]:
         raise ValueError("overall record count is incorrect")
+    completeness = stats["completeness"]
+    if completeness["completed_episodes"] != expected["episodes"]:
+        raise ValueError("completed episode count is incorrect")
+    if completeness["completed_reward_evaluations"] != expected["reward_evaluations"]:
+        raise ValueError("completed reward-evaluation count is incorrect")
+    if stats.get("reward_application") != {
+        "mode": "post_hoc_shared_rollout",
+        "rewards_per_terminal": expected["reward_configurations"],
+    }:
+        raise ValueError("reward application metadata is incorrect")
 
     for section in ("per_world", "per_archetype", "overall"):
         for index, row in enumerate(stats[section]):
@@ -967,7 +1264,7 @@ def validate_run(run_dir: Path, *, require_figures: bool = True) -> dict[str, An
         "per_archetype",
         "overall",
         "errors",
-        "pairing",
+        "reward_application",
         "completeness",
     )
     for key in comparable_keys:
@@ -978,21 +1275,24 @@ def validate_run(run_dir: Path, *, require_figures: bool = True) -> dict[str, An
     if require_figures:
         missing_figures = [
             name
-            for name in REQUIRED_FIGURES
+            for name in (*REQUIRED_FIGURES, *REQUIRED_SHEETS)
             if not (run_dir / "figures" / name).is_file()
             or (run_dir / "figures" / name).stat().st_size == 0
         ]
         if missing_figures:
-            raise ValueError(f"required figures are missing: {missing_figures}")
+            raise ValueError(
+                f"required visualization artifacts are missing: {missing_figures}"
+            )
     return {
         "complete": True,
         "worlds": expected["worlds"],
         "configurations": expected["configurations"],
+        "prompt_configurations": expected["prompt_configurations"],
         "episodes": expected["episodes"],
+        "reward_evaluations": expected["reward_evaluations"],
         "per_world_records": len(stats["per_world"]),
         "per_archetype_records": len(stats["per_archetype"]),
         "overall_records": len(stats["overall"]),
-        "pairing_warnings": stats["pairing"]["warning_count"],
         "figures": len(REQUIRED_FIGURES) if require_figures else 0,
     }
 

@@ -34,6 +34,7 @@ from visualization.plot_results import plot_all  # noqa: E402
 
 def _sampling(args) -> SamplingSettings:
     return SamplingSettings(
+        max_input_tokens=args.max_input_tokens,
         max_tokens=args.max_new_tokens,
         temperature=args.temperature,
         top_p=args.top_p,
@@ -48,8 +49,14 @@ def _sampling(args) -> SamplingSettings:
 def _add_all_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--model", required=True)
     parser.add_argument("--served-model-name", default=None)
-    parser.add_argument("--gpus", required=True, help="three physical GPU ids, e.g. 5,6,7")
-    parser.add_argument("--ports", default="18005,18006,18007")
+    parser.add_argument(
+        "--gpus", required=True,
+        help="exactly three unique physical GPU ids, e.g. 0,1,2 or 5,6,7",
+    )
+    parser.add_argument(
+        "--ports", default="18005,18006,18007",
+        help="exactly three unique worker ports",
+    )
     parser.add_argument("--seed", required=True, type=int)
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--runs-root", type=Path, default=default_runs_root())
@@ -59,10 +66,14 @@ def _add_all_arguments(parser: argparse.ArgumentParser) -> None:
 
     parser.add_argument("--budget", type=int, default=15)
     parser.add_argument("--max-turns", type=int, default=32)
+    parser.add_argument(
+        "--max-input-tokens", type=int, default=18432,
+        help="stop an episode before a rendered chat prompt exceeds this token count",
+    )
     parser.add_argument("--max-new-tokens", type=int, default=8192)
     parser.add_argument("--temperature", type=float, default=1.0)
-    parser.add_argument("--top-p", type=float, default=0.95)
-    parser.add_argument("--top-k", type=int, default=20)
+    parser.add_argument("--top-p", type=float, default=1.0)
+    parser.add_argument("--top-k", type=int, default=-1)
     parser.add_argument("--min-p", type=float, default=0.0)
     parser.add_argument(
         "--thinking", action=argparse.BooleanOptionalAction, default=True,
@@ -87,12 +98,31 @@ def _add_all_arguments(parser: argparse.ArgumentParser) -> None:
 def _validate_all_args(args) -> None:
     args.gpus_resolved = parse_csv_strings(args.gpus)
     args.ports_resolved = parse_ports(args.ports)
-    if args.gpus_resolved != ("5", "6", "7"):
-        raise ValueError("this experiment's fixed topology requires --gpus 5,6,7")
+    if len(args.gpus_resolved) != 3 or len(set(args.gpus_resolved)) != 3:
+        raise ValueError("--gpus must contain exactly three unique GPU ids")
     if len(args.ports_resolved) != 3 or len(set(args.ports_resolved)) != 3:
         raise ValueError("--ports must contain exactly three unique ports")
-    if args.budget < 1 or args.max_turns < 1 or args.max_new_tokens < 1:
-        raise ValueError("budget, max-turns, and max-new-tokens must be positive")
+    if (
+        args.budget < 1
+        or args.max_turns < 1
+        or args.max_input_tokens < 1
+        or args.max_new_tokens < 1
+        or args.max_model_len < 1
+    ):
+        raise ValueError(
+            "budget, max-turns, max-input-tokens, max-new-tokens, and "
+            "max-model-len must be positive"
+        )
+    if args.max_input_tokens + args.max_new_tokens > args.max_model_len:
+        raise ValueError(
+            "max-input-tokens + max-new-tokens must not exceed max-model-len"
+        )
+    if not 0.0 < args.top_p <= 1.0:
+        raise ValueError("top-p must be in (0, 1]")
+    if args.top_k != -1 and args.top_k < 1:
+        raise ValueError("top-k must be -1 (disabled) or a positive integer")
+    if not 0.0 <= args.min_p <= 1.0:
+        raise ValueError("min-p must be in [0, 1]")
     if not 0.0 < args.gpu_memory_utilization <= 1.0:
         raise ValueError("gpu-memory-utilization must be in (0, 1]")
     if args.transport_retries < 0 or args.world_max_attempts < 1:
@@ -106,7 +136,9 @@ def command_all(args) -> int:
     print(f"run directory: {run_dir}", flush=True)
     print(
         f"worlds persisted: {len(manifest['worlds'])}; "
-        f"expected episodes: {manifest['science']['expected']['episodes']}",
+        f"expected model episodes: {manifest['science']['expected']['episodes']}; "
+        "expected reward evaluations: "
+        f"{manifest['science']['expected']['reward_evaluations']}",
         flush=True,
     )
 
@@ -152,19 +184,13 @@ def command_all(args) -> int:
     finally:
         manager.stop()
 
-    stats = aggregate_run(run_dir, require_complete=True)
+    aggregate_run(run_dir, require_complete=True)
     validate_run(run_dir, require_figures=False)
     written = plot_all(run_dir / "stats.json", run_dir / "figures")
     summary = validate_run(run_dir, require_figures=True)
     print(f"figures generated: {len(written)}", flush=True)
     print(f"final completeness: {json.dumps(summary, sort_keys=True)}", flush=True)
     print(f"run directory: {run_dir}", flush=True)
-    if stats["pairing"]["warning_count"]:
-        print(
-            f"warning: {stats['pairing']['warning_count']} reward-pair transcripts mismatched; "
-            "details are in stats.json",
-            flush=True,
-        )
     return 0
 
 
