@@ -13,7 +13,7 @@ The parallel workers regenerate each world deterministically from (seed, skin,
 archetype) and replay the gold policy, so this also re-confirms determinism (V8):
 the same world must grade identically no matter where/when it runs.
 
-Run:  PYTHONPATH=../rpg_v7_prototype python test_stream_parallel.py
+Run:  PYTHONPATH=../rpg_v9 python test_stream_parallel.py
 """
 
 from __future__ import annotations

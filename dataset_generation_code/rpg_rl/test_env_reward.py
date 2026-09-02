@@ -7,7 +7,7 @@ ids) and confirming the env returns reward ~1.0 — i.e. the id->canonical->grad
 path is faithful. Then confirms degenerate answers score ~0 (master-key) and that a
 gold-equivalent answer beats a fix-only answer (variance / part-B actually bites).
 
-Run:  PYTHONPATH=../rpg_v7_prototype python test_env_reward.py
+Run:  PYTHONPATH=../rpg_v9 python test_env_reward.py
 """
 
 from __future__ import annotations

@@ -872,8 +872,8 @@ def evaluate_answer(answer: str, ground_truth: Any,
 # Aggregate scoring
 # ---------------------------------------------------------------------------
 
-# Map each question type to a higher-level category (the 3 question groups
-# described in CLAUDE.md). Question types not listed fall into "other".
+# Map each question type to a higher-level category (3 question groups).
+# Question types not listed fall into "other".
 _QUESTION_TYPE_TO_CATEGORY = {
     # Group 1 — Causal Structure
     "causal_effect": "causal_structure",

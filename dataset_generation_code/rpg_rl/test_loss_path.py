@@ -3,7 +3,7 @@
 variance. Fabricates a few (prompt_ids, completion_ids, advantage) examples and confirms
 pg_update runs backward+step, returns finite entropy/logp, and updates a LoRA param.
 
-Run: PYTHONPATH=../rpg_v7_prototype CUDA_VISIBLE_DEVICES=1 python test_loss_path.py
+Run: PYTHONPATH=../rpg_v9 CUDA_VISIBLE_DEVICES=1 python test_loss_path.py
 """
 from __future__ import annotations
 import torch

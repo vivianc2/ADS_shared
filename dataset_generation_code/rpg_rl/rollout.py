@@ -4,7 +4,7 @@
 An episode is: reset() -> [gen turn -> env.step]* -> terminal reward. We record each
 turn's (observation shown, completion produced, parsed action type) so a trainer can
 later build per-turn (prompt, completion, advantage) examples — the multi-turn -> GRPO
-bridge described in rpg_v7_rl_phase1_design.md §3.
+bridge for GRPO (phase-1 RL design).
 
 `rollout_group` runs G episodes on the SAME world (same seed => same catalog) — that is
 the GRPO group. Rollouts are independent, so we thread them (vLLM continuous batching

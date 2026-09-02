@@ -13,7 +13,7 @@ This is the cheapest, highest-leverage check and needs no training stack — jus
 running server. Costs only inference.
 
 Run (server must be up):
-    PYTHONPATH=../rpg_v7_prototype python probe_group_variance.py --n-worlds 8 --group 8
+    PYTHONPATH=../rpg_v9 python probe_group_variance.py --n-worlds 8 --group 8
 """
 
 from __future__ import annotations
