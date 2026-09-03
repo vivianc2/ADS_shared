@@ -25,7 +25,7 @@ Usage (as a library):
         ...
 
 Usage (CLI, prints acceptance + distribution for a split):
-    PYTHONPATH=../rpg_v7_prototype python world_stream.py --split train --n 60
+    PYTHONPATH=../rpg_v9 python world_stream.py --split train --n 60
 """
 
 from __future__ import annotations

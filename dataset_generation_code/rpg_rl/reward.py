@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""RL reward for RPG v7 — a PURE, DETERMINISTIC function of the policy's id-answer.
+"""RL reward for RPG — a PURE, DETERMINISTIC function of the policy's id-answer.
 
-Design contract (see docs/rpg/rpg_v7_reward_contract_decisions.md):
+Design contract (reward-contract decisions):
 
 - The reward is computed by the SAME oracle_v6.grade() the eval uses, so training and
   evaluation optimize/measure the same thing. (No separate, drift-prone reward logic.)

@@ -8,7 +8,7 @@ variable/actuator names. That resolver is (a) a second model call / lexical gues
 the loop and (b) a source of reward noise — a correct-but-verbose answer can fail to
 resolve, and a lucky phrasing can mis-resolve. For an RL REWARD that is unacceptable:
 the reward must be a pure, deterministic function of what the policy chose, never of
-how it phrased things (decision V6 in rpg_v7_reward_contract_decisions.md).
+how it phrased things (a hard reward-contract decision).
 
 So for RL we present each world through a CATALOG of OPAQUE IDS:
 
@@ -101,8 +101,7 @@ def _neutral_actuator_desc(act: Dict[str, Any]) -> str:
     actuator an alias that still reveals its role ('dye-masking additive', 'color-masking
     agent'), whereas others already give it a plausible legitimate alias (bioprocess: 'assay
     recalibration'). The catalog cannot invent a neutral name; the skins must give the trap a
-    non-revealing alias so it is indistinguishable by label from a real control. See
-    rpg_personal_docs/expA_9b_run_notes.md (reward/task v2)."""
+    non-revealing alias so it is indistinguishable by label from a real control."""
     aliases = act.get("aliases") or []
     return aliases[0] if aliases else "an adjustable control"
 

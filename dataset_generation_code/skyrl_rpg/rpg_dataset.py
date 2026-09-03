@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build SkyRL parquet datasets of RPG v7 worlds.
+"""Build SkyRL parquet datasets of RPG worlds (generator selected by RPG_PROTO; default rpg_v9).
 
 Each row = one audited world. We render the world's FIRST observation (via the same
 RPGEnv.reset() the env uses at train time -> identical text, guaranteed by determinism)
@@ -23,7 +23,7 @@ import os
 import sys
 
 _BASE = os.environ.get("RPG_SRC", "/work/ADS_shared/dataset_generation_code")
-for _p in (os.path.join(_BASE, "rpg_rl"), os.path.join(_BASE, os.environ.get("RPG_PROTO", "rpg_v8"))):
+for _p in (os.path.join(_BASE, "rpg_rl"), os.path.join(_BASE, os.environ.get("RPG_PROTO", "rpg_v9"))):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
@@ -44,7 +44,7 @@ def _rows(split: str, n: int, seed0: int, archetypes, max_turns: int, budget: in
         if os.environ.get("RPG_NO_THINK"):         # match the env's per-turn /no_think
             first_obs = first_obs + "\n/no_think"
         rows.append({
-            "data_source": "rpg_v7",
+            "data_source": "rpg_v9",
             "prompt": [SYSTEM_MSG, {"role": "user", "content": first_obs}],
             "env_class": "rpg",
             # reward is computed by the env from the rebuilt world; ground_truth unused,

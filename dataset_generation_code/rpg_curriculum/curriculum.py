@@ -5,7 +5,7 @@ Self-contained: imports the existing RPG generator/oracle/split READ-ONLY and ne
 modifies them. Nothing here is wired into training yet — it's the scheduler + tier
 definitions you plug into the RL dataset builder / trainer.
 
-Design (matches rpg_v7_rl_research.md "Curriculum" + rpg_v7_reward_contract_decisions V3):
+Design (easy-first adaptive curriculum; see the RL design / reward-contract notes):
   Difficulty is parameterized by  archetype x features x depth.  Train easy-first and make
   it ADAPTIVE to batch pass-rate (RLVE-style) so GRPO groups stay in the informative band
   (neither all-solved nor all-failed -> that's what gives advantage/gradient).
@@ -20,7 +20,7 @@ Tiers:
   T0  = ACED warm-up (structured, explicit-graph causal tasks) -- see AcedTier (stub / open design).
   T1..T5 = RPG, easy -> hard, over the 6 TRAIN archetypes x features x depth.
 The RPG tier ordering is informed by both the design docs AND the measured frontier ceiling
-(collider/instrument easy; synergy hard; see rpg_personal_docs/v9_dataset.md).
+(collider/instrument easy; synergy hard).
 
 Run `python curriculum.py` for a no-LLM demo (prints the ladder + samples a few worlds/tier).
 """

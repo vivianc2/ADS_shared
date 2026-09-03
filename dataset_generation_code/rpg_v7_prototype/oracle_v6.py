@@ -353,7 +353,7 @@ def grade(world: Dict[str, Any], answer: Dict[str, Any], gold: Dict[str, Any],
       empirically-equivalent one). Precise, comparable — the reported number.
     - strict=False (RL reward): any measurable downstream of the true root that is
       not a decoy/selection node. Rewards mechanism understanding, not exact naming.
-    See docs/rpg/rpg_v7_reward_contract_decisions.md V5."""
+    See the reward-contract decisions (V5)."""
     scm: WorldSCM = world["scm"]
     rec = answer.get("recommended_intervention", {}) or {}
     valid = {k: v for k, v in rec.items() if k in scm.actuators}

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# GRPO + LoRA training on the RPG causal-discovery env (Qwen3-8B; 14B = change model path).
+# GRPO + LoRA training on the RPG causal-discovery env (Qwen3.5-9B; larger model = change MODEL).
 # Run INSIDE the SkyRL container, from the SkyRL repo root, after:
 #   1) this package symlinked in:  ln -s /work/ADS_shared/dataset_generation_code/skyrl_rpg examples/train/rpg
 #   2) science dep present:        uv pip install scipy        # oracle uses scipy.stats
@@ -10,9 +10,10 @@
 # Then: bash examples/train/rpg/run_rpg.sh
 set -x
 
+export RPG_PROTO="${RPG_PROTO:-rpg_v9}"   # world sampler/oracle proto; must match the proto the dataset was built with
 DATA_DIR="${DATA_DIR:-/work/data/rpg}"
 NUM_GPUS="${NUM_GPUS:-4}"
-MODEL="${MODEL:-Qwen/Qwen3-8B}"      # final version: Qwen/Qwen3-14B (may need more GPUs / lower mem-util)
+MODEL="${MODEL:-Qwen/Qwen3.5-9B}"    # larger model (e.g. 27B) may need more GPUs / lower mem-util
 LOGGER="${LOGGER:-console}"
 
 uv run --isolated --extra fsdp -m examples.train.rpg.main_rpg \
@@ -49,8 +50,8 @@ uv run --isolated --extra fsdp -m examples.train.rpg.main_rpg \
   trainer.ckpt_interval=20 \
   environment.env_class=rpg \
   trainer.logger="$LOGGER" \
-  trainer.project_name="rpg_v7" \
-  trainer.run_name="rpg_qwen3_8b_grpo_lora" \
+  trainer.project_name="rpg_v9" \
+  trainer.run_name="rpg_qwen3.5_9b_grpo_lora" \
   trainer.ckpt_path="/work/rl_ckpt/rpg_skyrl" \
   $@
 

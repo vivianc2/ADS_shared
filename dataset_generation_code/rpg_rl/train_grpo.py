@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""v0 multi-turn GRPO + LoRA trainer for RPG v7 (design: rpg_v7_rl_phase1_design.md).
+"""v0 multi-turn GRPO + LoRA trainer for RPG (standalone HF-generate prototype; superseded by the SkyRL trainer in ../skyrl_rpg).
 
 Correct-first debug loop, on a single training GPU (leave GPU 0 for the vLLM server):
 
@@ -17,10 +17,10 @@ Design choices (see the design doc):
 - Qwen3 thinking OFF by default (V15: thinking ~2x trace length -> too slow for HF-gen debug).
 
 Run a tiny smoke:
-    PYTHONPATH=../rpg_v7_prototype CUDA_VISIBLE_DEVICES=1 python train_grpo.py \
+    PYTHONPATH=../rpg_v9 CUDA_VISIBLE_DEVICES=1 python train_grpo.py \
         --worlds-per-step 2 --group 4 --steps 1 --gen-batch 8 --max-new-tokens 256
 Run the debug loop:
-    PYTHONPATH=../rpg_v7_prototype CUDA_VISIBLE_DEVICES=1 python train_grpo.py \
+    PYTHONPATH=../rpg_v9 CUDA_VISIBLE_DEVICES=1 python train_grpo.py \
         --worlds-per-step 8 --group 8 --steps 60
 """
 

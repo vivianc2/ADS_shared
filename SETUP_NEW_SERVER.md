@@ -1,8 +1,8 @@
 # Setting up RPG-RL (SkyRL + GPU) on a new server
 
 Goal: reproduce the training/eval box on a fresh multi-GPU server. Almost everything is public or
-regenerable — you only need to *receive* two things out-of-band: **credentials** and access to the
-**personal_docs** repo (launch scripts). Assumes ~8× GPUs (L40S/A100/H100), NVIDIA driver + Docker +
+regenerable — the only thing you *receive* out-of-band is **credentials** (two key files). The
+launcher and dataset are in this repo. Assumes ~8× GPUs (L40S/A100/H100), NVIDIA driver + Docker +
 nvidia-container-runtime, and a large data volume (the working dir grows to ~60 GB:
 SkyRL/.venv ~17 GB, hf_cache ~34 GB, data + checkpoints).
 
@@ -77,17 +77,20 @@ docker exec skyrl bash -lc '
     --train_seed0 10000000 --val_seed0 20000000'
 ```
 
-## 9. Launch a run (scripts live in the personal_docs repo)
-The launch scripts (`run9b_launch.sh`, `run27b_launch.sh`) and setup notes (`rl_run6_setup.md`,
-`rpg_v7_rl_infra_decision.md`) are in **git@github.com:vivianc2/personal_docs.git** — ask Vivian for
-access, or she can send the two scripts. Before launching: `docker exec skyrl bash -lc 'ray stop --force'`
-and confirm all GPUs at 0 MiB. The 9B script points `DATA_DIR=/work/data/rpg_v9_deleaked` and carries
-the required Qwen3.5 vLLM flags (`gpu_memory_utilization=0.8`, `max_num_seqs=512`).
+## 9. Launch a run
+The launcher is in this repo: `dataset_generation_code/skyrl_rpg/run_rpg.sh` (already symlinked into
+`SkyRL/examples/train/rpg/` by step 3). It runs SkyRL GRPO + LoRA. Before launching:
+`docker exec skyrl bash -lc 'ray stop --force'` and confirm all GPUs at 0 MiB. Point it at the
+committed v9 dataset and pick a model:
+```
+docker exec skyrl bash -lc '
+  cd /work/SkyRL
+  export RPG_SRC=/work/ADS_shared/dataset_generation_code RPG_PROTO=rpg_v9
+  export DATA_DIR=/work/ADS_shared/dataset_generation_code/rpg_v9/data_v9_deleaked
+  export MODEL=Qwen/Qwen3.5-9B NUM_GPUS=4        # use GPUs 1-4 if GPU0 hosts an eval server
+  bash examples/train/rpg/run_rpg.sh'
+```
+`run_rpg.sh` sets the LoRA + vLLM flags; append any SkyRL overrides as extra args, e.g.
+`... run_rpg.sh generator.inference_engine.gpu_memory_utilization=0.8 generator.inference_engine.max_num_seqs=512`.
+For a larger model (e.g. 27B) raise `NUM_GPUS` and lower `gpu_memory_utilization`.
 **Verify after launch:** step-0 eval `stop_reason=stop` (no truncation), no OOM.
-
-## What Vivian needs to send you (that's it)
-1. `key.txt` + `wandb_key.txt` (secure channel).
-2. Access to `personal_docs` (launch scripts) — or the two launch scripts directly.
-Everything else = `docker pull` + `git clone` + `huggingface-cli download` + the ADS_shared clone you have.
-```
-```

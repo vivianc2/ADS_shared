@@ -16,7 +16,7 @@ prompt at build time.
 
 Reward is TERMINAL (0 on measure/intervene/code turns, the graded scalar at
 answer/give_up/turn-cap). SkyRL sums per-turn rewards, so terminal-only yields the correct
-trajectory reward for GRPO (see rpg_v7_rl_phase1_design.md §3, §13).
+trajectory reward for GRPO.
 """
 
 from __future__ import annotations
@@ -29,15 +29,15 @@ from typing import Any, Dict
 # --- workers that run from a copied working_dir (_ray_pkg) where realpath(__file__) no
 # --- longer points at our repo. Use the stable absolute mount path (override via RPG_SRC). ---
 _BASE = os.environ.get("RPG_SRC", "/work/ADS_shared/dataset_generation_code")
-for _p in (os.path.join(_BASE, "rpg_rl"), os.path.join(_BASE, os.environ.get("RPG_PROTO", "rpg_v8"))):
+for _p in (os.path.join(_BASE, "rpg_rl"), os.path.join(_BASE, os.environ.get("RPG_PROTO", "rpg_v9"))):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
 from skyrl_gym.envs.base_text_env import BaseTextEnv, BaseTextEnvStepOutput  # noqa: E402
 
 from env import RPGEnv, SYSTEM_PROMPT       # rpg_rl/env.py  (RL environment)   # noqa: E402
-from sampler import sample_world            # rpg_v7_prototype/sampler.py        # noqa: E402
-from generate_v7 import audit               # rpg_v7_prototype/generate_v7.py    # noqa: E402
+from sampler import sample_world            # rpg_v9/sampler.py                  # noqa: E402
+from generate_v7 import audit               # rpg_v9/generate_v7.py              # noqa: E402
 
 
 def build_rpg_env(seed: int, skin: str, archetype: str,

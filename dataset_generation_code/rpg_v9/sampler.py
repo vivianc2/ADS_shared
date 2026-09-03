@@ -286,7 +286,7 @@ def sample_world(seed: int, skin: Optional[str] = None,
         # synergy. NOW DEFAULT 20 (the fix): the original hard AND (ma=0) was unsolvable
         # within the 15-experiment budget (1-of-28 pair) and, combined with the inverted
         # proxy polarity, gave Opus part_a ~0.13. Set RPG_SYNERGY_SOFT=0 to reproduce the
-        # old hard-AND design for provenance. See box1_clean_eval/SYNERGY_REDESIGN_REPORT.md.
+        # old hard-AND design for provenance (synergy redesign).
         import os as _os
         _ms = float(_os.environ.get("RPG_SYNERGY_SOFT", "20"))
         add_var(root, kind="latent", parents=[src["name"], src2["name"]],
