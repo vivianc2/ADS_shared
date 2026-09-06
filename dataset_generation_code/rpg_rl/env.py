@@ -23,11 +23,9 @@ transitions to be deterministic and leak-proof.
 
 from __future__ import annotations
 
-import hashlib
 import json
-import os
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from engine import WorldSCM
 from sim_v6 import SimV6
@@ -36,7 +34,7 @@ from catalog import build_catalog, Catalog
 from reward import compute_reward, RewardConfig
 
 
-DEFAULT_SYSTEM_PROMPT = """You are a scientist diagnosing a failing industrial system. You interact ONLY through the catalog of ids given each turn — every measurement, control, and answer refers to those ids (m0, m1, ... for measurable signals; a0, a1, ... for controls). You do NOT know which signal or control matters; you must find out from data by measuring and (crucially) by intervening.
+SYSTEM_PROMPT = """You are a scientist diagnosing a failing industrial system. You interact ONLY through the catalog of ids given each turn — every measurement, control, and answer refers to those ids (m0, m1, ... for measurable signals; a0, a1, ... for controls). You do NOT know which signal or control matters; you must find out from data by measuring and (crucially) by intervening.
 
 Each turn, output exactly:
 <reasoning>your scientific thinking</reasoning>
@@ -58,50 +56,6 @@ CRUCIAL — the reported OUTCOME OF INTEREST is a SURROGATE metric that can be g
 """
 
 
-def _resolve_system_prompt(default: str) -> str:
-    """Return the system prompt, honoring an OPT-IN environment override.
-
-    Default behavior is unchanged: with no environment variables set, this returns
-    ``DEFAULT_SYSTEM_PROMPT`` byte-for-byte, so every existing caller of
-    ``SYSTEM_PROMPT`` keeps the exact prompt it had before.
-
-    Overrides (used by the prompt-comparison experiment in
-    ``rpg_rl_exps/prompt_compare_rl``, which needs the SAME prompt in the dataset
-    parquet and in every process that imports this module):
-
-    - ``RPG_SYSTEM_PROMPT_FILE``: path to a UTF-8 file whose full contents replace the
-      prompt. The file is read verbatim -- no stripping, no template substitution --
-      so the on-disk bytes are exactly what the policy sees.
-    - ``RPG_SYSTEM_PROMPT_SHA256``: optional. When set, the resolved prompt's SHA-256
-      must equal it, otherwise import fails loudly. This makes a stale/misplaced prompt
-      file a hard error instead of a silently wrong experiment.
-
-    Note this only changes the *default* value of ``RPGEnv.system_prompt``. The env
-    never renders the system prompt into an observation; the prompt reaches the policy
-    through the dataset row (see ``rpg_rl_exps/prompt_compare_rl/build_dataset.py``).
-    """
-    path = os.environ.get("RPG_SYSTEM_PROMPT_FILE")
-    prompt = default
-    if path:
-        with open(path, "r", encoding="utf-8") as fh:
-            prompt = fh.read()
-        if not prompt.strip():
-            raise ValueError(f"RPG_SYSTEM_PROMPT_FILE={path!r} resolved to an empty prompt")
-    expected = os.environ.get("RPG_SYSTEM_PROMPT_SHA256")
-    if expected:
-        actual = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
-        if actual != expected:
-            raise ValueError(
-                "system prompt sha256 mismatch: RPG_SYSTEM_PROMPT_SHA256="
-                f"{expected} but resolved prompt hashes to {actual}"
-                + (f" (from {path})" if path else " (module default)")
-            )
-    return prompt
-
-
-SYSTEM_PROMPT = _resolve_system_prompt(DEFAULT_SYSTEM_PROMPT)
-
-
 @dataclass
 class RPGEnv:
     """One episode over one world. Construct with a loaded world record (from
@@ -114,8 +68,6 @@ class RPGEnv:
     catalog_seed: int = 0
     reward_cfg: RewardConfig = field(default_factory=RewardConfig)
     data_dir: Optional[str] = None
-    system_prompt: str = SYSTEM_PROMPT
-    reward_fn: Callable[..., Dict[str, Any]] = compute_reward
 
     # runtime state
     scm: WorldSCM = field(init=False)
@@ -240,21 +192,6 @@ YOUR MEMORY
         if atype in ("answer", "give_up"):
             return self._terminal(data if atype == "answer" else None, rec, forced=False)
 
-        # `budget` is a hard experiment limit, not merely a prompt directive. Once it
-        # is exhausted, measurement and intervention requests become recoverable
-        # no-ops so the agent can still use free code turns or submit its answer.
-        # Check before calling SimV6: every successful call below increments `_used`.
-        if atype in ("measure", "intervene") and self._used >= self.budget:
-            self._latest = (
-                "(experiment budget exhausted — no experiment run and budget not "
-                "charged; use existing evidence and submit answer)"
-            )
-            rec["error"] = f"{atype}: experiment budget exhausted"
-            self.turns.append(rec)
-            if cap_hit:
-                return self._terminal(None, rec, forced=True)
-            return self._observation(), 0.0, False, {"turn_type": "budget_exhausted"}
-
         if atype == "code":
             from sandbox import run_code
             # The model frequently wraps code as JSON `{"code":"..."}` (mirroring measure/intervene,
@@ -330,14 +267,9 @@ YOUR MEMORY
 
     # ---- terminal handling: compute the PURE id-based reward ----
     def _terminal(self, answer_struct, rec, *, forced: bool):
-        if self._used > self.budget:
-            raise RuntimeError(
-                f"experiment budget invariant violated: used={self._used}, "
-                f"budget={self.budget}"
-            )
         self._done = True
         struct = answer_struct if isinstance(answer_struct, dict) else {}
-        rw = self.reward_fn(struct, self.world, self.cat, self.gold, self.battery,
+        rw = compute_reward(struct, self.world, self.cat, self.gold, self.battery,
                             cfg=self.reward_cfg, n_interventions=self._n_interv)
         rec["answer_struct"] = struct
         rec["reward_breakdown"] = {k: rw[k] for k in ("reward", "part_a", "part_b",
