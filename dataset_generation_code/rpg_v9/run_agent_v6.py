@@ -73,13 +73,42 @@ def _strip_fences(text: str) -> str:
     return t.strip()
 
 
+# Model private-reasoning blocks. Reasoning models emit <think>...</think> BEFORE the
+# committed, formatted output; any <action>/<memory> the model DRAFTS inside it must NOT be
+# parsed or executed (bug: think-block actions were executed; found via RL traces 2026-09-08).
+_THINK_RE = re.compile(r'<think\b[^>]*>.*?</think\s*>', re.DOTALL | re.IGNORECASE)
+_THINK_OPEN_RE = re.compile(r'<think\b[^>]*>.*$', re.DOTALL | re.IGNORECASE)  # unclosed -> to EOF
+
+
+def _strip_think(raw: str) -> str:
+    """Remove private <think> reasoning so only the committed turn is parsed."""
+    return _THINK_OPEN_RE.sub(" ", _THINK_RE.sub(" ", raw))
+
+
 def _parse_action(raw: str):
-    """Return (atype, payload) or (None, None). Tries the strict tag, then an
-    open-tag-to-EOF fallback, stripping any markdown fence around the payload."""
-    m = _ACTION_RE.search(raw)
+    """Return (atype, payload) or (None, None). Parses ONLY the committed output:
+    <think> reasoning is stripped first, and MULTIPLE <action> tags are rejected as a
+    parse failure (schema = ONE action/turn) instead of silently executing the first and
+    dropping the rest (which also masked parse-failure counting). Tries the strict tag,
+    then an open-tag-to-EOF fallback, stripping any markdown fence around the payload."""
+    scan = _strip_think(raw)
+    hits = list(_ACTION_RE.finditer(scan))
+    if len(hits) > 1:
+        # Malformed: schema is ONE action/turn. Old parser SILENTLY ran the first and
+        # dropped the rest (and this bypassed parse-failure accounting). Handle explicitly:
+        #  - if the model committed a terminal (answer/give_up), HONOR it (take the last such)
+        #    so a duplicated/appended answer is never thrown away;
+        #  - otherwise there is no safe single pick -> parse failure (env counts it, the
+        #    policy re-observes and retries with one action) instead of an arbitrary first.
+        terms = [h for h in hits if h.group(1).lower() in ("answer", "give_up")]
+        if terms:
+            h = terms[-1]
+            return h.group(1).lower(), _strip_fences(h.group(2))
+        return None, None
+    m = _ACTION_RE.search(scan)
     if m:
         return m.group(1).lower(), _strip_fences(m.group(2))
-    m = _ACTION_OPEN_RE.search(raw)
+    m = _ACTION_OPEN_RE.search(scan)
     if m:
         # drop a dangling ```/</action> remnant the greedy capture may have taken
         payload = re.sub(r"</action\s*>?\s*$", "", m.group(2), flags=re.I)
@@ -88,6 +117,8 @@ def _parse_action(raw: str):
 
 
 def _tag(text: str, tag: str) -> str:
+    # Ignore anything the model drafted inside <think> (memory/reasoning committed outside it).
+    text = _strip_think(text)
     m = re.search(rf"<{tag}>\s*(.*?)\s*</{tag}>", text, re.DOTALL | re.IGNORECASE)
     return m.group(1).strip() if m else ""
 

@@ -32,7 +32,8 @@ Unknown ids are dropped (and counted for the invalid-id penalty), NEVER resolved
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import os
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from oracle_v6 import grade
@@ -41,8 +42,10 @@ from catalog import Catalog
 
 @dataclass
 class RewardConfig:
-    w_a: float = 0.5              # weight on part A (found the fix)
-    w_b: float = 0.5             # weight on part B (understood the mechanism)
+    # env-var gated (default 0.5/0.5 = r1, unchanged) so a GRPO run can select r2=part_a-only
+    # via RPG_W_A=1.0 RPG_W_B=0.0 without touching any other caller. (box2 2026-09-03 experiment)
+    w_a: float = field(default_factory=lambda: float(os.environ.get("RPG_W_A", "0.5")))  # weight on part A (found the fix)
+    w_b: float = field(default_factory=lambda: float(os.environ.get("RPG_W_B", "0.5")))  # weight on part B (mechanism)
     c_invalid: float = 0.25      # penalty per unit fraction of invalid ids in the answer
     strict_part_b: bool = True   # V5: strict proxy credit
     # FAITHFULNESS (v9): "observation/code alone CANNOT establish causation" (system prompt).
