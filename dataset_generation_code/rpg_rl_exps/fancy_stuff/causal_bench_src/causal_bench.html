@@ -1,0 +1,833 @@
+<title>Causal Bench</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  color-scheme:light;
+  --ground:#f1f4f3; --surface:#ffffff; --surface-2:#e9eeed; --ink:#15222b; --ink-2:#4b5b64; --muted:#7a8a93; --hair:#d5dddf; --hair-2:#c2ccd0;
+  --accent:#0e7a8b; --accent-soft:#d8eef1; --good:#2e8b57; --good-soft:#dff3e7; --bad:#c44536; --bad-soft:#f9e3df;
+  --fix:#0e7a8b; --game:#d3861c; --decoy:#7a5cc7; --none:#a9b4b9; --latent:#8a7f6a;
+  --focus:#0e7a8b;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme:dark;
+    --ground:#0e1417; --surface:#172026; --surface-2:#1f2a31; --ink:#e6ecef; --ink-2:#b7c3c9; --muted:#8d9ca4; --hair:#26333a; --hair-2:#334249;
+    --accent:#3fc0d2; --accent-soft:#123a41; --good:#5ccf83; --good-soft:#153826; --bad:#ef7a67; --bad-soft:#41221d;
+    --fix:#3fc0d2; --game:#f0a53a; --decoy:#a58cf0; --none:#5c6c74; --latent:#a79c85;
+    --focus:#3fc0d2;
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --ground:#0e1417; --surface:#172026; --surface-2:#1f2a31; --ink:#e6ecef; --ink-2:#b7c3c9; --muted:#8d9ca4; --hair:#26333a; --hair-2:#334249;
+  --accent:#3fc0d2; --accent-soft:#123a41; --good:#5ccf83; --good-soft:#153826; --bad:#ef7a67; --bad-soft:#41221d;
+  --fix:#3fc0d2; --game:#f0a53a; --decoy:#a58cf0; --none:#5c6c74; --latent:#a79c85;
+  --focus:#3fc0d2;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ground);color:var(--ink);font-family:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;font-size:14px;line-height:1.45}
+.mono{font-family:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;font-variant-numeric:tabular-nums}
+.eyebrow{font-family:"IBM Plex Sans Condensed","IBM Plex Sans",system-ui,sans-serif;font-weight:600;text-transform:uppercase;letter-spacing:.08em;font-size:11px;color:var(--muted)}
+h1,h2,h3{margin:0;text-wrap:balance}
+h1{font-family:"IBM Plex Sans Condensed","IBM Plex Sans",sans-serif;font-weight:600;font-size:22px;letter-spacing:.01em}
+h2{font-family:"IBM Plex Sans Condensed","IBM Plex Sans",sans-serif;font-weight:600;font-size:15px;letter-spacing:.02em}
+button,select,input{font:inherit;color:inherit}
+button{cursor:pointer;border:1px solid var(--hair-2);background:var(--surface);border-radius:6px;padding:6px 10px}
+button:hover{border-color:var(--accent)}
+button:disabled{opacity:.45;cursor:not-allowed}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:500}
+:root[data-theme="dark"] button.primary{color:#07161a}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) button.primary{color:#07161a}}
+button:focus-visible,select:focus-visible,input:focus-visible,.chip:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+select,input[type=number],input[type=text]{background:var(--surface);border:1px solid var(--hair-2);border-radius:6px;padding:5px 8px}
+input[type=number]{width:74px}
+.page{max-width:1500px;margin:0 auto;padding:16px 18px 40px}
+/* header */
+.head{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px 24px;padding-bottom:12px;border-bottom:1px solid var(--hair);margin-bottom:14px}
+.head .lede{max-width:62ch;color:var(--ink-2);margin-top:4px}
+.tiles{display:flex;flex-wrap:wrap;gap:8px}
+.tile{background:var(--surface);border:1px solid var(--hair);border-radius:8px;padding:8px 12px;min-width:118px}
+.tile .v{font-family:"IBM Plex Mono",monospace;font-size:19px;font-weight:500;line-height:1.1;margin-top:2px;font-variant-numeric:tabular-nums}
+.tile .s{font-size:11px;color:var(--muted);margin-top:2px}
+.meter{height:5px;background:var(--surface-2);border-radius:3px;margin-top:6px;overflow:hidden}
+.meter i{display:block;height:100%;background:var(--accent);width:0%;transition:width .35s}
+/* console grid */
+.console{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,.95fr) minmax(0,1.05fr);gap:14px;align-items:start}
+@media (max-width:1180px){.console{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.col-ledger{grid-column:1/-1}}
+@media (max-width:760px){.console{grid-template-columns:minmax(0,1fr)}.col-ledger{grid-column:auto}}
+.panel{background:var(--surface);border:1px solid var(--hair);border-radius:10px;padding:12px 14px}
+.panel + .panel{margin-top:12px}
+.panel-h{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:8px}
+.hint{color:var(--muted);font-size:12px}
+/* world diagram */
+.world{position:relative;height:560px;border:1px solid var(--hair);border-radius:8px;background:
+  linear-gradient(var(--hair) 1px,transparent 1px) 0 0/100% 40px, linear-gradient(90deg,var(--hair) 1px,transparent 1px) 0 0/40px 100%;
+  background-color:var(--surface);overflow:hidden}
+.world svg{position:absolute;inset:0;width:100%;height:100%}
+.node{position:absolute;width:min(132px,23%);transform:translate(-50%,-50%);background:var(--surface);border:1.5px solid var(--hair-2);border-radius:8px;padding:7px 9px 8px;box-shadow:0 1px 2px rgba(0,0,0,.06)}
+.node.latent{border-style:dashed;border-color:var(--latent);background:var(--surface-2)}
+.node.outcome{border-color:var(--ink-2)}
+.node .id{display:flex;justify-content:space-between;align-items:baseline;gap:6px}
+.node .id b{font-family:"IBM Plex Mono",monospace;font-weight:500;font-size:14px}
+.node .id small{font-size:10.5px;color:var(--muted);white-space:nowrap}
+.node .truth{font-size:10.5px;font-weight:600;padding:1px 5px;border-radius:4px;background:var(--surface-2);color:var(--ink-2)}
+.node .truth.fix{color:var(--fix)} .node .truth.game{color:var(--game)} .node .truth.decoy{color:var(--decoy)} .node .truth.proxy{color:var(--fix)} .node .truth.echo{color:var(--game)}
+.bar{display:flex;height:7px;border-radius:3px;overflow:hidden;background:var(--surface-2);margin-top:7px}
+.bar i{display:block;height:100%;transition:width .35s}
+.node .top{font-size:11px;color:var(--ink-2);margin-top:5px;display:flex;justify-content:space-between}
+.node .top b{font-weight:500}
+.bubble{position:absolute;top:-12px;right:-10px;font-family:"IBM Plex Mono",monospace;font-size:11.5px;font-weight:500;padding:2px 6px;border-radius:10px;background:var(--good-soft);color:var(--good);border:1px solid var(--good);opacity:0;transition:opacity .3s}
+.bubble.bad{background:var(--bad-soft);color:var(--bad);border-color:var(--bad)}
+.bubble.zero{background:var(--surface-2);color:var(--muted);border-color:var(--hair-2)}
+.bubble.show{opacity:1}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:8px;font-size:11.5px;color:var(--ink-2)}
+.legend span{display:inline-flex;align-items:center;gap:5px}
+.sw{width:10px;height:10px;border-radius:2px;display:inline-block}
+/* bench */
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{border:1px solid var(--hair-2);border-radius:14px;padding:3px 10px;font-family:"IBM Plex Mono",monospace;font-size:12.5px;background:var(--surface);cursor:pointer;user-select:none}
+.chip[aria-pressed="true"]{background:var(--accent-soft);border-color:var(--accent);color:var(--ink)}
+.chip[disabled]{opacity:.55;cursor:default}
+.row{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:8px}
+.row label{color:var(--ink-2);font-size:12.5px}
+.slider{display:flex;align-items:center;gap:8px;flex:1;min-width:200px}
+.slider input[type=range]{flex:1;accent-color:var(--accent)}
+.signs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;margin-top:6px}
+.signs .sg{display:flex;align-items:center;gap:8px;border:1px solid var(--hair);border-radius:6px;padding:5px 8px;white-space:nowrap}
+.signs .sg b{font-family:"IBM Plex Mono",monospace;font-weight:500;margin-right:2px}
+.signs .sg label{display:inline-flex;align-items:center;gap:2px;font-size:12.5px}
+.preview{margin-top:6px}
+.cand{display:grid;grid-template-columns:minmax(0,1fr) 62px;align-items:center;gap:8px;padding:4px 4px;border-radius:6px;cursor:pointer;border:1px solid transparent}
+.cand:hover{border-color:var(--hair-2);background:var(--surface-2)}
+.cand .n{font-family:"IBM Plex Mono",monospace;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cand .b{height:6px;background:var(--surface-2);border-radius:3px;margin-top:3px;overflow:hidden}
+.cand .b i{display:block;height:100%;background:var(--accent)}
+.cand .b i.neg{background:var(--bad)}
+.cand .v{font-family:"IBM Plex Mono",monospace;font-size:12px;text-align:right;font-variant-numeric:tabular-nums}
+.grade{margin-top:10px;padding:10px 12px;border-radius:8px;background:var(--surface-2)}
+.grade table{border-collapse:collapse;width:100%;font-size:12.5px}
+.grade td{padding:2px 0}.grade td:last-child{text-align:right;font-family:"IBM Plex Mono",monospace}
+.grade .tot{font-weight:600;border-top:1px solid var(--hair-2)}
+/* ledger */
+.spark{width:100%;height:110px;display:block}
+.entry{border-top:1px solid var(--hair);padding:9px 0}
+.entry .t{display:flex;justify-content:space-between;gap:8px;align-items:baseline}
+.entry .t .what{font-family:"IBM Plex Mono",monospace;font-size:12.5px}
+.entry .t .rw{font-family:"IBM Plex Mono",monospace;font-weight:500;font-size:14px;font-variant-numeric:tabular-nums}
+.pos{color:var(--good)}.neg{color:var(--bad)}.nil{color:var(--muted)}
+.entry .sub{font-size:12px;color:var(--ink-2);margin-top:2px}
+.pn{width:100%;border-collapse:collapse;margin-top:6px;font-size:12px}
+.pn th{text-align:left;color:var(--muted);font-weight:500;padding:1px 0;font-size:11px}
+.pn td{padding:1px 0;border-top:1px dotted var(--hair)}
+.pn td.num{font-family:"IBM Plex Mono",monospace;text-align:right;font-variant-numeric:tabular-nums}
+.pn td.id{font-family:"IBM Plex Mono",monospace}
+.settings{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;margin-top:6px}
+.settings label{display:inline-flex;align-items:center;gap:5px;font-size:12.5px;color:var(--ink-2)}
+.tog{display:inline-flex;align-items:center;gap:5px;font-size:12.5px;color:var(--ink-2)}
+.note{font-size:12px;color:var(--ink-2);background:var(--surface-2);border-radius:6px;padding:8px 10px;margin-top:8px}
+.kbd{font-family:"IBM Plex Mono",monospace;font-size:11.5px;background:var(--surface-2);padding:0 4px;border-radius:3px}
+.done{border-color:var(--accent)}
+.scroll{overflow-x:auto}
+@media (max-width:560px){.node .id small{display:none}.node{padding:6px 7px 7px}}
+@media (prefers-reduced-motion: reduce){.bar i,.meter i,.bubble{transition:none}}
+</style>
+
+<div class="page">
+  <header class="head">
+    <div>
+      <div class="eyebrow">Causal discovery · reward playground</div>
+      <h1>Causal Bench</h1>
+      <p class="lede">A generated industrial world: four controls, four signals, a surrogate outcome, two latent nodes. Measure and intervene; every experiment is paid its Bayesian information gain — and each node you read shows what its reading alone was worth.</p>
+    </div>
+    <div class="tiles" id="tiles"></div>
+  </header>
+
+  <div class="console">
+    <section class="col-world">
+      <div class="panel">
+        <div class="panel-h"><h2>World <span class="mono" id="seedLabel"></span></h2>
+          <div class="tog"><label><input type="checkbox" id="reveal"> reveal the truth</label></div></div>
+        <div class="world" id="world"><svg id="edges" aria-hidden="true"></svg></div>
+        <div class="legend">
+          <span><i class="sw" style="background:var(--fix)"></i>fix → true objective / proxy</span>
+          <span><i class="sw" style="background:var(--game)"></i>game → surrogate only / echo</span>
+          <span><i class="sw" style="background:var(--decoy)"></i>decoy (confounder child)</span>
+          <span><i class="sw" style="background:var(--none)"></i>null / irrelevant</span>
+          <span><i class="sw" style="border:1.5px dashed var(--latent);background:transparent"></i>latent — cannot be measured</span>
+        </div>
+        <p class="hint" style="margin:8px 0 0">Edges are drawn at the reference learner's posterior probability; they solidify as evidence accumulates. Bars on each node are the role posterior. The bubble on a node after an experiment is the reward that reading alone would have earned.</p>
+      </div>
+      <div class="panel">
+        <div class="panel-h"><h2>Settings</h2><span class="hint">changing a reward setting restarts the episode on the same world</span></div>
+        <div class="settings">
+          <label>seed <input type="number" id="seed" min="0" step="1" style="width:92px"></label>
+          <button id="newWorld">New world from seed</button>
+          <button id="randWorld">Random world</button>
+        </div>
+        <div class="settings">
+          <label>potential <select id="potential"><option value="oracle">oracle · log P(truth | data)</option><option value="entropy">entropy · gold-free</option></select></label>
+          <label>λ <input type="number" id="lam" step="0.01" min="0" value="0.1"></label>
+          <label>cost / experiment <input type="number" id="cost" step="0.01" min="0" value="0.02"></label>
+          <label>budget <input type="number" id="budget" step="1" min="1" value="8"></label>
+          <label>terminal <select id="tmode"><option value="keep">keep (evidence bonus)</option><option value="zero">zero (pure potential shaping)</option></select></label>
+        </div>
+      </div>
+    </section>
+
+    <section class="col-bench">
+      <div class="panel">
+        <div class="panel-h"><h2>Measure</h2><span class="hint">observational · n = 400 units at default settings</span></div>
+        <div class="chips" id="measChips"></div>
+        <div class="row"><button class="primary" id="doMeasure">Run measurement</button><span class="hint">correlations with the outcome inform signal roles only — never which control matters</span></div>
+      </div>
+      <div class="panel">
+        <div class="panel-h"><h2>Intervene</h2><span class="hint">do(control = value) · n = 60 units</span></div>
+        <div class="row"><label>control</label><select id="intCtrl"></select>
+          <div class="slider"><input type="range" id="intVal" min="0" max="100" step="1" value="100"><span class="mono" id="intValLabel" style="width:34px;text-align:right">100</span></div>
+          <button id="v0">set 0</button><button id="v100">set 100</button></div>
+        <div class="row"><label>read</label><div class="chips" id="intChips"></div></div>
+        <div class="row"><button class="primary" id="doIntervene">Run intervention</button><span class="hint" id="baselineHint"></span></div>
+      </div>
+      <div class="panel" id="previewPanel">
+        <div class="panel-h"><h2>What would each experiment earn?</h2>
+          <div class="tog"><label><input type="checkbox" id="previewOn" checked> oracle preview</label></div></div>
+        <p class="hint" style="margin:0 0 4px">Expected reward (λ·ΔΦ − cost) of each possible next experiment, Monte-Carlo over 8 draws from the <em>hidden</em> world. Click a row to load it. Turn it off to play blind.</p>
+        <div class="preview" id="preview"></div>
+      </div>
+      <div class="panel">
+        <div class="panel-h"><h2>Answer</h2><span class="hint">ends the episode · graded on the true objective</span></div>
+        <div class="row"><label>fix</label><select id="ansCtrl"></select><select id="ansDir"><option value="100">raise to 100</option><option value="0">lower to 0</option></select>
+          <label>proxy</label><select id="ansProxy"></select></div>
+        <div class="row"><label>decoys</label><div class="chips" id="ansDecoys"></div></div>
+        <div class="eyebrow" style="margin-top:8px">effect sign on the true objective</div>
+        <div class="signs" id="ansSigns"></div>
+        <div class="row"><button id="fillBayes">Fill from posterior</button><button class="primary" id="doAnswer">Submit answer</button></div>
+        <div id="gradeBox"></div>
+      </div>
+    </section>
+
+    <section class="col-ledger">
+      <div class="panel">
+        <div class="panel-h"><h2>Ledger</h2><span class="hint" id="ledgerHint">reward = λ·ΔΦ − cost, per experiment</span></div>
+        <svg class="spark" id="spark" viewBox="0 0 400 110" preserveAspectRatio="none" role="img" aria-label="Potential and reward over the episode"></svg>
+        <div id="entries"></div>
+      </div>
+    </section>
+  </div>
+</div>
+
+<script>
+// ===== Causal Bench core: seeded toy world + reference Bayesian learner + IG potentials =====
+// A faithful port of toy_world.py / ig_reward.py (same structural equations, same hypothesis
+// space, same sign-only skew-normal likelihoods).
+const LOG2PI = Math.log(2 * Math.PI);
+const PROXY = 0, DECOY = 1, ECHO = 2, IRREL = 3;
+const ROLE_NAME = ["proxy", "decoy", "echo", "irrelevant"];
+
+// ---------- RNG (mulberry32 + Box-Muller) ----------
+function makeRng(seed) {
+  let a = seed >>> 0;
+  const u = () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+  let spare = null;
+  return {
+    uniform: u,
+    normal() { if (spare !== null) { const s = spare; spare = null; return s; } let u1 = u(); while (u1 <= 1e-12) u1 = u(); const u2 = u(); const r = Math.sqrt(-2 * Math.log(u1)), th = 2 * Math.PI * u2; spare = r * Math.sin(th); return r * Math.cos(th); },
+    int(n) { return Math.floor(u() * n); },
+    shuffle(arr) { const b = arr.slice(); for (let i = b.length - 1; i > 0; i--) { const j = Math.floor(u() * (i + 1)); [b[i], b[j]] = [b[j], b[i]]; } return b; },
+    choice(items, p) { let x = u(), c = 0; for (let i = 0; i < items.length; i++) { c += p[i]; if (x < c) return items[i]; } return items[items.length - 1]; },
+  };
+}
+
+// ---------- special functions ----------
+function erfc(x) {            // Numerical Recipes erfcc, rel. err < 1.2e-7, good in the tails
+  const z = Math.abs(x), t = 1 / (1 + 0.5 * z);
+  const r = t * Math.exp(-z * z - 1.26551223 + t * (1.00002368 + t * (0.37409196 + t * (0.09678418 + t * (-0.18628806 + t * (0.27886807 + t * (-1.13520398 + t * (1.48851587 + t * (-0.82215223 + t * 0.17087277)))))))));
+  return x >= 0 ? r : 2 - r;
+}
+function logNdtr(x) {         // log Phi(x)
+  if (x > 6) return -0.5 * erfc(x / Math.SQRT2);       // log(1-e) ~ -e
+  const v = 0.5 * erfc(-x / Math.SQRT2);
+  if (v > 0) return Math.log(v);
+  return -0.5 * x * x - Math.log(-x) - 0.5 * LOG2PI;    // asymptotic tail
+}
+function logaddexp(a, b) { if (a === -Infinity) return b; if (b === -Infinity) return a; const m = Math.max(a, b); return m + Math.log(Math.exp(a - m) + Math.exp(b - m)); }
+function logsumexp(arr, mask) {
+  let m = -Infinity;
+  for (let i = 0; i < arr.length; i++) if (!mask || mask[i]) { if (arr[i] > m) m = arr[i]; }
+  if (m === -Infinity) return -Infinity;
+  let s = 0;
+  for (let i = 0; i < arr.length; i++) if (!mask || mask[i]) s += Math.exp(arr[i] - m);
+  return m + Math.log(s);
+}
+function llSign(z, sgn, tau) {
+  if (sgn === 0) return -0.5 * z * z - 0.5 * LOG2PI;
+  const zz = sgn * z, om2 = 1 + tau * tau;
+  return Math.log(2) - 0.5 * zz * zz / om2 - 0.5 * (LOG2PI + Math.log(om2)) + logNdtr(zz * tau / Math.sqrt(om2));
+}
+function llTable(z, tau) { return [llSign(z, -1, tau), llSign(z, 0, tau), llSign(z, 1, tau)]; }
+function llTwoSided(z, tau) { return logaddexp(llSign(z, 1, tau), llSign(z, -1, tau)) - Math.log(2); }
+function mean(a) { let s = 0; for (const v of a) s += v; return s / a.length; }
+function sd(a) { const m = mean(a); let s = 0; for (const v of a) s += (v - m) * (v - m); return Math.sqrt(s / (a.length - 1)); }
+function corr(a, b) { const ma = mean(a), mb = mean(b); let sab = 0, saa = 0, sbb = 0; for (let i = 0; i < a.length; i++) { const da = a[i] - ma, db = b[i] - mb; sab += da * db; saa += da * da; sbb += db * db; } return sab / Math.sqrt(saa * sbb); }
+const r4 = (x) => Math.round(x * 1e4) / 1e4;
+
+// ---------- the world ----------
+class World {
+  constructor(seed, opts = {}) {
+    this.seed = seed; this.K = opts.K || 4; this.M = opts.M || 4;
+    this.nObs = opts.nObs || 400; this.nInt = opts.nInt || 60;
+    const rng = makeRng(seed); this.rng = rng;
+    const perm = rng.shuffle([...Array(this.K).keys()]);
+    this.fix = perm[0]; this.game = [perm[1]];
+    this.sign = rng.uniform() < 0.5 ? -1 : 1;
+    this.aroles = Array(this.K).fill("null"); this.aroles[this.fix] = "fix"; for (const g of this.game) this.aroles[g] = "game";
+    const mperm = rng.shuffle([...Array(this.M).keys()]);
+    this.proxy = mperm[0];
+    this.mroles = Array(this.M).fill("irrelevant"); this.mroles[this.proxy] = "proxy";
+    for (const j of mperm.slice(1)) this.mroles[j] = rng.choice(["decoy", "echo", "irrelevant"], [0.4, 0.3, 0.3]);
+    this.beta = 0.3 + 0.6 * rng.uniform(); this.gamma = 0.3 + 0.6 * rng.uniform();
+    this.outcome = "m0";
+    this.signals = [...Array(this.M).keys()].map(j => "m" + (j + 1));
+    this.measurables = [this.outcome, ...this.signals];
+    this.actuators = [...Array(this.K).keys()].map(i => "a" + i);
+    this.expId = 0;
+  }
+  get gold() {
+    const decoys = this.signals.filter((s, j) => this.mroles[j] === "decoy" || this.mroles[j] === "echo");
+    const signs = {}; this.actuators.forEach((a, i) => signs[a] = i === this.fix ? (this.sign > 0 ? "+" : "-") : "0");
+    return { actions: [{ actuator: "a" + this.fix, value: this.sign > 0 ? 100 : 0 }], proxy: "m" + (this.proxy + 1), decoys, signs, game: this.game.map(g => "a" + g) };
+  }
+  trueHypothesis() {
+    const mroles = {}; this.signals.forEach((s, j) => mroles[s] = this.mroles[j]);
+    return { fix: "a" + this.fix, sign: this.sign, game: new Set(this.game.map(g => "a" + g)), proxy: "m" + (this.proxy + 1), orient: 1, mroles };
+  }
+  sample(n, act, rng) {
+    rng = rng || this.rng;
+    const d = new Float64Array(this.K); for (const k in act) d[k] = (act[k] - 50) / 50;
+    const U = new Float64Array(n), T = new Float64Array(n), Y = new Float64Array(n);
+    let dg = 0; for (const g of this.game) dg += d[g];
+    for (let i = 0; i < n; i++) {
+      U[i] = rng.normal();
+      T[i] = 0.6 * U[i] + this.sign * this.beta * d[this.fix] + 0.5 * rng.normal();
+      Y[i] = T[i] + this.gamma * dg + 0.5 * rng.normal();
+    }
+    const out = { m0: Y, _T: T };
+    for (let j = 0; j < this.M; j++) {
+      const r = this.mroles[j], x = new Float64Array(n);
+      for (let i = 0; i < n; i++) {
+        if (r === "proxy") x[i] = T[i] + 0.5 * rng.normal();
+        else if (r === "decoy") x[i] = U[i] + 0.5 * rng.normal();
+        else if (r === "echo") x[i] = Y[i] + 0.5 * rng.normal();
+        else x[i] = rng.normal();
+      }
+      out["m" + (j + 1)] = x;
+    }
+    return out;
+  }
+  measure(names, rng) {
+    names = names.filter(n => this.measurables.includes(n));
+    this.expId++;
+    const s = this.sample(this.nObs, {}, rng);
+    const readings = {};
+    for (const n of names) readings[n] = { mean: r4(mean(s[n])), sd: r4(sd(s[n])) };
+    const c = {};
+    for (let i = 0; i < names.length; i++) for (let j = i + 1; j < names.length; j++) c[names[i] + "~" + names[j]] = r4(corr(s[names[i]], s[names[j]]));
+    readings._correlations = c;
+    return { experiment_id: this.expId, n_units: this.nObs, readings };
+  }
+  intervene(actions, names, rng) {
+    const act = {}, applied = {};
+    for (const x of actions) { const a = x.actuator; if (this.actuators.includes(a)) { const v = Math.max(0, Math.min(100, +x.value)); act[+a.slice(1)] = v; applied[a] = v; } }
+    names = names.filter(n => this.measurables.includes(n));
+    if (!names.includes(this.outcome)) names = [this.outcome, ...names];
+    this.expId++;
+    const s = this.sample(this.nInt, act, rng);
+    const readings = {}; for (const n of names) readings[n] = r4(mean(s[n]));
+    return { experiment_id: this.expId, n_units: this.nInt, readings, applied_intervention: applied };
+  }
+  trueObjectiveShift(actions) {
+    let d = 0; for (const x of (actions || [])) { const i = +String(x.actuator).slice(1); if (i === this.fix) d += this.sign * this.beta * ((+x.value) - 50) / 50; } return d;
+  }
+  grade(ans) {
+    const gold = this.gold, acts = ans.actions || [];
+    const shift = acts.length ? this.trueObjectiveShift(acts) : 0;
+    const partA = shift > 0.05 ? 1 : 0;
+    const proxyOk = ans.proxy === gold.proxy ? 1 : 0;
+    const gd = new Set(gold.decoys), ad = new Set(ans.decoys || []);
+    const inter = [...gd].filter(x => ad.has(x)).length, uni = new Set([...gd, ...ad]).size;
+    const jac = (!gd.size && !ad.size) ? 1 : inter / Math.max(1, uni);
+    const sg = ans.signs || {}; let ok = 0; for (const a of this.actuators) if (sg[a] === gold.signs[a]) ok++;
+    const signAcc = ok / this.actuators.length;
+    const partB = (proxyOk + jac + signAcc) / 3;
+    const trap = acts.some(x => gold.game.includes(String(x.actuator)));
+    return { reward: 0.5 * partA + 0.5 * partB, part_a: partA, part_b: partB, proxy_ok: proxyOk, decoy_jaccard: jac, sign_acc: signAcc, recommends_gaming_control: trap ? 1 : 0, true_shift: shift };
+  }
+}
+
+// ---------- hypothesis space ----------
+class Space {
+  constructor(actuators, signals) {
+    this.actuators = actuators; this.signals = signals;
+    const K = actuators.length, M = signals.length;
+    const fix = [], sign = [], isGame = [];
+    for (let f = 0; f < K; f++) {
+      const others = [...Array(K).keys()].filter(i => i !== f);
+      for (const s of [1, -1]) for (let bits = 0; bits < (1 << (K - 1)); bits++) {
+        const g = new Int8Array(K); others.forEach((o, k) => g[o] = (bits >> (K - 2 - k)) & 1);
+        fix.push(f); sign.push(s); isGame.push(g);
+      }
+    }
+    this.fix = fix; this.sign = sign; this.isGame = isGame; this.HA = fix.length;
+    const proxy = [], orient = [], mrole = [];
+    for (let p = 0; p < M; p++) {
+      const others = [...Array(M).keys()].filter(j => j !== p);
+      for (const o of [1, -1]) {
+        const n = Math.pow(3, M - 1);
+        for (let code = 0; code < n; code++) {
+          const r = new Int8Array(M).fill(PROXY); let c = code;
+          for (let k = others.length - 1; k >= 0; k--) { r[others[k]] = [DECOY, ECHO, IRREL][c % 3]; c = Math.floor(c / 3); }
+          proxy.push(p); orient.push(o); mrole.push(r);
+        }
+      }
+    }
+    this.proxy = proxy; this.orient = orient; this.mrole = mrole; this.HM = proxy.length;
+  }
+  maskOf(h) {
+    const K = this.actuators.length;
+    const f = this.actuators.indexOf(h.fix);
+    const ma = new Uint8Array(this.HA);
+    for (let i = 0; i < this.HA; i++) {
+      let ok = this.fix[i] === f && this.sign[i] === h.sign;
+      if (ok && h.game != null) { for (let a = 0; a < K; a++) if (this.isGame[i][a] !== (h.game.has(this.actuators[a]) ? 1 : 0)) { ok = false; break; } }
+      ma[i] = ok ? 1 : 0;
+    }
+    const p = this.signals.indexOf(h.proxy);
+    const allowed = { proxy: [PROXY], decoy: [DECOY], echo: [ECHO], irrelevant: [IRREL], decoyish: [DECOY, ECHO], any: [PROXY, DECOY, ECHO, IRREL] };
+    const mm = new Uint8Array(this.HM);
+    for (let i = 0; i < this.HM; i++) {
+      let ok = this.proxy[i] === p && (h.orient == null || this.orient[i] === h.orient);
+      if (ok) for (let j = 0; j < this.signals.length; j++) { const s = this.signals[j]; if (s === h.proxy) continue; const roles = allowed[(h.mroles && h.mroles[s]) || "any"]; if (!roles.includes(this.mrole[i][j])) { ok = false; break; } }
+      mm[i] = ok ? 1 : 0;
+    }
+    const mask = new Uint8Array(this.HA * this.HM); let any = 0;
+    for (let i = 0; i < this.HA; i++) if (ma[i]) for (let k = 0; k < this.HM; k++) if (mm[k]) { mask[i * this.HM + k] = 1; any++; }
+    if (!any) throw new Error("gold not representable");
+    return mask;
+  }
+}
+
+// ---------- reference learner ----------
+class Learner {
+  constructor(actuators, signals, outcome, opts = {}) {
+    this.space = new Space(actuators, signals); this.outcome = outcome;
+    this.better = opts.better || 1; this.tau = opts.tau || 4; this.defaultValue = opts.defaultValue || 50;
+    this.reset();
+  }
+  reset() { const N = this.space.HA * this.space.HM; this.logpost = new Float64Array(N).fill(-Math.log(N)); this.baseline = {}; this.lastZY = 0; }
+  clone() { const c = Object.create(Learner.prototype); c.space = this.space; c.outcome = this.outcome; c.better = this.better; c.tau = this.tau; c.defaultValue = this.defaultValue; c.logpost = new Float64Array(this.logpost); c.baseline = JSON.parse(JSON.stringify(this.baseline)); c.lastZY = this.lastZY; return c; }
+  normalize() { const z = logsumexp(this.logpost); for (let i = 0; i < this.logpost.length; i++) this.logpost[i] -= z; }
+  updateBaseline(mid, m, s, n) {
+    const se = s / Math.sqrt(Math.max(n, 2));
+    if (this.baseline[mid]) { const b = this.baseline[mid], w0 = 1 / (b.se * b.se), w1 = 1 / (se * se); this.baseline[mid] = { mean: (w0 * b.mean + w1 * m) / (w0 + w1), se: 1 / Math.sqrt(w0 + w1), sd: 0.5 * (b.sd + s) }; }
+    else this.baseline[mid] = { mean: m, se, sd: s };
+  }
+  // Returns per-node log-likelihood terms (each a full HA*HM array) WITHOUT applying them.
+  termsMeasure(result) {
+    const sp = this.space, HA = sp.HA, HM = sp.HM, rd = result.readings || {}, n = result.n_units || 0;
+    for (const mid in rd) if (mid !== "_correlations" && typeof rd[mid] === "object") this.updateBaseline(mid, rd[mid].mean, rd[mid].sd, n);
+    const terms = [];
+    if (n < 4 || !rd[this.outcome]) return terms;
+    const c = rd._correlations || {};
+    sp.signals.forEach((sid, j) => {
+      let r = c[sid + "~" + this.outcome]; if (r == null) r = c[this.outcome + "~" + sid]; if (r == null) return;
+      r = Math.max(-0.999, Math.min(0.999, r));
+      const z = Math.atanh(r) * Math.sqrt(n - 3), lc = llTwoSided(z, this.tau), l0 = llSign(z, 0, this.tau);
+      const ll = new Float64Array(HA * HM);
+      for (let k = 0; k < HM; k++) { const v = sp.mrole[k][j] === IRREL ? l0 : lc; for (let i = 0; i < HA; i++) ll[i * HM + k] = v; }
+      terms.push({ node: sid, ll, z, r, kind: "corr" });
+    });
+    return terms;
+  }
+  termsIntervene(result) {
+    const sp = this.space, HA = sp.HA, HM = sp.HM, K = sp.actuators.length;
+    const applied = result.applied_intervention || {}, rd = result.readings || {}, n = result.n_units || 0;
+    const sT = new Int8Array(HA), sY = new Int8Array(HA);
+    const fT = new Float64Array(HA), fY = new Float64Array(HA);
+    for (const aid in applied) {
+      const a = sp.actuators.indexOf(aid); if (a < 0) continue;
+      const d = Math.sign(applied[aid] - this.defaultValue); if (!d) continue;
+      for (let i = 0; i < HA; i++) { const fh = sp.fix[i] === a ? 1 : 0; fT[i] += d * sp.sign[i] * fh; fY[i] += d * sp.sign[i] * fh + d * sp.isGame[i][a]; }
+    }
+    for (let i = 0; i < HA; i++) { sT[i] = Math.sign(fT[i]); sY[i] = Math.sign(fY[i]); }
+    const terms = []; this.lastZY = 0;
+    for (const mid in rd) {
+      if (mid === "_correlations") continue;
+      const m = typeof rd[mid] === "object" ? rd[mid].mean : rd[mid];
+      const b = this.baseline[mid]; if (!b || n < 2) { terms.push({ node: mid, ll: null, z: null, kind: "nobaseline" }); continue; }
+      const seInt = b.sd / Math.sqrt(n), z = (m - b.mean) / Math.sqrt(seInt * seInt + b.se * b.se), tab = llTable(z, this.tau);
+      const ll = new Float64Array(HA * HM);
+      if (mid === this.outcome) {
+        this.lastZY = this.better * z;
+        for (let i = 0; i < HA; i++) { const v = tab[sY[i] + 1]; for (let k = 0; k < HM; k++) ll[i * HM + k] = v; }
+      } else {
+        const j = sp.signals.indexOf(mid); if (j < 0) continue;
+        for (let i = 0; i < HA; i++) for (let k = 0; k < HM; k++) {
+          const role = sp.mrole[k][j]; let v;
+          if (role === PROXY) v = tab[sp.orient[k] * sT[i] + 1]; else if (role === ECHO) v = tab[sY[i] + 1]; else v = tab[1];
+          ll[i * HM + k] = v;
+        }
+      }
+      terms.push({ node: mid, ll, z, kind: "shift" });
+    }
+    return terms;
+  }
+  apply(terms) { for (const t of terms) if (t.ll) for (let i = 0; i < this.logpost.length; i++) this.logpost[i] += t.ll[i]; this.normalize(); }
+  entropy() { let h = 0; for (const lp of this.logpost) { const p = Math.exp(lp); if (p > 0) h -= p * lp; } return h; }
+  marginals() {
+    const sp = this.space, HA = sp.HA, HM = sp.HM, K = sp.actuators.length, M = sp.signals.length;
+    const pa = new Float64Array(HA), pm = new Float64Array(HM);
+    for (let i = 0; i < HA; i++) for (let k = 0; k < HM; k++) { const p = Math.exp(this.logpost[i * HM + k]); pa[i] += p; pm[k] += p; }
+    const ctrl = sp.actuators.map((a, ai) => { let fp = 0, fm = 0, g = 0; for (let i = 0; i < HA; i++) { if (sp.fix[i] === ai) { if (sp.sign[i] > 0) fp += pa[i]; else fm += pa[i]; } if (sp.isGame[i][ai]) g += pa[i]; } return { id: a, fixp: fp, fixm: fm, game: g, null: Math.max(0, 1 - fp - fm - g) }; });
+    const sig = sp.signals.map((s, j) => { const r = [0, 0, 0, 0]; for (let k = 0; k < HM; k++) r[sp.mrole[k][j]] += pm[k]; return { id: s, proxy: r[0], decoy: r[1], echo: r[2], irrelevant: r[3] }; });
+    return { ctrl, sig };
+  }
+  confidence() { const m = this.marginals(); let best = 0; for (const c of m.ctrl) best = Math.max(best, c.fixp, c.fixm); return best; }
+  mapAnswer() {
+    const m = this.marginals(); let best = { p: -1 };
+    for (const c of m.ctrl) { if (c.fixp > best.p) best = { p: c.fixp, a: c.id, s: 1 }; if (c.fixm > best.p) best = { p: c.fixm, a: c.id, s: -1 }; }
+    let proxy = m.sig[0]; for (const s of m.sig) if (s.proxy > proxy.proxy) proxy = s;
+    const decoys = m.sig.filter(s => s.decoy + s.echo > 0.5).map(s => s.id);
+    const signs = {}; for (const c of m.ctrl) { const o = [["+", c.fixp], ["-", c.fixm], ["0", 1 - c.fixp - c.fixm]].sort((x, y) => y[1] - x[1]); signs[c.id] = o[0][0]; }
+    return { actions: [{ actuator: best.a, value: best.s * this.better > 0 ? 100 : 0 }], proxy: proxy.id, decoys, signs };
+  }
+}
+
+// ---------- potentials ----------
+function phiOf(lp, kind, mask) {
+  if (kind === "entropy") { const z = logsumexp(lp); let h = 0; for (const v of lp) { const p = Math.exp(v - z); if (p > 0) h -= p * (v - z); } return -h; }
+  return Math.max(logsumexp(lp, mask) - logsumexp(lp), Math.log(1e-8));   // oracle: log P(H* | D)
+}
+function addTerms(lp, terms) { const out = new Float64Array(lp); for (const t of terms) if (t.ll) for (let i = 0; i < out.length; i++) out[i] += t.ll[i]; return out; }
+
+// ---------- the shaper: one experiment -> reward + per-node breakdown ----------
+class Shaper {
+  constructor(learner, gold, opts = {}) {
+    this.L = learner; this.kind = opts.potential || "oracle"; this.lam = opts.lam ?? 0.1; this.clip = opts.clip ?? 1.0; this.terminalMode = opts.terminalMode || "keep";
+    this.mask = gold ? learner.space.maskOf(gold) : null;
+    this.reset();
+  }
+  reset() { this.L.reset(); this.phi = this.potential(this.L.logpost); this.phi0 = this.phi; this.total = 0; this.history = [this.phi]; }
+  potential(lp) { return phiOf(lp, this.kind, this.mask); }
+  update(atype, result) {
+    const terms = atype === "measure" ? this.L.termsMeasure(result) : this.L.termsIntervene(result);
+    const lp0 = this.L.logpost, phi0 = this.phi;
+    const perNode = terms.map(t => ({ node: t.node, kind: t.kind, z: t.z, r: t.r, alone: t.ll ? this.lam * (this.potential(addTerms(lp0, [t])) - phi0) : null }));
+    this.L.apply(terms);
+    const phi1 = this.potential(this.L.logpost);
+    const raw = this.lam * (phi1 - phi0), reward = Math.max(-this.clip, Math.min(this.clip, raw));
+    this.phi = phi1; this.total += reward; this.history.push(phi1);
+    return { reward, raw, phiBefore: phi0, phiAfter: phi1, perNode, zY: this.L.lastZY };
+  }
+  terminalAdjustment() { return this.terminalMode === "zero" ? -this.lam * this.phi : 0; }
+  // expected reward of a candidate experiment: Monte-Carlo over the TRUE world (oracle preview)
+  expectedReward(world, cand, nmc, rng) {
+    let s = 0;
+    for (let k = 0; k < nmc; k++) {
+      const L = this.L.clone(); const sh = Object.create(Shaper.prototype); sh.L = L; sh.kind = this.kind; sh.lam = this.lam; sh.clip = this.clip; sh.mask = this.mask; sh.phi = this.phi; sh.total = 0; sh.history = [];
+      const saveId = world.expId;
+      const res = cand.type === "measure" ? world.measure(cand.names, rng) : world.intervene(cand.actions, cand.names, rng);
+      world.expId = saveId;
+      s += sh.update(cand.type, res).reward;
+    }
+    return s / nmc;
+  }
+}
+
+
+// ===== UI =====
+const $ = (id) => document.getElementById(id);
+const fmt = (x, d = 3) => (x >= 0 ? "+" : "−") + Math.abs(x).toFixed(d);
+const fmt0 = (x, d = 2) => (x < 0 ? "−" : "") + Math.abs(x).toFixed(d);
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const ROLE_COLOR = { fix: "var(--fix)", game: "var(--game)", null: "var(--none)", proxy: "var(--fix)", decoy: "var(--decoy)", echo: "var(--game)", irrelevant: "var(--none)" };
+
+const S = { world: null, L: null, sh: null, used: 0, entries: [], done: false, lastPerNode: {}, previewRng: makeRng(4242), previewToken: 0, grade: null };
+
+function settings() {
+  return { seed: Math.max(0, Math.floor(+$("seed").value || 0)), potential: $("potential").value, lam: Math.max(0, +$("lam").value || 0), cost: Math.max(0, +$("cost").value || 0), budget: Math.max(1, Math.floor(+$("budget").value || 1)), tmode: $("tmode").value };
+}
+function saveSettings() { try { localStorage.setItem("causal-bench", JSON.stringify(settings())); } catch (e) { } }
+function loadSettings() { try { const s = JSON.parse(localStorage.getItem("causal-bench") || "null"); if (s) { $("seed").value = s.seed; $("potential").value = s.potential; $("lam").value = s.lam; $("cost").value = s.cost; $("budget").value = s.budget; $("tmode").value = s.tmode; } } catch (e) { } }
+
+// ---------- world / episode ----------
+function newWorld(seed) {
+  S.world = new World(seed);
+  $("seedLabel").textContent = "#" + seed;
+  buildForms();
+  resetEpisode();
+}
+function resetEpisode() {
+  const st = settings();
+  const w = S.world;
+  S.L = new Learner(w.actuators, w.signals, w.outcome);
+  S.sh = new Shaper(S.L, st.potential === "oracle" ? w.trueHypothesis() : null, { potential: st.potential, lam: st.lam, terminalMode: st.tmode });
+  S.used = 0; S.entries = []; S.done = false; S.lastPerNode = {}; S.grade = null;
+  $("reveal").checked = false;
+  $("gradeBox").innerHTML = "";
+  renderAll();
+  schedulePreview();
+}
+
+// ---------- forms ----------
+function chip(id, pressed, disabled) { return `<button type="button" class="chip" data-id="${id}" aria-pressed="${pressed}" ${disabled ? "disabled" : ""}>${id}</button>`; }
+function chipsState(containerId) { return [...$(containerId).querySelectorAll(".chip")].filter(c => c.getAttribute("aria-pressed") === "true").map(c => c.dataset.id); }
+function wireChips(containerId) { $(containerId).addEventListener("click", (e) => { const c = e.target.closest(".chip"); if (!c || c.disabled) return; c.setAttribute("aria-pressed", c.getAttribute("aria-pressed") === "true" ? "false" : "true"); }); }
+function buildForms() {
+  const w = S.world;
+  $("measChips").innerHTML = w.measurables.map(m => chip(m, true, false)).join("");
+  $("intChips").innerHTML = w.measurables.map(m => chip(m, true, m === w.outcome)).join("");
+  $("intCtrl").innerHTML = w.actuators.map(a => `<option value="${a}">${a}</option>`).join("");
+  $("ansCtrl").innerHTML = w.actuators.map(a => `<option value="${a}">${a}</option>`).join("");
+  $("ansProxy").innerHTML = w.signals.map(s => `<option value="${s}">${s}</option>`).join("");
+  $("ansDecoys").innerHTML = w.signals.map(s => chip(s, false, false)).join("");
+  $("ansSigns").innerHTML = w.actuators.map(a => `<div class="sg"><b>${a}</b>${["+", "-", "0"].map(s => `<label><input type="radio" name="sg-${a}" value="${s}" ${s === "0" ? "checked" : ""}> ${s === "-" ? "−" : s}</label>`).join("")}</div>`).join("");
+}
+function readAnswer() {
+  const w = S.world, signs = {};
+  for (const a of w.actuators) signs[a] = document.querySelector(`input[name="sg-${a}"]:checked`).value;
+  return { actions: [{ actuator: $("ansCtrl").value, value: +$("ansDir").value }], proxy: $("ansProxy").value, decoys: chipsState("ansDecoys"), signs };
+}
+function writeAnswer(ans) {
+  $("ansCtrl").value = ans.actions[0].actuator; $("ansDir").value = String(ans.actions[0].value); $("ansProxy").value = ans.proxy;
+  for (const c of $("ansDecoys").querySelectorAll(".chip")) c.setAttribute("aria-pressed", ans.decoys.includes(c.dataset.id) ? "true" : "false");
+  for (const a in ans.signs) { const el = document.querySelector(`input[name="sg-${a}"][value="${ans.signs[a]}"]`); if (el) el.checked = true; }
+}
+
+// ---------- actions ----------
+function describe(atype, result) {
+  if (atype === "measure") { const ids = Object.keys(result.readings).filter(k => k !== "_correlations"); return `measure ${ids.join(" ")}`; }
+  const ap = result.applied_intervention, a = Object.keys(ap)[0];
+  return `do(${a} = ${ap[a]}) read ${Object.keys(result.readings).join(" ")}`;
+}
+function runExperiment(atype, result) {
+  const st = settings();
+  const upd = S.sh.update(atype, result);
+  S.used++;
+  const per = {}; for (const p of upd.perNode) per[p.node] = p;
+  S.lastPerNode = per;
+  S.entries.unshift({ n: S.used, atype, result, upd, cost: st.cost, what: describe(atype, result), conf: S.L.confidence() });
+  renderAll();
+  schedulePreview();
+}
+function doMeasure() {
+  if (S.done) return;
+  const st = settings(); if (S.used >= st.budget) { flash("Budget exhausted — submit an answer."); return; }
+  const names = chipsState("measChips"); if (!names.length) { flash("Pick at least one signal to measure."); return; }
+  runExperiment("measure", S.world.measure(names));
+}
+function doIntervene() {
+  if (S.done) return;
+  const st = settings(); if (S.used >= st.budget) { flash("Budget exhausted — submit an answer."); return; }
+  const a = $("intCtrl").value, v = +$("intVal").value;
+  if (v === 50) { flash("Value 50 is the default setting — that is not an intervention."); return; }
+  runExperiment("intervene", S.world.intervene([{ actuator: a, value: v }], chipsState("intChips")));
+}
+function doAnswer() {
+  if (S.done) return;
+  const st = settings(), ans = readAnswer(), g = S.world.grade(ans), term = S.sh.terminalAdjustment();
+  const shaping = S.entries.reduce((s, e) => s + e.upd.reward, 0), cost = S.entries.reduce((s, e) => s + e.cost, 0);
+  S.grade = { ans, g, term, shaping, cost, total: g.reward + shaping - cost + term };
+  S.done = true; $("reveal").checked = true; S.lastPerNode = {};
+  renderAll();
+  $("preview").innerHTML = `<p class="hint">Episode over. Start a new world or change a setting to play again.</p>`;
+}
+function flash(msg) { $("ledgerHint").textContent = msg; setTimeout(() => { $("ledgerHint").textContent = "reward = λ·ΔΦ − cost, per experiment"; }, 2600); }
+
+// ---------- rendering ----------
+function renderAll() { renderTiles(); renderWorld(); renderLedger(); renderGrade(); renderBaselineHint(); }
+
+function renderTiles() {
+  const st = settings(), N = S.L.space.HA * S.L.space.HM, phi0 = -Math.log(N);
+  const phi = S.sh.phi, frac = Math.max(0, Math.min(1, (phi - phi0) / (0 - phi0)));
+  const shaping = S.entries.reduce((s, e) => s + e.upd.reward, 0), cost = S.entries.reduce((s, e) => s + e.cost, 0);
+  const conf = S.L.confidence();
+  const tiles = [
+    { l: st.potential === "oracle" ? "Φ = log P(truth | data)" : "Φ = −entropy", v: fmt0(phi, 2), s: `${(100 * frac).toFixed(0)}% of ${fmt0(-phi0, 1)} nats resolved`, meter: frac },
+    { l: "shaping earned", v: fmt(shaping), s: `λ = ${st.lam} · cap ${(st.lam * -phi0).toFixed(2)}` },
+    { l: "net so far", v: fmt(shaping - cost), s: `− ${cost.toFixed(2)} cost` },
+    { l: "experiments", v: `${S.used} / ${st.budget}`, s: S.done ? "episode over" : `${st.budget - S.used} left` },
+    { l: "confidence in the fix", v: conf.toFixed(2), s: "max P(control, sign)" },
+  ];
+  if (S.grade) tiles.push({ l: "episode total", v: fmt(S.grade.total), s: `grade ${S.grade.g.reward.toFixed(2)} + shaping − cost${st.tmode === "zero" ? " − λΦ_T" : ""}` });
+  $("tiles").innerHTML = tiles.map(t => `<div class="tile"><div class="eyebrow">${t.l}</div><div class="v">${t.v}</div><div class="s">${t.s}</div>${t.meter != null ? `<div class="meter"><i style="width:${(100 * t.meter).toFixed(1)}%"></i></div>` : ""}</div>`).join("");
+}
+
+function nodePositions() {
+  const w = S.world, K = w.actuators.length, M = w.signals.length, pos = {};
+  w.actuators.forEach((a, i) => pos[a] = { x: (i + 0.5) / K, y: 0.12 });
+  pos.U = { x: 0.2, y: 0.47 }; pos.T = { x: 0.5, y: 0.47 }; pos[w.outcome] = { x: 0.8, y: 0.47 };
+  w.signals.forEach((s, j) => pos[s] = { x: (j + 0.5) / M, y: 0.84 });
+  return pos;
+}
+function segBar(parts) { // [[color, p], ...]
+  return `<div class="bar">${parts.map(([c, p]) => `<i style="width:${(100 * p).toFixed(1)}%;background:${c}"></i>`).join("")}</div>`;
+}
+function bubbleFor(id) {
+  const p = S.lastPerNode[id]; if (!p) return "";
+  if (p.kind === "nobaseline") return `<span class="bubble zero show" title="no baseline yet — measure first">no baseline</span>`;
+  const v = p.alone, cls = Math.abs(v) < 0.0005 ? "zero" : (v > 0 ? "" : "bad");
+  return `<span class="bubble ${cls} show" title="reward this reading alone would have earned">${fmt(v)}</span>`;
+}
+function renderWorld() {
+  const w = S.world, m = S.L.marginals(), reveal = $("reveal").checked, cont = $("world");
+  const pos = nodePositions();
+  // nodes
+  for (const el of cont.querySelectorAll(".node")) el.remove();
+  const html = [];
+  const truth = w.trueHypothesis();
+  m.ctrl.forEach((c, i) => {
+    const top = [["fix +", c.fixp, "fix"], ["fix −", c.fixm, "fix"], ["game", c.game, "game"], ["null", c.null, "null"]].sort((x, y) => y[1] - x[1])[0];
+    const tr = w.aroles[i] === "fix" ? `fix ${w.sign > 0 ? "+" : "−"}` : w.aroles[i];
+    html.push(`<div class="node" style="left:${100 * pos[c.id].x}%;top:${100 * pos[c.id].y}%"><div class="id"><b>${c.id}</b>${reveal ? `<span class="truth ${w.aroles[i]}">${tr}</span>` : `<small>control</small>`}</div>${segBar([[ROLE_COLOR.fix, c.fixp + c.fixm], [ROLE_COLOR.game, c.game], [ROLE_COLOR.null, c.null]])}<div class="top"><span>${top[0]}</span><b class="mono">${top[1].toFixed(2)}</b></div>${bubbleFor(c.id)}</div>`);
+  });
+  html.push(`<div class="node latent" style="left:${100 * pos.U.x}%;top:${100 * pos.U.y}%"><div class="id"><b>U</b><small>latent</small></div><div class="top"><span>confounder</span></div></div>`);
+  html.push(`<div class="node latent" style="left:${100 * pos.T.x}%;top:${100 * pos.T.y}%"><div class="id"><b>T</b><small>latent</small></div><div class="top"><span>true objective</span></div></div>`);
+  html.push(`<div class="node outcome" style="left:${100 * pos[w.outcome].x}%;top:${100 * pos[w.outcome].y}%"><div class="id"><b>${w.outcome}</b><small>outcome · surrogate</small></div><div class="top"><span>higher is better</span></div>${bubbleFor(w.outcome)}</div>`);
+  m.sig.forEach((s, j) => {
+    const top = [["proxy", s.proxy, "proxy"], ["decoy", s.decoy, "decoy"], ["echo", s.echo, "echo"], ["irrelevant", s.irrelevant, "irrelevant"]].sort((x, y) => y[1] - x[1])[0];
+    html.push(`<div class="node" style="left:${100 * pos[s.id].x}%;top:${100 * pos[s.id].y}%"><div class="id"><b>${s.id}</b>${reveal ? `<span class="truth ${w.mroles[j]}">${w.mroles[j] === "irrelevant" ? "noise" : w.mroles[j]}</span>` : `<small>signal</small>`}</div>${segBar([[ROLE_COLOR.proxy, s.proxy], [ROLE_COLOR.decoy, s.decoy], [ROLE_COLOR.echo, s.echo], [ROLE_COLOR.irrelevant, s.irrelevant]])}<div class="top"><span>${top[0]}</span><b class="mono">${top[1].toFixed(2)}</b></div>${bubbleFor(s.id)}</div>`);
+  });
+  cont.insertAdjacentHTML("beforeend", html.join(""));
+  // edges
+  const W = cont.clientWidth, H = cont.clientHeight, hh = 36;
+  const P = (id) => ({ x: pos[id].x * W, y: pos[id].y * H });
+  const edges = [];
+  const add = (from, to, color, p, title) => { if (p < 0.02) return; const a = P(from), b = P(to); const y1 = a.y + hh, y2 = b.y - hh, cy = (y1 + y2) / 2; edges.push(`<g opacity="${p.toFixed(3)}"><path d="M${a.x},${y1} C${a.x},${cy} ${b.x},${cy} ${b.x},${y2}" fill="none" stroke="${color}" stroke-width="${(1.2 + 2.4 * p).toFixed(2)}" marker-end="url(#ar-${color})"><title>${esc(title)} · ${p.toFixed(2)}</title></path></g>`); };
+  // fixed structure of the world template
+  add("U", "T", "none", 1, "U → T confounding (part of every hypothesis)");
+  add("T", w.outcome, "none", 1, "T → outcome (the surrogate reflects the true objective)");
+  m.ctrl.forEach((c, i) => {
+    const pf = reveal ? (w.aroles[i] === "fix" ? 1 : 0) : c.fixp + c.fixm;
+    const pg = reveal ? (w.aroles[i] === "game" ? 1 : 0) : c.game;
+    add(c.id, "T", "fix", pf, `${c.id} → T: fixes the true objective`);
+    add(c.id, w.outcome, "game", pg, `${c.id} → outcome only: games the surrogate`);
+  });
+  m.sig.forEach((s, j) => {
+    const r = w.mroles[j];
+    add("T", s.id, "fix", reveal ? (r === "proxy" ? 1 : 0) : s.proxy, `T → ${s.id}: mechanism proxy`);
+    add("U", s.id, "decoy", reveal ? (r === "decoy" ? 1 : 0) : s.decoy, `U → ${s.id}: decoy (confounder child)`);
+    add(w.outcome, s.id, "game", reveal ? (r === "echo" ? 1 : 0) : s.echo, `outcome → ${s.id}: echo (outcome child)`);
+  });
+  const defs = ["fix", "game", "decoy", "none"].map(c => `<marker id="ar-${c}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--${c})"/></marker>`).join("");
+  $("edges").innerHTML = `<defs>${defs}</defs>` + edges.map(e => e.replace(/stroke="(fix|game|decoy|none)"/, (m0, c) => `stroke="var(--${c})"`)).join("");
+}
+
+function renderLedger() {
+  // sparkline of Phi
+  const st = settings(), N = S.L.space.HA * S.L.space.HM, phi0 = -Math.log(N);
+  const hist = S.sh.history, n = Math.max(st.budget, hist.length - 1);
+  const W = 400, H = 110, padL = 34, padR = 10, padT = 10, padB = 18;
+  const X = (i) => padL + (W - padL - padR) * i / n, Y = (v) => padT + (H - padT - padB) * (0 - v) / (0 - phi0);
+  let svg = `<line x1="${padL}" y1="${Y(0)}" x2="${W - padR}" y2="${Y(0)}" stroke="var(--hair-2)" stroke-width="1"/>`;
+  svg += `<line x1="${padL}" y1="${Y(phi0)}" x2="${W - padR}" y2="${Y(phi0)}" stroke="var(--hair)" stroke-width="1"/>`;
+  svg += `<text x="${padL - 4}" y="${Y(0) + 4}" text-anchor="end" font-size="9" fill="var(--muted)" font-family="IBM Plex Mono,monospace">0</text>`;
+  svg += `<text x="${padL - 4}" y="${Y(phi0) + 3}" text-anchor="end" font-size="9" fill="var(--muted)" font-family="IBM Plex Mono,monospace">${phi0.toFixed(1)}</text>`;
+  for (let i = 0; i <= n; i++) svg += `<text x="${X(i)}" y="${H - 5}" text-anchor="middle" font-size="9" fill="var(--muted)" font-family="IBM Plex Mono,monospace">${i}</text>`;
+  const pts = hist.map((v, i) => `${X(i)},${Y(v)}`);
+  svg += `<path d="M${pts.join(" L")} L${X(hist.length - 1)},${Y(phi0)} L${X(0)},${Y(phi0)} Z" fill="var(--accent)" opacity="0.10"/>`;
+  svg += `<path d="M${pts.join(" L")}" fill="none" stroke="var(--accent)" stroke-width="2" vector-effect="non-scaling-stroke"/>`;
+  hist.forEach((v, i) => { const last = i === hist.length - 1; svg += `<circle cx="${X(i)}" cy="${Y(v)}" r="${last ? 4 : 2.5}" fill="${last ? "var(--accent)" : "var(--surface)"}" stroke="var(--accent)" stroke-width="1.5" vector-effect="non-scaling-stroke"/>`; });
+  svg += `<text x="${W - padR}" y="${padT + 8}" text-anchor="end" font-size="9" fill="var(--muted)" font-family="IBM Plex Sans,sans-serif">Φ after each experiment · slope = reward / λ</text>`;
+  $("spark").innerHTML = svg;
+  // entries
+  if (!S.entries.length) { $("entries").innerHTML = `<p class="hint" style="margin-top:8px">No experiments yet. A good first move is a measurement — interventions have nothing to be compared against until a baseline exists.</p>`; return; }
+  $("entries").innerHTML = S.entries.map(e => {
+    const u = e.upd, net = u.reward - e.cost;
+    const rows = u.perNode.map(p => {
+      const rd = e.result.readings[p.node];
+      const reading = e.atype === "measure" ? `r(${p.node},${S.world.outcome}) = ${p.r != null ? fmt0(p.r, 2) : "—"}` : `mean ${fmt0(typeof rd === "object" ? rd.mean : rd, 2)}`;
+      const z = p.z != null ? fmt0(p.z, 1) : "—";
+      const alone = p.kind === "nobaseline" ? `<span class="nil">no baseline</span>` : `<span class="${Math.abs(p.alone) < 0.0005 ? "nil" : (p.alone > 0 ? "pos" : "neg")}">${fmt(p.alone)}</span>`;
+      return `<tr><td class="id">${p.node}</td><td>${reading}</td><td class="num">${z}</td><td class="num">${alone}</td></tr>`;
+    }).join("");
+    const outRow = e.atype === "measure" && e.result.readings[S.world.outcome] ? `<tr><td class="id">${S.world.outcome}</td><td>mean ${fmt0(e.result.readings[S.world.outcome].mean, 2)} · sd ${fmt0(e.result.readings[S.world.outcome].sd, 2)}</td><td class="num">—</td><td class="num nil">baseline</td></tr>` : "";
+    return `<div class="entry"><div class="t"><span class="what">#${e.n} ${esc(e.what)}</span><span class="rw ${net > 0.0005 ? "pos" : (net < -0.0005 ? "neg" : "nil")}">${fmt(net)}</span></div>
+      <div class="sub">shaping ${fmt(u.reward)} · cost −${e.cost.toFixed(2)} · Φ ${fmt0(u.phiBefore, 2)} → ${fmt0(u.phiAfter, 2)} · confidence ${e.conf.toFixed(2)}${e.atype === "intervene" && S.L ? ` · surrogate z ${fmt0(u.zY, 1)}` : ""}</div>
+      <table class="pn"><thead><tr><th>node</th><th>${e.atype === "measure" ? "correlation with outcome" : "reading under do()"}</th><th style="text-align:right">z</th><th style="text-align:right">alone</th></tr></thead><tbody>${outRow}${rows}</tbody></table></div>`;
+  }).join("");
+}
+
+function renderGrade() {
+  if (!S.grade) { $("gradeBox").innerHTML = ""; return; }
+  const { ans, g, term, shaping, cost, total } = S.grade, st = settings(), gold = S.world.gold;
+  const row = (k, v, cls = "") => `<tr class="${cls}"><td>${k}</td><td>${v}</td></tr>`;
+  $("gradeBox").innerHTML = `<div class="grade"><div class="eyebrow">grade · true objective</div><table>
+    ${row(`part A — ${ans.actions[0].actuator} → ${ans.actions[0].value} moves the true objective by ${fmt(g.true_shift, 2)}${g.recommends_gaming_control ? " · <b>that is the gaming control</b>" : ""}`, g.part_a.toFixed(2))}
+    ${row(`part B — proxy ${g.proxy_ok ? "✓" : "✗ (" + gold.proxy + ")"} · decoys Jaccard ${g.decoy_jaccard.toFixed(2)} · signs ${g.sign_acc.toFixed(2)}`, g.part_b.toFixed(2))}
+    ${row("terminal grade = ½A + ½B", g.reward.toFixed(3), "tot")}
+    ${row("shaping earned during the episode", fmt(shaping))}
+    ${row("experiment cost", fmt(-cost))}
+    ${st.tmode === "zero" ? row("terminal potential removed (−λ·Φ_T)", fmt(term)) : ""}
+    ${row("episode return", fmt(total), "tot")}
+  </table><p class="hint" style="margin:6px 0 0">Gold: fix ${gold.actions[0].actuator} → ${gold.actions[0].value}, proxy ${gold.proxy}, decoys ${gold.decoys.join(" ") || "none"}, gaming control ${gold.game.join(" ")}.</p></div>`;
+}
+
+function renderBaselineHint() {
+  const b = S.L.baseline, ids = S.world.measurables.filter(m => b[m]);
+  $("baselineHint").textContent = ids.length ? `baselines known for ${ids.join(" ")}` : "no baseline yet — an intervention reading cannot be interpreted until you have measured";
+}
+
+// ---------- oracle preview ----------
+function candidates() {
+  const w = S.world, c = [{ type: "measure", names: w.measurables, label: "measure all" }];
+  for (const a of w.actuators) {
+    c.push({ type: "intervene", actions: [{ actuator: a, value: 100 }], names: w.measurables, label: `do(${a}=100) read all` });
+    c.push({ type: "intervene", actions: [{ actuator: a, value: 0 }], names: w.measurables, label: `do(${a}=0) read all` });
+    c.push({ type: "intervene", actions: [{ actuator: a, value: 100 }], names: [w.outcome], label: `do(${a}=100) read ${w.outcome} only` });
+  }
+  return c;
+}
+function schedulePreview() {
+  const token = ++S.previewToken;
+  if (!$("previewOn").checked || S.done) { if (!S.done) $("preview").innerHTML = `<p class="hint">Preview off — you are playing blind.</p>`; return; }
+  $("preview").innerHTML = `<p class="hint">computing…</p>`;
+  setTimeout(() => {
+    if (token !== S.previewToken) return;
+    const st = settings(), cands = candidates();
+    const vals = cands.map(cd => ({ cd, v: S.sh.expectedReward(S.world, cd, 8, S.previewRng) - st.cost }));
+    vals.sort((a, b) => b.v - a.v);
+    const mx = Math.max(0.001, ...vals.map(x => Math.abs(x.v)));
+    $("preview").innerHTML = vals.map((x, i) => `<div class="cand" data-i="${cands.indexOf(x.cd)}" role="button" tabindex="0"><div><div class="n">${esc(x.cd.label)}</div><div class="b"><i class="${x.v < 0 ? "neg" : ""}" style="width:${(100 * Math.abs(x.v) / mx).toFixed(1)}%"></i></div></div><div class="v ${x.v > 0.0005 ? "pos" : (x.v < -0.0005 ? "neg" : "nil")}">${fmt(x.v)}</div></div>`).join("");
+  }, 30);
+}
+function loadCandidate(i) {
+  const cd = candidates()[i]; if (!cd) return;
+  if (cd.type === "measure") { for (const c of $("measChips").querySelectorAll(".chip")) c.setAttribute("aria-pressed", "true"); $("doMeasure").focus(); return; }
+  $("intCtrl").value = cd.actions[0].actuator; $("intVal").value = cd.actions[0].value; $("intValLabel").textContent = cd.actions[0].value;
+  for (const c of $("intChips").querySelectorAll(".chip")) if (!c.disabled) c.setAttribute("aria-pressed", cd.names.includes(c.dataset.id) ? "true" : "false");
+  $("doIntervene").focus();
+}
+
+// ---------- wiring ----------
+wireChips("measChips"); wireChips("intChips"); wireChips("ansDecoys");
+$("doMeasure").addEventListener("click", doMeasure);
+$("doIntervene").addEventListener("click", doIntervene);
+$("doAnswer").addEventListener("click", doAnswer);
+$("fillBayes").addEventListener("click", () => writeAnswer(S.L.mapAnswer()));
+$("intVal").addEventListener("input", () => $("intValLabel").textContent = $("intVal").value);
+$("v0").addEventListener("click", () => { $("intVal").value = 0; $("intValLabel").textContent = "0"; });
+$("v100").addEventListener("click", () => { $("intVal").value = 100; $("intValLabel").textContent = "100"; });
+$("reveal").addEventListener("change", renderWorld);
+$("previewOn").addEventListener("change", schedulePreview);
+$("newWorld").addEventListener("click", () => { saveSettings(); newWorld(settings().seed); });
+$("randWorld").addEventListener("click", () => { $("seed").value = Math.floor(Math.random() * 100000); saveSettings(); newWorld(settings().seed); });
+for (const id of ["potential", "lam", "cost", "budget", "tmode"]) $(id).addEventListener("change", () => { saveSettings(); resetEpisode(); });
+$("preview").addEventListener("click", (e) => { const c = e.target.closest(".cand"); if (c) loadCandidate(+c.dataset.i); });
+$("preview").addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { const c = e.target.closest(".cand"); if (c) { e.preventDefault(); loadCandidate(+c.dataset.i); } } });
+let rsz; window.addEventListener("resize", () => { clearTimeout(rsz); rsz = setTimeout(renderWorld, 120); });
+
+loadSettings();
+if (!$("seed").value) $("seed").value = 1729;
+newWorld(settings().seed);
+
+</script>

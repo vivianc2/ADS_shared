@@ -1,0 +1,222 @@
+<title>Causal Bench</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  color-scheme:light;
+  --ground:#f1f4f3; --surface:#ffffff; --surface-2:#e9eeed; --ink:#15222b; --ink-2:#4b5b64; --muted:#7a8a93; --hair:#d5dddf; --hair-2:#c2ccd0;
+  --accent:#0e7a8b; --accent-soft:#d8eef1; --good:#2e8b57; --good-soft:#dff3e7; --bad:#c44536; --bad-soft:#f9e3df;
+  --fix:#0e7a8b; --game:#d3861c; --decoy:#7a5cc7; --none:#a9b4b9; --latent:#8a7f6a;
+  --focus:#0e7a8b;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme:dark;
+    --ground:#0e1417; --surface:#172026; --surface-2:#1f2a31; --ink:#e6ecef; --ink-2:#b7c3c9; --muted:#8d9ca4; --hair:#26333a; --hair-2:#334249;
+    --accent:#3fc0d2; --accent-soft:#123a41; --good:#5ccf83; --good-soft:#153826; --bad:#ef7a67; --bad-soft:#41221d;
+    --fix:#3fc0d2; --game:#f0a53a; --decoy:#a58cf0; --none:#5c6c74; --latent:#a79c85;
+    --focus:#3fc0d2;
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --ground:#0e1417; --surface:#172026; --surface-2:#1f2a31; --ink:#e6ecef; --ink-2:#b7c3c9; --muted:#8d9ca4; --hair:#26333a; --hair-2:#334249;
+  --accent:#3fc0d2; --accent-soft:#123a41; --good:#5ccf83; --good-soft:#153826; --bad:#ef7a67; --bad-soft:#41221d;
+  --fix:#3fc0d2; --game:#f0a53a; --decoy:#a58cf0; --none:#5c6c74; --latent:#a79c85;
+  --focus:#3fc0d2;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ground);color:var(--ink);font-family:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;font-size:14px;line-height:1.45}
+.mono{font-family:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;font-variant-numeric:tabular-nums}
+.eyebrow{font-family:"IBM Plex Sans Condensed","IBM Plex Sans",system-ui,sans-serif;font-weight:600;text-transform:uppercase;letter-spacing:.08em;font-size:11px;color:var(--muted)}
+h1,h2,h3{margin:0;text-wrap:balance}
+h1{font-family:"IBM Plex Sans Condensed","IBM Plex Sans",sans-serif;font-weight:600;font-size:22px;letter-spacing:.01em}
+h2{font-family:"IBM Plex Sans Condensed","IBM Plex Sans",sans-serif;font-weight:600;font-size:15px;letter-spacing:.02em}
+button,select,input{font:inherit;color:inherit}
+button{cursor:pointer;border:1px solid var(--hair-2);background:var(--surface);border-radius:6px;padding:6px 10px}
+button:hover{border-color:var(--accent)}
+button:disabled{opacity:.45;cursor:not-allowed}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:500}
+:root[data-theme="dark"] button.primary{color:#07161a}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) button.primary{color:#07161a}}
+button:focus-visible,select:focus-visible,input:focus-visible,.chip:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+select,input[type=number],input[type=text]{background:var(--surface);border:1px solid var(--hair-2);border-radius:6px;padding:5px 8px}
+input[type=number]{width:74px}
+.page{max-width:1500px;margin:0 auto;padding:16px 18px 40px}
+/* header */
+.head{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px 24px;padding-bottom:12px;border-bottom:1px solid var(--hair);margin-bottom:14px}
+.head .lede{max-width:62ch;color:var(--ink-2);margin-top:4px}
+.tiles{display:flex;flex-wrap:wrap;gap:8px}
+.tile{background:var(--surface);border:1px solid var(--hair);border-radius:8px;padding:8px 12px;min-width:118px}
+.tile .v{font-family:"IBM Plex Mono",monospace;font-size:19px;font-weight:500;line-height:1.1;margin-top:2px;font-variant-numeric:tabular-nums}
+.tile .s{font-size:11px;color:var(--muted);margin-top:2px}
+.meter{height:5px;background:var(--surface-2);border-radius:3px;margin-top:6px;overflow:hidden}
+.meter i{display:block;height:100%;background:var(--accent);width:0%;transition:width .35s}
+/* console grid */
+.console{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,.95fr) minmax(0,1.05fr);gap:14px;align-items:start}
+@media (max-width:1180px){.console{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.col-ledger{grid-column:1/-1}}
+@media (max-width:760px){.console{grid-template-columns:minmax(0,1fr)}.col-ledger{grid-column:auto}}
+.panel{background:var(--surface);border:1px solid var(--hair);border-radius:10px;padding:12px 14px}
+.panel + .panel{margin-top:12px}
+.panel-h{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:8px}
+.hint{color:var(--muted);font-size:12px}
+/* world diagram */
+.world{position:relative;height:560px;border:1px solid var(--hair);border-radius:8px;background:
+  linear-gradient(var(--hair) 1px,transparent 1px) 0 0/100% 40px, linear-gradient(90deg,var(--hair) 1px,transparent 1px) 0 0/40px 100%;
+  background-color:var(--surface);overflow:hidden}
+.world svg{position:absolute;inset:0;width:100%;height:100%}
+.node{position:absolute;width:min(132px,23%);transform:translate(-50%,-50%);background:var(--surface);border:1.5px solid var(--hair-2);border-radius:8px;padding:7px 9px 8px;box-shadow:0 1px 2px rgba(0,0,0,.06)}
+.node.latent{border-style:dashed;border-color:var(--latent);background:var(--surface-2)}
+.node.outcome{border-color:var(--ink-2)}
+.node .id{display:flex;justify-content:space-between;align-items:baseline;gap:6px}
+.node .id b{font-family:"IBM Plex Mono",monospace;font-weight:500;font-size:14px}
+.node .id small{font-size:10.5px;color:var(--muted);white-space:nowrap}
+.node .truth{font-size:10.5px;font-weight:600;padding:1px 5px;border-radius:4px;background:var(--surface-2);color:var(--ink-2)}
+.node .truth.fix{color:var(--fix)} .node .truth.game{color:var(--game)} .node .truth.decoy{color:var(--decoy)} .node .truth.proxy{color:var(--fix)} .node .truth.echo{color:var(--game)}
+.bar{display:flex;height:7px;border-radius:3px;overflow:hidden;background:var(--surface-2);margin-top:7px}
+.bar i{display:block;height:100%;transition:width .35s}
+.node .top{font-size:11px;color:var(--ink-2);margin-top:5px;display:flex;justify-content:space-between}
+.node .top b{font-weight:500}
+.bubble{position:absolute;top:-12px;right:-10px;font-family:"IBM Plex Mono",monospace;font-size:11.5px;font-weight:500;padding:2px 6px;border-radius:10px;background:var(--good-soft);color:var(--good);border:1px solid var(--good);opacity:0;transition:opacity .3s}
+.bubble.bad{background:var(--bad-soft);color:var(--bad);border-color:var(--bad)}
+.bubble.zero{background:var(--surface-2);color:var(--muted);border-color:var(--hair-2)}
+.bubble.show{opacity:1}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:8px;font-size:11.5px;color:var(--ink-2)}
+.legend span{display:inline-flex;align-items:center;gap:5px}
+.sw{width:10px;height:10px;border-radius:2px;display:inline-block}
+/* bench */
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{border:1px solid var(--hair-2);border-radius:14px;padding:3px 10px;font-family:"IBM Plex Mono",monospace;font-size:12.5px;background:var(--surface);cursor:pointer;user-select:none}
+.chip[aria-pressed="true"]{background:var(--accent-soft);border-color:var(--accent);color:var(--ink)}
+.chip[disabled]{opacity:.55;cursor:default}
+.row{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:8px}
+.row label{color:var(--ink-2);font-size:12.5px}
+.slider{display:flex;align-items:center;gap:8px;flex:1;min-width:200px}
+.slider input[type=range]{flex:1;accent-color:var(--accent)}
+.signs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;margin-top:6px}
+.signs .sg{display:flex;align-items:center;gap:8px;border:1px solid var(--hair);border-radius:6px;padding:5px 8px;white-space:nowrap}
+.signs .sg b{font-family:"IBM Plex Mono",monospace;font-weight:500;margin-right:2px}
+.signs .sg label{display:inline-flex;align-items:center;gap:2px;font-size:12.5px}
+.preview{margin-top:6px}
+.cand{display:grid;grid-template-columns:minmax(0,1fr) 62px;align-items:center;gap:8px;padding:4px 4px;border-radius:6px;cursor:pointer;border:1px solid transparent}
+.cand:hover{border-color:var(--hair-2);background:var(--surface-2)}
+.cand .n{font-family:"IBM Plex Mono",monospace;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cand .b{height:6px;background:var(--surface-2);border-radius:3px;margin-top:3px;overflow:hidden}
+.cand .b i{display:block;height:100%;background:var(--accent)}
+.cand .b i.neg{background:var(--bad)}
+.cand .v{font-family:"IBM Plex Mono",monospace;font-size:12px;text-align:right;font-variant-numeric:tabular-nums}
+.grade{margin-top:10px;padding:10px 12px;border-radius:8px;background:var(--surface-2)}
+.grade table{border-collapse:collapse;width:100%;font-size:12.5px}
+.grade td{padding:2px 0}.grade td:last-child{text-align:right;font-family:"IBM Plex Mono",monospace}
+.grade .tot{font-weight:600;border-top:1px solid var(--hair-2)}
+/* ledger */
+.spark{width:100%;height:110px;display:block}
+.entry{border-top:1px solid var(--hair);padding:9px 0}
+.entry .t{display:flex;justify-content:space-between;gap:8px;align-items:baseline}
+.entry .t .what{font-family:"IBM Plex Mono",monospace;font-size:12.5px}
+.entry .t .rw{font-family:"IBM Plex Mono",monospace;font-weight:500;font-size:14px;font-variant-numeric:tabular-nums}
+.pos{color:var(--good)}.neg{color:var(--bad)}.nil{color:var(--muted)}
+.entry .sub{font-size:12px;color:var(--ink-2);margin-top:2px}
+.pn{width:100%;border-collapse:collapse;margin-top:6px;font-size:12px}
+.pn th{text-align:left;color:var(--muted);font-weight:500;padding:1px 0;font-size:11px}
+.pn td{padding:1px 0;border-top:1px dotted var(--hair)}
+.pn td.num{font-family:"IBM Plex Mono",monospace;text-align:right;font-variant-numeric:tabular-nums}
+.pn td.id{font-family:"IBM Plex Mono",monospace}
+.settings{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;margin-top:6px}
+.settings label{display:inline-flex;align-items:center;gap:5px;font-size:12.5px;color:var(--ink-2)}
+.tog{display:inline-flex;align-items:center;gap:5px;font-size:12.5px;color:var(--ink-2)}
+.note{font-size:12px;color:var(--ink-2);background:var(--surface-2);border-radius:6px;padding:8px 10px;margin-top:8px}
+.kbd{font-family:"IBM Plex Mono",monospace;font-size:11.5px;background:var(--surface-2);padding:0 4px;border-radius:3px}
+.done{border-color:var(--accent)}
+.scroll{overflow-x:auto}
+@media (max-width:560px){.node .id small{display:none}.node{padding:6px 7px 7px}}
+@media (prefers-reduced-motion: reduce){.bar i,.meter i,.bubble{transition:none}}
+</style>
+
+<div class="page">
+  <header class="head">
+    <div>
+      <div class="eyebrow">Causal discovery · reward playground</div>
+      <h1>Causal Bench</h1>
+      <p class="lede">A generated industrial world: four controls, four signals, a surrogate outcome, two latent nodes. Measure and intervene; every experiment is paid its Bayesian information gain — and each node you read shows what its reading alone was worth.</p>
+    </div>
+    <div class="tiles" id="tiles"></div>
+  </header>
+
+  <div class="console">
+    <section class="col-world">
+      <div class="panel">
+        <div class="panel-h"><h2>World <span class="mono" id="seedLabel"></span></h2>
+          <div class="tog"><label><input type="checkbox" id="reveal"> reveal the truth</label></div></div>
+        <div class="world" id="world"><svg id="edges" aria-hidden="true"></svg></div>
+        <div class="legend">
+          <span><i class="sw" style="background:var(--fix)"></i>fix → true objective / proxy</span>
+          <span><i class="sw" style="background:var(--game)"></i>game → surrogate only / echo</span>
+          <span><i class="sw" style="background:var(--decoy)"></i>decoy (confounder child)</span>
+          <span><i class="sw" style="background:var(--none)"></i>null / irrelevant</span>
+          <span><i class="sw" style="border:1.5px dashed var(--latent);background:transparent"></i>latent — cannot be measured</span>
+        </div>
+        <p class="hint" style="margin:8px 0 0">Edges are drawn at the reference learner's posterior probability; they solidify as evidence accumulates. Bars on each node are the role posterior. The bubble on a node after an experiment is the reward that reading alone would have earned.</p>
+      </div>
+      <div class="panel">
+        <div class="panel-h"><h2>Settings</h2><span class="hint">changing a reward setting restarts the episode on the same world</span></div>
+        <div class="settings">
+          <label>seed <input type="number" id="seed" min="0" step="1" style="width:92px"></label>
+          <button id="newWorld">New world from seed</button>
+          <button id="randWorld">Random world</button>
+        </div>
+        <div class="settings">
+          <label>potential <select id="potential"><option value="oracle">oracle · log P(truth | data)</option><option value="entropy">entropy · gold-free</option></select></label>
+          <label>λ <input type="number" id="lam" step="0.01" min="0" value="0.1"></label>
+          <label>cost / experiment <input type="number" id="cost" step="0.01" min="0" value="0.02"></label>
+          <label>budget <input type="number" id="budget" step="1" min="1" value="8"></label>
+          <label>terminal <select id="tmode"><option value="keep">keep (evidence bonus)</option><option value="zero">zero (pure potential shaping)</option></select></label>
+        </div>
+      </div>
+    </section>
+
+    <section class="col-bench">
+      <div class="panel">
+        <div class="panel-h"><h2>Measure</h2><span class="hint">observational · n = 400 units at default settings</span></div>
+        <div class="chips" id="measChips"></div>
+        <div class="row"><button class="primary" id="doMeasure">Run measurement</button><span class="hint">correlations with the outcome inform signal roles only — never which control matters</span></div>
+      </div>
+      <div class="panel">
+        <div class="panel-h"><h2>Intervene</h2><span class="hint">do(control = value) · n = 60 units</span></div>
+        <div class="row"><label>control</label><select id="intCtrl"></select>
+          <div class="slider"><input type="range" id="intVal" min="0" max="100" step="1" value="100"><span class="mono" id="intValLabel" style="width:34px;text-align:right">100</span></div>
+          <button id="v0">set 0</button><button id="v100">set 100</button></div>
+        <div class="row"><label>read</label><div class="chips" id="intChips"></div></div>
+        <div class="row"><button class="primary" id="doIntervene">Run intervention</button><span class="hint" id="baselineHint"></span></div>
+      </div>
+      <div class="panel" id="previewPanel">
+        <div class="panel-h"><h2>What would each experiment earn?</h2>
+          <div class="tog"><label><input type="checkbox" id="previewOn" checked> oracle preview</label></div></div>
+        <p class="hint" style="margin:0 0 4px">Expected reward (λ·ΔΦ − cost) of each possible next experiment, Monte-Carlo over 8 draws from the <em>hidden</em> world. Click a row to load it. Turn it off to play blind.</p>
+        <div class="preview" id="preview"></div>
+      </div>
+      <div class="panel">
+        <div class="panel-h"><h2>Answer</h2><span class="hint">ends the episode · graded on the true objective</span></div>
+        <div class="row"><label>fix</label><select id="ansCtrl"></select><select id="ansDir"><option value="100">raise to 100</option><option value="0">lower to 0</option></select>
+          <label>proxy</label><select id="ansProxy"></select></div>
+        <div class="row"><label>decoys</label><div class="chips" id="ansDecoys"></div></div>
+        <div class="eyebrow" style="margin-top:8px">effect sign on the true objective</div>
+        <div class="signs" id="ansSigns"></div>
+        <div class="row"><button id="fillBayes">Fill from posterior</button><button class="primary" id="doAnswer">Submit answer</button></div>
+        <div id="gradeBox"></div>
+      </div>
+    </section>
+
+    <section class="col-ledger">
+      <div class="panel">
+        <div class="panel-h"><h2>Ledger</h2><span class="hint" id="ledgerHint">reward = λ·ΔΦ − cost, per experiment</span></div>
+        <svg class="spark" id="spark" viewBox="0 0 400 110" preserveAspectRatio="none" role="img" aria-label="Potential and reward over the episode"></svg>
+        <div id="entries"></div>
+      </div>
+    </section>
+  </div>
+</div>
+
+<script>
+/*__CORE__*/
+/*__UI__*/
+</script>
