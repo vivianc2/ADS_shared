@@ -38,6 +38,9 @@ from skyrl_gym.envs.base_text_env import BaseTextEnv, BaseTextEnvStepOutput  # n
 from env import RPGEnv, SYSTEM_PROMPT       # rpg_rl/env.py  (RL environment)   # noqa: E402
 from sampler import sample_world            # rpg_v9/sampler.py                  # noqa: E402
 from generate_v7 import audit               # rpg_v9/generate_v7.py              # noqa: E402
+import json, re                                                                     # noqa: E402
+from reward import compute_reward, RewardConfig  # rpg_rl/reward.py                  # noqa: E402
+_BELIEF_RE = re.compile(r"<belief>\s*(\{.*?\})\s*</belief>", re.DOTALL)  # BG2 per-turn belief graph
 
 
 def build_rpg_env(seed: int, skin: str, archetype: str,
@@ -81,6 +84,12 @@ class RPGSkyEnv(BaseTextEnv):
         # reset now so the very first step advances the correct world state; the first
         # observation is identical to the one baked into the dataset prompt (determinism).
         self._first_obs = self._rpg.reset()
+        # BG2 (opt-in, default OFF): per-turn belief-graph potential shaping. Inert unless
+        # RPG_BELIEF_SHAPING is set. Phi(t)=grade(<belief>).part_a; r_shape=gamma*Phi(t)-Phi(t-1).
+        self._belief_shaping = bool(os.environ.get("RPG_BELIEF_SHAPING"))
+        self._gamma = float(os.environ.get("RPG_BELIEF_GAMMA", "1.0"))
+        self._prev_phi = 0.0
+        self._bcfg = RewardConfig()
 
     def init(self, prompt):
         # The dataset prompt already holds [system(SYSTEM_PROMPT), user(first_obs)];
@@ -89,6 +98,10 @@ class RPGSkyEnv(BaseTextEnv):
 
     def step(self, action: str) -> BaseTextEnvStepOutput:
         obs, reward, done, info = self._rpg.step(action)
+        if self._belief_shaping:            # BG2: dense per-turn belief-graph shaping (potential-based)
+            phi = self._belief_phi(action)
+            reward = float(reward) + self._gamma * phi - self._prev_phi
+            self._prev_phi = phi
         # RPG_NO_THINK=1 -> append Qwen3's /no_think directive to every turn (forces
         # thinking-off for the debug loop; SkyRL has no chat-template thinking flag).
         if not done and os.environ.get("RPG_NO_THINK"):
@@ -105,6 +118,30 @@ class RPGSkyEnv(BaseTextEnv):
                       ("part_a", "part_b", "accepted", "turn_type", "n_interventions",
                        "reward_error")},
         )
+
+    def _belief_phi(self, action: str) -> float:
+        """Phi(t) = part_a of grading the turn's <belief> struct (current best answer).
+        No/invalid belief -> keep prev phi (no shaping change). Uses the SAME oracle as the
+        terminal reward, so shaping telescopes toward the graded answer."""
+        m = _BELIEF_RE.search(action or "")
+        if not m:
+            return self._prev_phi
+        try:
+            b = json.loads(m.group(1))
+        except Exception:
+            try:
+                b = json.loads(re.sub(r",\s*}", "}", re.sub(r",\s*]", "]", m.group(1))))
+            except Exception:
+                return self._prev_phi
+        if not isinstance(b, dict):
+            return self._prev_phi
+        try:
+            r = compute_reward(b, self._rpg.world, self._rpg.cat, self._rpg.gold,
+                               self._rpg.battery, self._bcfg,
+                               n_interventions=max(getattr(self._rpg, "_n_interv", 1), 1))
+            return float(r.get("part_a", 0.0))
+        except Exception:
+            return self._prev_phi
 
     def get_metrics(self) -> Dict[str, Any]:
         return {"turns": self._rpg._turn, "interventions": self._rpg._n_interv}

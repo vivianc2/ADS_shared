@@ -211,6 +211,28 @@ def _sign(delta, eps):
     return "+" if delta > eps else ("-" if delta < -eps else "0")
 
 
+def _canon_sign(s):
+    """Canonicalize a predicted/gold actuator sign to "+", "-", "0" (or None if absent).
+    Models emit the "no effect" sign in many forms - JSON int 0/0.0, "0", "none", "neutral" -
+    and non-zero signs as +1/-1 or words; gold signs are always the strings "+"/"-"/"0".
+    Without this, a legitimate `"a4": 0` (int) vs gold "0" is `0 == "0"` -> False, silently
+    DROPPING that sign's battery credit (part_b). Found by reading RL traces (2026-09-08)."""
+    if s is None:
+        return None
+    if isinstance(s, bool):          # bool is a subclass of int - guard first
+        return "+" if s else "0"
+    if isinstance(s, (int, float)):
+        return "+" if s > 0 else ("-" if s < 0 else "0")
+    t = str(s).strip().lower()
+    if t in ("+", "1", "+1", "pos", "positive", "up", "increase", "increases", "higher"):
+        return "+"
+    if t in ("-", "-1", "neg", "negative", "down", "decrease", "decreases", "lower"):
+        return "-"
+    if t in ("0", "0.0", "none", "null", "no effect", "no_effect", "neutral", "flat", "zero", "skip"):
+        return "0"
+    return t                          # unknown token: deterministic as-is comparison
+
+
 def counterfactual_battery(world: Dict[str, Any], *, n=15000, seed=777) -> Dict[str, Any]:
     scm: WorldSCM = world["scm"]
     gt = world["ground_truth"]
@@ -342,7 +364,7 @@ def _score_battery(battery, answer, recommended=None, strict=True):
         # "0" (utility-based, see counterfactual_battery). The sign question is defined in
         # the prompt as "effect on the TRUE OBJECTIVE" (not the observed metric), so an
         # agent that answers "+" because it saw the surrogate rise is correctly marked wrong.
-        items.append((f"sign:{aid}", pred.get(aid) == gold))
+        items.append((f"sign:{aid}", _canon_sign(pred.get(aid)) == _canon_sign(gold)))
     # items hold numeric scores: booleans (True/False -> 1.0/0.0) for exact-match items and
     # graded floats in [0,1] (e.g. confounded_decoys). Sum the scores rather than counting
     # truthy, so partial credit contributes fractionally to the battery fraction.
