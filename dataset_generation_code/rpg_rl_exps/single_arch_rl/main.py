@@ -14,7 +14,7 @@ entrypoint task, then run the standard GRPO loop -- and adds four things:
 3. **The per-step group statistics** (log requirement 1): ``reward/group_reward_mean``
    and ``reward/group_reward_var``, computed from the same rewards and uids SkyRL uses
    for ``reward/avg_raw_reward``.
-4. **A checkpoint guard**: the two concurrent runs serialize their ~18 GiB state-dict
+4. **A checkpoint guard**: the two archetype runs serialize their ~18 GiB state-dict
    saves behind one file lock, and each saved LoRA adapter is copied out of the 19 GB
    blob so the trained delta survives on its own.
 
@@ -57,7 +57,7 @@ from single_arch_rl.metrics import group_reward_stats
 
 
 def _check_runtime_overlays() -> list:
-    """Verify the two project-local overlays are the ones actually imported.
+    """Verify the project-local runtime overlays are the ones actually imported.
 
     Both are silent when missing -- FLA 0.5.1 fails much later inside a backward pass, and
     the vLLM partial wake corrupts scheduling rather than raising -- so check eagerly, on
@@ -97,7 +97,9 @@ def _check_runtime_overlays() -> list:
 
     try:
         import vllm
+        from vllm.device_allocator.cumem import CuMemAllocator
         from vllm.v1.engine.core import EngineCore
+        from vllm.v1.executor.multiproc_executor import MultiprocExecutor
 
         if vllm.__version__ != REQUIRED_VLLM_VERSION:
             problems.append(
@@ -110,6 +112,16 @@ def _check_runtime_overlays() -> list:
                 "the scheduler on wake_up(['weights']) while the KV cache is still "
                 "unmapped. Put runtime/skyrl_patches on PYTHONPATH so its "
                 "sitecustomize.py runs -- scripts/run_one.sh does this."
+            )
+        if not getattr(CuMemAllocator.wake_up, "_sa_cumem_state_guard", False):
+            problems.append(
+                "vLLM's CuMem sleep/wake guard did not load; repeated colocated wake cycles "
+                "can wedge a tensor-parallel worker"
+            )
+        if not getattr(MultiprocExecutor.wake_up, "_sa_wake_timeout", False):
+            problems.append(
+                "vLLM's multiprocess wake timeout did not load; a wedged TP worker would "
+                "block sync_weights forever"
             )
     except Exception as exc:  # noqa: BLE001
         problems.append(f"could not inspect vLLM EngineCore: {exc!r}")
@@ -173,7 +185,7 @@ def _preflight(cfg: SkyRLTrainConfig) -> None:
             f"cycle (got {os.environ.get('PYTORCH_CUDA_ALLOC_CONF')!r})"
         )
 
-    # One global step == one optimizer step, so "checkpoint every 2 steps" is unambiguous.
+    # One global step == one optimizer step, so "checkpoint every 4 steps" is unambiguous.
     if cfg.trainer.train_batch_size != TRAIN_BATCH_SIZE:
         problems.append(f"trainer.train_batch_size must be {TRAIN_BATCH_SIZE}")
     if cfg.trainer.policy_mini_batch_size != POLICY_MINI_BATCH_SIZE:
@@ -190,7 +202,7 @@ def _preflight(cfg: SkyRLTrainConfig) -> None:
     if cfg.environment.env_class != ENV_ID:
         problems.append(f"environment.env_class must be {ENV_ID!r}")
     # Requirement (5): the same command must resume a crashed run rather than silently
-    # restarting it from step 0 into the same W&B run.
+    # restarting its training state from step 0. W&B attempts are intentionally separate.
     if str(cfg.trainer.resume_mode) not in ("ResumeMode.LATEST", "latest"):
         problems.append(f"trainer.resume_mode must be 'latest', got {cfg.trainer.resume_mode!r}")
     if not os.environ.get("WANDB_RUN_ID"):

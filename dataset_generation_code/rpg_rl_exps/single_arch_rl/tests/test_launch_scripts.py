@@ -42,7 +42,14 @@ def test_launch_never_starts_two_runs_at_once():
     assert 'RUNS="${SA_RUNS:-easy}"' in text
     # A second run waits for the first to exit.
     assert "waiting for the previous run to finish" in text
+    assert 'pgrep -f "[s]ingle_arch_rl.main"' in text
     assert "--sequential" not in text
+
+
+def test_launch_does_not_count_live_shmem_as_reclaimable_page_cache():
+    text = (_SCRIPTS / "launch.sh").read_text(encoding="utf-8")
+    assert '$1=="shmem"' in text
+    assert "mem_file_gb" in text and "mem_shmem_gb" in text
 
 
 def test_run_one_holds_no_settings_of_its_own():
@@ -67,6 +74,14 @@ def test_run_one_uses_the_venv_python_so_the_overlays_load():
     # 0.5.2 overlay. Check the executable lines, not the comment that explains this.
     code = [line for line in text.splitlines() if line.strip() and not line.lstrip().startswith("#")]
     assert not any("uv run" in line for line in code)
+
+
+def test_run_one_cleans_only_its_own_pid1_orphans():
+    text = (_SCRIPTS / "run_one.sh").read_text(encoding="utf-8")
+    assert "cleanup_run_orphans" in text
+    assert 'grep -Fx -- "SA_EXP_TAG=$SA_EXP_TAG"' in text
+    assert 'ps -u "$(id -u)" -o pid=,ppid=' in text
+    assert '[ "$ppid" = "1" ]' in text
 
 
 def test_config_cli_matches_the_python_api():
@@ -96,3 +111,10 @@ def test_budget_subcommand_reports_what_the_launcher_needs():
     keys = {line.split("=", 1)[0] for line in out.splitlines() if line}
     assert {"HOST_GB_PER_JOB", "GPU_GB_HEADROOM", "GPU_MEM_UTIL", "CKPT_ROOT",
             "CKPT_INTERVAL", "CKPT_GB_PER_RUN", "GPUS", "MAX_STEPS", "EXP_DIR"} <= keys
+
+
+def test_each_launch_uses_a_fresh_wandb_attempt():
+    text = (_SCRIPTS / "run_one.sh").read_text(encoding="utf-8")
+    assert 'WANDB_ATTEMPT="$(date -u +%Y%m%dT%H%M%SZ)-$$"' in text
+    assert 'WANDB_RUN_ID="${WANDB_RUN_ID}-${WANDB_ATTEMPT}"' in text
+    assert "WANDB_RESUME=never" in text

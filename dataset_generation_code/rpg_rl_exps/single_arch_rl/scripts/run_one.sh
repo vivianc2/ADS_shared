@@ -1,16 +1,15 @@
 #!/usr/bin/env bash
 # Launch ONE single-archetype run. Executes INSIDE the skyrl-pc container.
 #
-#   bash scripts/run_one.sh easy      # 96 dose_window worlds,         GPU 0
-#   bash scripts/run_one.sh hard      # 96 confounded_reversal worlds, GPU 4
+#   bash scripts/run_one.sh easy      # 96 dose_window worlds,         GPUs 5,6 (default)
+#   bash scripts/run_one.sh hard      # 96 confounded_reversal worlds, GPUs 5,6 (default)
 #
 # Any extra arguments are appended as SkyRL overrides. All configuration (env vars,
 # overrides, output paths) comes from single_arch_rl/config.py, so this script holds no
 # settings of its own.
 #
-# Re-running the SAME command after a crash resumes from the newest checkpoint
-# (trainer.resume_mode=latest) and reuses the same W&B run id, so the chart continues
-# rather than forking.
+# Re-running the same command after a crash resumes from the newest checkpoint and opens
+# a fresh W&B attempt in the same group, preventing rollback-step rejection.
 set -euo pipefail
 
 RUN_ID="${1:?usage: run_one.sh <easy|hard> [extra SkyRL overrides...]}"
@@ -28,6 +27,53 @@ while IFS= read -r line; do
   [ -z "$line" ] && continue
   export "$line"
 done <<< "$(run_cfg env "$RUN_ID")"
+
+# vLLM's multiprocessing workers can outlive Ray after both successful and failed runs.
+# In this long-lived container they are reparented to PID 1 and retain their CUDA/shared-
+# memory allocations, which can starve the next sequential run. Clean only orphaned
+# processes owned by this uid whose inherited experiment tag exactly matches this run.
+cleanup_run_orphans() {
+  local run_status=$?
+  local pid ppid
+  local -a tagged_orphans=()
+  local -a survivors=()
+
+  trap - EXIT
+  set +e
+  while read -r pid ppid; do
+    [ "$ppid" = "1" ] || continue
+    [ -r "/proc/$pid/environ" ] || continue
+    if { tr '\0' '\n' < "/proc/$pid/environ"; } 2>/dev/null \
+        | grep -Fx -- "SA_EXP_TAG=$SA_EXP_TAG" >/dev/null; then
+      tagged_orphans+=("$pid")
+    fi
+  done < <(ps -u "$(id -u)" -o pid=,ppid=)
+
+  if [ "${#tagged_orphans[@]}" -gt 0 ]; then
+    echo "[single_arch_rl] cleaning ${#tagged_orphans[@]} tagged orphan process(es)"
+    kill -TERM "${tagged_orphans[@]}" 2>/dev/null || true
+    for _ in {1..10}; do
+      survivors=()
+      for pid in "${tagged_orphans[@]}"; do
+        kill -0 "$pid" 2>/dev/null && survivors+=("$pid")
+      done
+      [ "${#survivors[@]}" -eq 0 ] && break
+      sleep 1
+    done
+    [ "${#survivors[@]}" -eq 0 ] || kill -KILL "${survivors[@]}" 2>/dev/null || true
+  fi
+
+  exit "$run_status"
+}
+trap cleanup_run_orphans EXIT
+
+# Every process launch gets a new W&B history. A checkpoint resume can therefore start
+# again at an earlier trainer/global step without W&B rejecting it as non-monotonic.
+# Attempts remain together in the stable group emitted by config.py.
+WANDB_ATTEMPT="$(date -u +%Y%m%dT%H%M%SZ)-$$"
+export WANDB_RUN_ID="${WANDB_RUN_ID}-${WANDB_ATTEMPT}"
+export WANDB_NAME="${WANDB_NAME}-${WANDB_ATTEMPT}"
+export WANDB_RESUME=never
 
 # expandable_segments is incompatible with the CuMemAllocator pool vLLM re-maps on every
 # colocate_all sleep/wake cycle; main.py's pre-flight refuses to start with it set.

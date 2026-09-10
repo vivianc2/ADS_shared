@@ -126,9 +126,9 @@ def test_checkpoint_guard_is_a_no_op_without_the_lock(trainer_cls, monkeypatch):
 def _minimal_cfg(**overrides):
     """A stand-in config with just the fields ``_preflight`` reads."""
     trainer = dict(
-        train_batch_size=32, policy_mini_batch_size=32, update_epochs_per_batch=1,
+        train_batch_size=2, policy_mini_batch_size=2, update_epochs_per_batch=1,
         eval_before_train=True, eval_interval=2, resume_mode="latest",
-        ckpt_interval=0, ckpt_path="/nonexistent", max_training_steps=12,
+        ckpt_interval=0, ckpt_path="/nonexistent", max_training_steps=30,
     )
     trainer.update(overrides)
     return types.SimpleNamespace(
@@ -144,7 +144,7 @@ def sane_env(monkeypatch):
     monkeypatch.setenv("SA_RUN_ID", "easy")
     monkeypatch.setenv("SA_TRAIN_ARCHETYPE", "dose_window")
     monkeypatch.setenv("RPG_PROTO", "rpg_v9")
-    monkeypatch.setenv("WANDB_RUN_ID", "sarl_v1-easy")
+    monkeypatch.setenv("WANDB_RUN_ID", "sarl_v3_bs2_s30_ckpt4-easy-attempt")
     monkeypatch.delenv("PYTORCH_CUDA_ALLOC_CONF", raising=False)
 
 

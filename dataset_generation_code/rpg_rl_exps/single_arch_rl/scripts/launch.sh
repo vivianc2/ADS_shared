@@ -5,7 +5,7 @@
 #   bash scripts/launch.sh --dry-run        # print every check and exit, touching nothing
 #   bash scripts/launch.sh --runs hard      # the other archetype, once easy is done
 #   bash scripts/launch.sh --skip-build     # datasets already built (the resume path)
-#   SA_GPUS=0,6 bash scripts/launch.sh      # different cards (default 0,4)
+#   SA_GPUS=0,6 bash scripts/launch.sh      # different cards (default 5,6)
 #
 #   easy -> 96 dose_window worlds
 #   hard -> 96 confounded_reversal worlds
@@ -15,8 +15,8 @@
 # docs/gpu_sizing.md. Asking for both runs here is therefore sequential by construction.
 #
 # Re-running this command after a crash RESUMES from the newest checkpoint
-# (trainer.resume_mode=latest) into the SAME W&B run id, so the chart continues instead
-# of forking. --skip-build is the fast path for that.
+# (trainer.resume_mode=latest) into a fresh W&B attempt in the same group, so replayed
+# trainer steps cannot be rejected as non-monotonic. --skip-build is the fast path.
 #
 # The run gets its own Ray cluster (RAY_ADDRESS=local + private RAY_TMPDIR), checkpoint /
 # export / log directory, LoRA-sync directory, compiler caches and W&B run id, so a later
@@ -127,10 +127,13 @@ effective_memory_limit_gb() {
 mem_limit_gb="$(effective_memory_limit_gb || true)"
 if [ -n "${mem_limit_gb:-}" ] && [ -r /sys/fs/cgroup/memory.current ]; then
   mem_used_gb="$(awk '{printf "%d", $1/1073741824}' /sys/fs/cgroup/memory.current)"
-  # memory.current counts the page cache, which is reclaimable under pressure -- after a
-  # dataset build or a model load that is tens of GB of cached file pages that would be
-  # evicted rather than cause an OOM. Charge only the unreclaimable part (anon + kernel).
-  mem_cache_gb="$(awk '$1=="file" {printf "%d", $2/1073741824}' /sys/fs/cgroup/memory.stat 2>/dev/null || echo 0)"
+  # cgroup v2's `file` includes tmpfs/shmem. vLLM and FSDP keep tens of GiB of live model
+  # state there, so subtracting all `file` as page cache can overstate free RAM by ~60 GiB.
+  # Only regular file-backed pages (`file - shmem`) are potentially reclaimable here.
+  mem_file_gb="$(awk '$1=="file" {printf "%d", $2/1073741824}' /sys/fs/cgroup/memory.stat 2>/dev/null || echo 0)"
+  mem_shmem_gb="$(awk '$1=="shmem" {printf "%d", $2/1073741824}' /sys/fs/cgroup/memory.stat 2>/dev/null || echo 0)"
+  mem_cache_gb=$(( ${mem_file_gb:-0} - ${mem_shmem_gb:-0} ))
+  [ "$mem_cache_gb" -lt 0 ] && mem_cache_gb=0
   mem_committed_gb=$(( mem_used_gb - ${mem_cache_gb:-0} ))
   [ "$mem_committed_gb" -lt 0 ] && mem_committed_gb=0
   avail_gb=$(( mem_limit_gb - mem_committed_gb ))
@@ -183,7 +186,7 @@ for run in $RUNS; do
   env_lines="$(PYTHONPATH="$PKG_PARENT" python3 -m single_arch_rl.config env "$run")"
   wid="$(echo "$env_lines" | sed -n 's/^WANDB_RUN_ID=//p')"
   arch="$(echo "$env_lines" | sed -n 's/^SA_TRAIN_ARCHETYPE=//p')"
-  echo "run '$run': archetype=$arch  wandb_run_id=$wid (resumed on relaunch)"
+  echo "run '$run': archetype=$arch  wandb_group=$wid (fresh attempt per launch)"
 done
 
 if [ "$DRY_RUN" = 1 ]; then
@@ -208,9 +211,13 @@ fi
 # the first exits. With a single run (the default) this is one backgrounded docker exec.
 first=1
 for run in $RUNS; do
-  if [ "$first" = 0 ]; then
+  if [ "$first" = 1 ] && docker exec "$CONTAINER" pgrep -f "[s]ingle_arch_rl.main" >/dev/null 2>&1; then
+    echo "ERROR: another single_arch_rl.main process is already active in $CONTAINER." >&2
+    echo "       Stop it cleanly before launching; overlapping jobs exceed host RAM." >&2
+    exit 1
+  elif [ "$first" = 0 ]; then
     echo "== waiting for the previous run to finish before starting $run =="
-    while docker exec "$CONTAINER" pgrep -f "single_arch_rl.main" >/dev/null 2>&1; do sleep 60; done
+    while docker exec "$CONTAINER" pgrep -f "[s]ingle_arch_rl.main" >/dev/null 2>&1; do sleep 60; done
   fi
   echo "== launching $run in the background =="
   docker exec -d "${FORWARD[@]}" "$CONTAINER" bash -lc "cd $CONTAINER_PKG_DIR && bash scripts/run_one.sh $run"
@@ -222,4 +229,4 @@ echo
 echo "All requested runs started. Follow them with:"
 echo "  tail -f \$(ls -t $EXP_DIR_HOST/runs/*/logs/train_*.log | head -1)"
 echo "  docker exec $CONTAINER bash -lc 'cd $CONTAINER_PKG_DIR && bash scripts/in_container.sh python -m single_arch_rl.report_eval'"
-echo "W&B: project $(cfg env easy | sed -n 's/^WANDB_PROJECT=//p'), runs $(for r in $RUNS; do cfg env "$r" | sed -n 's/^WANDB_RUN_ID=//p' | tr '\n' ' '; done)"
+echo "W&B: project $(cfg env easy | sed -n 's/^WANDB_PROJECT=//p'), groups $(for r in $RUNS; do cfg env "$r" | sed -n 's/^WANDB_RUN_GROUP=//p' | tr '\n' ' '; done)"

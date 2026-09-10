@@ -58,19 +58,19 @@ TRAIN_WORLDS_PER_RUN = 96
 #: 95.6 GiB against a 96 GiB cgroup ceiling. Two would need ~165 GiB.
 #: With both GPUs on one run, FSDP shards the policy across the two ranks and rank 1
 #: uses meta-init, which is the shape that fits. See docs/gpu_sizing.md.
-DEFAULT_GPUS: Tuple[int, ...] = (0, 4)
+DEFAULT_GPUS: Tuple[int, ...] = (5, 6)
 
 #: Runs launched by default. The two runs share the GPUs now, so they are sequential;
 #: `hard` is launched the same way once `easy` finishes.
 DEFAULT_RUNS: Tuple[str, ...] = ("easy",)
 
 #: ``train_batch_size == policy_mini_batch_size`` with ``update_epochs_per_batch == 1``
-#: makes one SkyRL global step exactly one optimizer step, so "checkpoint every 2 steps"
-#: is unambiguous. 96 worlds / 32 = 3 steps per epoch.
-TRAIN_BATCH_SIZE = 32
-POLICY_MINI_BATCH_SIZE = 32
+#: makes one SkyRL global step exactly one optimizer step, so "checkpoint every 4 steps"
+#: is unambiguous. 96 worlds / 2 = 48 steps per epoch.
+TRAIN_BATCH_SIZE = 2
+POLICY_MINI_BATCH_SIZE = 2
 UPDATE_EPOCHS_PER_BATCH = 1
-STEPS_PER_EPOCH = TRAIN_WORLDS_PER_RUN // TRAIN_BATCH_SIZE  # 3
+STEPS_PER_EPOCH = TRAIN_WORLDS_PER_RUN // TRAIN_BATCH_SIZE  # 48
 
 MODEL_PATH = "Qwen/Qwen3.5-9B"
 RPG_PROTO = "rpg_v9"
@@ -78,7 +78,9 @@ RPG_PROTO = "rpg_v9"
 ENV_ID = "rpg_single_arch"
 ENV_ENTRY_POINT = "single_arch_rl.sky_env:SingleArchRPGEnv"
 
-DEFAULT_EXP_TAG = "sarl_v1"
+# Fresh output/checkpoint namespace for the batch-2, 30-step run. The completed sarl_v1
+# tree is never reused or overwritten.
+DEFAULT_EXP_TAG = "sarl_v3_bs2_s30_ckpt4"
 DEFAULT_OUT_ROOT = "/work/data/rpg_rl_exps/single_arch_rl"
 #: Requirement (3): the container filesystem has ~49 GB free and one checkpoint is
 #: ~19 GB. Checkpoints go to the 31 TB NFS volume, mounted at the SAME path inside the
@@ -110,6 +112,8 @@ REQUIRED_FLA_VERSION = "0.5.2"
 #: ``runtime/skyrl_patches`` adds the missing sleeping-state check -- and loads the frozen
 #: policy base in bf16, without which the run does not fit in host memory at all.
 REQUIRED_VLLM_VERSION = "0.23.0"
+#: Fail an attempt instead of allowing vLLM's TP worker wake collective to wait forever.
+VLLM_WAKE_TIMEOUT_SECONDS = 300
 
 # --- resource budget, used by the launcher pre-flight ----------------------------------
 #: Host RAM for one run, MEASURED on this stack (3-second cgroup sampling, see
@@ -202,10 +206,10 @@ class ExperimentConfig:
     wandb_project: str = field(default_factory=lambda: _env("SA_WANDB_PROJECT", DEFAULT_WANDB_PROJECT))
 
     # Knobs that are deliberately exposed but must stay equal across the two runs.
-    max_training_steps: int = field(default_factory=lambda: _env_int("SA_MAX_STEPS", 8))
-    #: Spec (3): checkpoint every 2 optimizer steps. SkyRL additionally always saves at an
-    #: epoch boundary (every 3 steps here) and once more at the end of training.
-    ckpt_interval: int = field(default_factory=lambda: _env_int("SA_CKPT_INTERVAL", 2))
+    max_training_steps: int = field(default_factory=lambda: _env_int("SA_MAX_STEPS", 30))
+    #: Checkpoint every 4 optimizer steps. SkyRL additionally always saves at an
+    #: epoch boundary (every 48 steps here) and once more at the end of training.
+    ckpt_interval: int = field(default_factory=lambda: _env_int("SA_CKPT_INTERVAL", 4))
     eval_interval: int = field(default_factory=lambda: _env_int("SA_EVAL_INTERVAL", 2))
     seed: int = field(default_factory=lambda: _env_int("SA_SEED", 42))
     lr: float = field(default_factory=lambda: _env_float("SA_LR", 1.0e-5))
@@ -234,8 +238,9 @@ class ExperimentConfig:
     #: vLLM context window. Must be >= max_prompt_length + max_generate_length (26624).
     max_model_len: int = field(default_factory=lambda: _env_int("SA_MAX_MODEL_LEN", 32768))
     #: Requirement (5): "latest" from the very first launch. With no checkpoint present
-    #: SkyRL starts from step 0; after a crash the SAME command resumes from the newest
-    #: checkpoint, and because the W&B run id is deterministic the chart continues.
+    #: SkyRL starts from step 0; after a crash the same command resumes from the newest
+    #: checkpoint. Each process launch gets a fresh W&B attempt run (grouped under the
+    #: experiment id), so replaying steps after rollback cannot be rejected by W&B.
     resume_mode: str = field(default_factory=lambda: _env("SA_RESUME_MODE", "latest"))
     max_env_workers: int = field(default_factory=lambda: _env_int("SA_MAX_ENV_WORKERS", 16))
     #: Forwarded by launch.sh from the host; see DEFAULT_CGROUP_MEMORY_BYTES.
@@ -355,12 +360,7 @@ class ExperimentConfig:
         return f"{self.exp_tag}_{run_id}_{TRAIN_ARCHETYPE[run_id]}"
 
     def wandb_run_id(self, run_id: str) -> str:
-        """Deterministic W&B id.
-
-        Requirement (5): a re-launch of the same (exp_tag, run) -- including a resume
-        from the latest checkpoint after a crash -- reuses this id, so the run keeps
-        appending to the same W&B chart instead of starting a new one.
-        """
+        """Stable W&B group/id prefix; run_one.sh adds a unique attempt suffix."""
         return f"{self.exp_tag}-{run_id}"
 
 
@@ -444,12 +444,16 @@ def run_env(cfg: ExperimentConfig, run_id: str) -> Dict[str, str]:
         # puts this run over the container tree's 96 GiB ceiling; the trained LoRA tensors
         # are promoted back to fp32. Set to "fp32" to restore SkyRL's default.
         "SA_POLICY_LOAD_DTYPE": _env("SA_POLICY_LOAD_DTYPE", "bf16"),
+        "SA_VLLM_WAKE_TIMEOUT_SECONDS": _env(
+            "SA_VLLM_WAKE_TIMEOUT_SECONDS", str(VLLM_WAKE_TIMEOUT_SECONDS)
+        ),
         "HF_HOME": _env("HF_HOME", "/work/hf_cache"),
-        # -- W&B: distinct id per run, stable across re-launches (requirement 5) -----------
+        # -- W&B: run_one.sh turns this stable prefix into a unique attempt id ------------
         "WANDB_PROJECT": cfg.wandb_project,
         "WANDB_RUN_ID": cfg.wandb_run_id(run_id),
         "WANDB_NAME": cfg.run_name(run_id),
-        "WANDB_RESUME": "allow",
+        "WANDB_RUN_GROUP": cfg.wandb_run_id(run_id),
+        "WANDB_RESUME": "never",
         "WANDB_DIR": str(paths["wandb_dir"]),
     }
 

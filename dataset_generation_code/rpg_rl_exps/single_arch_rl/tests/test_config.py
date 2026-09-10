@@ -80,10 +80,10 @@ def test_all_gpus_go_to_one_tensor_parallel_run():
     ~165 GiB against a 96 GiB ceiling, and N data-parallel engines would each keep their
     own ~23 GB host sleep buffer. See docs/gpu_sizing.md."""
     cfg = ExperimentConfig()
-    assert cfg.gpus == (0, 4)
+    assert cfg.gpus == (5, 6)
     assert cfg.num_gpus == 2
     for run_id in RUN_IDS:
-        assert run_env(cfg, run_id)["CUDA_VISIBLE_DEVICES"] == "0,4"
+        assert run_env(cfg, run_id)["CUDA_VISIBLE_DEVICES"] == "5,6"
     overrides = run_overrides(cfg, "easy")
     assert "trainer.placement.policy_num_gpus_per_node=2" in overrides
     assert "trainer.placement.ref_num_gpus_per_node=2" in overrides
@@ -97,7 +97,7 @@ def test_gpus_env_var_is_validated(monkeypatch):
     with pytest.raises(SystemExit, match="repeat"):
         ExperimentConfig()
     monkeypatch.setenv("SA_GPUS", "")
-    assert ExperimentConfig().gpus == (0, 4)          # empty falls back to the default
+    assert ExperimentConfig().gpus == (5, 6)          # empty falls back to the default
     monkeypatch.setenv("SA_GPUS", "6")
     cfg = ExperimentConfig()
     assert cfg.gpus == (6,) and cfg.num_gpus == 1
@@ -106,10 +106,10 @@ def test_gpus_env_var_is_validated(monkeypatch):
     assert ExperimentConfig().gpus == (1, 2, 3)
 
 
-def test_checkpoint_every_two_steps():
+def test_checkpoint_every_four_steps():
     cfg = ExperimentConfig()
-    assert cfg.ckpt_interval == 2                        # spec (3)
-    assert "trainer.ckpt_interval=2" in run_overrides(cfg, "easy")
+    assert cfg.ckpt_interval == 4
+    assert "trainer.ckpt_interval=4" in run_overrides(cfg, "easy")
     # Nothing may prune the earlier checkpoints.
     assert "trainer.max_ckpts_to_keep=-1" in run_overrides(cfg, "easy")
 
@@ -129,16 +129,17 @@ def test_epochs_cover_the_requested_number_of_steps(monkeypatch):
     cfg = ExperimentConfig()
     assert cfg.epochs * STEPS_PER_EPOCH >= cfg.max_training_steps
     monkeypatch.setenv("SA_MAX_STEPS", "7")
-    assert ExperimentConfig().epochs == 3
+    assert ExperimentConfig().epochs == 1
 
 
-def test_wandb_run_id_is_deterministic_and_resumes():
-    """Requirement (5): a relaunch keeps the same W&B run so monitoring continues."""
+def test_wandb_attempts_have_a_stable_group_and_never_resume_history():
+    """run_one adds a unique id; the stable base keeps attempts grouped."""
     cfg = ExperimentConfig()
     for run_id in RUN_IDS:
         env = run_env(cfg, run_id)
         assert env["WANDB_RUN_ID"] == f"{cfg.exp_tag}-{run_id}"
-        assert env["WANDB_RESUME"] == "allow"
+        assert env["WANDB_RUN_GROUP"] == f"{cfg.exp_tag}-{run_id}"
+        assert env["WANDB_RESUME"] == "never"
         assert run_env(ExperimentConfig(), run_id)["WANDB_RUN_ID"] == env["WANDB_RUN_ID"]
     assert run_env(cfg, "easy")["WANDB_RUN_ID"] != run_env(cfg, "hard")["WANDB_RUN_ID"]
     # ... and the trainer must actually be asked to resume.
@@ -152,6 +153,12 @@ def test_checkpoints_go_to_the_data_volume_not_the_container_filesystem():
         ckpt = str(cfg.run_paths(run_id)["ckpt_path"])
         assert ckpt.startswith("/data/"), ckpt
         assert f"trainer.ckpt_path={ckpt}" in run_overrides(cfg, run_id)
+
+
+def test_new_checkpoint_tree_cannot_collide_with_sarl_v1():
+    cfg = ExperimentConfig()
+    assert cfg.ckpt_exp_dir.name == "sarl_v3_bs2_s30_ckpt4"
+    assert cfg.ckpt_exp_dir.name != "sarl_v1"
 
 
 def test_gpu_footprint_stays_modest_on_a_shared_box():
@@ -176,12 +183,15 @@ def test_context_window_is_pinned_and_large_enough():
             in run_overrides(cfg, "easy"))
 
 
-def test_eight_optimizer_steps_by_default():
+def test_batch_two_and_thirty_optimizer_steps_by_default():
     cfg = ExperimentConfig()
-    assert cfg.max_training_steps == 8
-    assert "trainer.max_training_steps=8" in run_overrides(cfg, "easy")
-    # 3 steps per epoch -> ckpt at 2, 3, 4, 6, 8 and eval at 0, 2, 4, 6, 8.
-    assert cfg.epochs == 3
+    assert cfgmod.TRAIN_BATCH_SIZE == 2
+    assert cfgmod.POLICY_MINI_BATCH_SIZE == 2
+    assert cfg.max_training_steps == 30
+    assert "trainer.max_training_steps=30" in run_overrides(cfg, "easy")
+    assert "trainer.train_batch_size=2" in run_overrides(cfg, "easy")
+    # 48 steps per epoch, so the 30-step run completes within one epoch.
+    assert cfg.epochs == 1
 
 
 def test_group_size_supports_group_variance():
@@ -233,6 +243,7 @@ def test_blackwell_runtime_contract_is_in_the_run_environment():
         assert any("skyrl_patches" in p for p in first_two)
         assert any("fla-0.5.2" in p for p in first_two)
         assert env["SA_POLICY_LOAD_DTYPE"] == "bf16"
+        assert env["SA_VLLM_WAKE_TIMEOUT_SECONDS"] == "300"
         # expandable_segments must never be exported by the config.
         assert "PYTORCH_CUDA_ALLOC_CONF" not in env
     assert cfgmod.UNSET_IN_RUN_ENV == ("PYTORCH_CUDA_ALLOC_CONF",)
@@ -244,8 +255,11 @@ def test_runtime_overlays_are_present_on_disk():
     patches = (runtime / "skyrl_patches" / "sitecustomize.py")
     assert patches.exists()
     text = patches.read_text(encoding="utf-8")
-    # One sitecustomize, both patches: Python imports at most one.
+    # One sitecustomize, all patches: Python imports at most one.
     assert "vllm.v1.engine.core" in text and "model_wrapper" in text
+    assert "vllm.device_allocator.cumem" in text
+    assert "vllm.v1.executor.multiproc_executor" in text
+    assert "_sa_cumem_state_guard" in text and "_sa_wake_timeout" in text
     version = (runtime / "fla-0.5.2" / "fla" / "__init__.py").read_text(encoding="utf-8")
     assert re.search(r"__version__\s*=\s*['\"]0\.5\.2['\"]", version)
 
@@ -280,5 +294,5 @@ def test_manifest_records_what_the_run_actually_did():
     manifest = run_manifest(ExperimentConfig(), "hard")
     assert manifest["train_archetype"] == "confounded_reversal"
     assert manifest["train_worlds"] == TRAIN_WORLDS_PER_RUN
-    assert manifest["gpus"] == [0, 4]
+    assert manifest["gpus"] == [5, 6]
     assert manifest["tensor_parallel_size"] == 2
