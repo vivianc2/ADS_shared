@@ -41,8 +41,6 @@ Each turn, output exactly:
 <action type="measure|intervene|code|answer|give_up">JSON</action>
 <memory>notes to carry forward</memory>
 
-Each turn, maintain a probability belief for EVERY controls in <memory></memory>. Update these probabilities using experiment results observed. Each probability is between 0 and 1; they do not need to sum to 1.
-
 Action payloads (JSON, ids only):
 - measure:   {"ids": ["m3","m0"]}                         # read those signals
 - intervene: {"actions":[{"actuator":"a2","value":66}], "measure":["m3"]}   # set controls, then read
