@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# GRPO + LoRA training on the RPG causal-discovery env with a 150-step A -> 150-step B curriculum.
+# GRPO + LoRA training on the RPG causal-discovery env with a 150-step B -> 150-step A curriculum.
 # Run inside the SkyRL container from /work/SkyRL.
 set -euo pipefail
 
@@ -11,7 +11,7 @@ fi
 
 set -x
 
-export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-5,6}"
+export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-3}"
 export HF_HOME="${HF_HOME:-/work/hf_cache}"
 export RPG_PROTO="${RPG_PROTO:-rpg_v9}"
 export PYTHONPATH="/work/ADS_shared/dataset_generation_code/rpg_rl_exps${PYTHONPATH:+:$PYTHONPATH}"
@@ -27,7 +27,7 @@ export UV_CACHE_DIR="${UV_CACHE_DIR:-/tmp/long_rl_curriculum_project_uv_cache}"
 export VLLM_NO_USAGE_STATS=1
 
 DATA_DIR="${DATA_DIR:-/work/ADS_shared/dataset_generation_code/rpg_v9/data_v9_deleaked}"
-NUM_GPUS="${NUM_GPUS:-2}"
+NUM_GPUS="${NUM_GPUS:-1}"
 MODEL="${MODEL:-Qwen/Qwen3.5-9B}"
 LOGGER="${LOGGER:-wandb}"
 CKPT_DIR="${CKPT_DIR:-/data/long_rl_curriculum/checkpoints}"
@@ -73,7 +73,7 @@ uv run --isolated --extra fsdp -m long_rl_curriculum.main_rpg_long \
   environment.env_class=rpg \
   trainer.logger="$LOGGER" \
   trainer.project_name="rpg_long_rl_curriculum" \
-  trainer.run_name="rpg_qwen3.5_9b_grpo_lora_a150_b150" \
+  trainer.run_name="rpg_qwen3.5_9b_grpo_lora_b150_a150" \
   trainer.ckpt_path="$CKPT_DIR" \
   trainer.export_path="$EXPORT_DIR" \
   trainer.policy.language_model_only=true \

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """SkyRL entrypoint for the two-stage RPG reward curriculum.
 
-Training and evaluation rollouts through global step 150 use only reward part A.
-Rollouts at steps 151-300 use only reward part B. The existing invalid-ID penalty
+Training and evaluation rollouts through global step 150 use only reward part B.
+Rollouts at steps 151-300 use only reward part A. The existing invalid-ID penalty
 and evidence gate remain active in both stages.
 """
 
@@ -23,12 +23,12 @@ from skyrl_gym.envs import register
 from examples.train.rpg.env import RPGSkyEnv, RewardConfig
 
 
-PART_A_LAST_STEP = 150
+FIRST_STAGE_LAST_STEP = 150
 
 
 def curriculum_weights(global_step: int) -> tuple[float, float]:
     """Return (part-A weight, part-B weight) for a SkyRL global step."""
-    return (1.0, 0.0) if global_step <= PART_A_LAST_STEP else (0.0, 1.0)
+    return (0.0, 1.0) if global_step <= FIRST_STAGE_LAST_STEP else (1.0, 0.0)
 
 
 class RPGCurriculumEnv(RPGSkyEnv):
