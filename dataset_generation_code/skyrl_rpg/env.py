@@ -116,7 +116,7 @@ class RPGSkyEnv(BaseTextEnv):
             done=bool(done),
             metadata={k: info.get(k) for k in
                       ("part_a", "part_b", "accepted", "turn_type", "n_interventions",
-                       "reward_error")},
+                       "reward_error", "lever_ok", "lever_gated")},
         )
 
     def _belief_phi(self, action: str) -> float:

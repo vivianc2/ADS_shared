@@ -272,8 +272,10 @@ YOUR MEMORY
         rw = compute_reward(struct, self.world, self.cat, self.gold, self.battery,
                             cfg=self.reward_cfg, n_interventions=self._n_interv)
         rec["answer_struct"] = struct
-        rec["reward_breakdown"] = {k: rw[k] for k in ("reward", "part_a", "part_b",
-                                                      "invalid_id_fraction", "accepted")}
+        rec["reward_breakdown"] = {k: rw.get(k) for k in ("reward", "part_a", "part_b",
+                                                          "invalid_id_fraction", "accepted",
+                                                          "lever_ok", "lever_gated",
+                                                          "chosen_levers", "causal_levers")}
         rec["forced_no_answer"] = forced and not struct
         if rec.get("action_type") is None or "action_type" not in rec:
             rec.setdefault("action_type", "forced")

@@ -17,6 +17,9 @@ Design contract (reward-contract decisions):
       (optionally minus a small over-budget / no-evidence term; off by default)
 - Part-B uses strict=True (V5): the exact sampled proxy / valid-equivalent, not a
   lenient downstream set (measured no-op and it weakens the signal).
+- LEVER-IDENTIFICATION GATE (opt-in, 2026-09-21): with RPG_LEVER_GATE=1 the whole reward is
+  zeroed unless the answer names the correct variable(s) to intervene on (lever_sets());
+  with RPG_LEVER_ONLY=1 the reward IS that binary check. See RewardConfig.
 
 The answer the policy must emit (all ids from the world's catalog):
     {
@@ -56,6 +59,29 @@ class RewardConfig:
     require_evidence: bool = True   # zero part_a/part_b if n_interventions == 0
     # optional shaping (off by default; enable via trainer if needed):
     c_no_evidence: float = 0.0   # ADDITIONAL flat penalty if the episode ran 0 interventions
+    # LEVER-IDENTIFICATION GATE (2026-09-21). The deficit the results deck diagnoses is a
+    # *stochastic identification error*: the policy is seduced by the wrong (confounded) knob.
+    # But the r1 reward does not isolate identification — measured on the v8 Opus/27B dumps,
+    # a wrong-lever answer still earns ~0.3/0.12 of part B (proxy/decoys/signs are graded
+    # independently of the recommended knob), so 82%/28% of wrong-lever episodes score >0.1.
+    # These knobs make identification a PREREQUISITE for any credit (all env-var gated,
+    # defaults OFF = r1 unchanged):
+    #   RPG_LEVER_GATE=1  -> part_a and part_b are zeroed unless the answer names the correct
+    #                        lever(s); the dense A/B shaping applies on top of a correct id.
+    #   RPG_LEVER_ONLY=1  -> reward is the BINARY lever check alone (no dose, no battery):
+    #                        "can it find the variable to intervene on?" (implies the gate).
+    #   RPG_LEVER_MODE    -> "full" (default): every must-have lever named (both co-causes on
+    #                        competing/synergy worlds, the treatment on conditional-policy
+    #                        subtype worlds) AND at least one causal lever;
+    #                        "any": at least one causal lever (any knob that truly moves the
+    #                        goal: the fix, its upstream source knob, either co-cause).
+    #   RPG_LEVER_BONUS   -> flat credit added on a correct id in gate mode (keeps a reward step
+    #                        for "right knob, poor dose" so GRPO groups don't all collapse to 0).
+    # See _lever_check() for the exact sets.
+    lever_gate: bool = field(default_factory=lambda: os.environ.get("RPG_LEVER_GATE", "0") not in ("", "0", "false", "False"))
+    lever_only: bool = field(default_factory=lambda: os.environ.get("RPG_LEVER_ONLY", "0") not in ("", "0", "false", "False"))
+    lever_mode: str = field(default_factory=lambda: os.environ.get("RPG_LEVER_MODE", "full"))
+    lever_bonus: float = field(default_factory=lambda: float(os.environ.get("RPG_LEVER_BONUS", "0.0")))
 
 
 def _num(x, default=None):
@@ -155,6 +181,57 @@ def _to_canonical_answer(struct: Dict[str, Any], cat: Catalog):
     return answer, invalid_fraction
 
 
+def lever_sets(world: Dict[str, Any], gold: Dict[str, Any]):
+    """The (causal, must) lever sets for a world, from stored gold + ground truth only.
+
+    causal = every actuator that genuinely moves the TRUE goal: the oracle's screened
+             ``active_actuators`` (fix + its upstream source knob; both co-causes; synergy-
+             rescued pairs) ∪ the gold intervention's keys (adds the conditional-policy
+             treatment, which screens ~inactive on population average). The surrogate trap
+             (zero true-goal effect) and inert knobs are never in it.
+    must   = levers the archetype's skill REQUIRES all of: the co-actuators of a two-cause
+             world (competing_causes / synergy_pair / the two_cause feature) and the
+             treatment of a conditional-policy subtype world. Empty for single-cause worlds,
+             where the fix and its source knob are interchangeable identifications.
+    Measured over the local v8 world set: |causal| = 1 (reversal, instrument), 2 (chain,
+    collider, surrogate, dose_window, competing, synergy), 3 (subtype); |must| = 0 / 2 / 3."""
+    gt = world.get("ground_truth", {}) or {}
+    scm_acts = set(getattr(world.get("scm"), "actuators", {}) or {})
+    causal = set(gold.get("active_actuators") or []) | set((gold.get("intervention") or {}).keys())
+    must = set(gt.get("co_actuators") or [])
+    sp = gt.get("subtype_policy")
+    if sp and gold.get("is_conditional_policy") and sp.get("treatment_actuator"):
+        must.add(sp["treatment_actuator"])
+    if scm_acts:                       # never require a lever the world cannot execute
+        causal &= scm_acts
+        must &= scm_acts
+    return causal, must
+
+
+def _lever_check(answer: Dict[str, Any], world: Dict[str, Any], gold: Dict[str, Any],
+                 mode: str = "full") -> Dict[str, Any]:
+    """Did the canonical answer name the correct variable(s) to intervene on? Total —
+    never raises. Levers are read from the answer itself (scalar actions ∪ the policy's
+    treatment), independent of which grading variant later wins, so a spurious/stripped
+    policy cannot change the identification verdict."""
+    causal, must = lever_sets(world, gold)
+    scm_acts = set(getattr(world.get("scm"), "actuators", {}) or {})
+    chosen = set((answer.get("recommended_intervention") or {}).keys())
+    pol = answer.get("recommended_policy")
+    if isinstance(pol, dict) and pol.get("treatment"):
+        chosen.add(pol["treatment"])
+    if scm_acts:
+        chosen &= scm_acts
+    hit = chosen & causal
+    if mode == "any":
+        ok = bool(hit)
+    else:                              # "full" (default)
+        ok = bool(hit) and must <= chosen
+    return {"lever_ok": ok, "lever_mode": mode,
+            "chosen_levers": sorted(chosen), "causal_levers": sorted(causal),
+            "must_levers": sorted(must), "extra_levers": sorted(chosen - causal)}
+
+
 def compute_reward(struct: Dict[str, Any], world: Dict[str, Any], cat: Catalog,
                    gold: Dict[str, Any], battery: Dict[str, Any],
                    cfg: RewardConfig = RewardConfig(),
@@ -162,6 +239,13 @@ def compute_reward(struct: Dict[str, Any], world: Dict[str, Any], cat: Catalog,
     """Pure reward for one episode's final id-answer. Returns a dict with the scalar
     ``reward`` plus its components and the full grade (for logging/debugging)."""
     answer, invalid_frac = _to_canonical_answer(struct, cat)
+    # Lever identification is decided from the answer alone (total, no simulation), BEFORE
+    # grading, so it is available on the error path too and is independent of which grading
+    # variant wins below.
+    gating = bool(cfg.lever_gate or cfg.lever_only)
+    lever = _lever_check(answer, world, gold, mode=cfg.lever_mode)
+    lever_ok = bool(lever["lever_ok"])
+    evidence_gated = bool(cfg.require_evidence and n_interventions == 0)
 
     def _pa(g):
         """The recovered-utility scalar compute_reward derives part_a from (kept in sync
@@ -205,21 +289,38 @@ def compute_reward(struct: Dict[str, Any], world: Dict[str, Any], cat: Catalog,
         # crash the trainer on a pathological answer. If even the policy-stripped answer
         # can't be graded, it did not solve the world -> reward 0 (minus any invalid-id
         # penalty). Flagged + surfaced so we can count how often it fires.
+        # In lever-only mode the identification verdict needs no simulation, so it is still
+        # paid out (subject to the evidence gate) even when the oracle could not grade.
+        reward = -cfg.c_invalid * invalid_frac
+        if cfg.lever_only and lever_ok and not evidence_gated:
+            reward += 1.0
         return {
-            "reward": float(-cfg.c_invalid * invalid_frac),
+            "reward": float(reward),
             "part_a": 0.0, "part_b": 0.0,
             "invalid_id_fraction": invalid_frac, "accepted": False,
             "grade": {"error": f"{type(e).__name__}: {e}"}, "reward_error": True,
+            "evidence_gated": evidence_gated, "lever_gated": gating and not lever_ok, **lever,
         }
 
     # FAITHFULNESS GATE (v9): no interventional evidence -> no discovery credit. Zero both parts
     # so an answer read off priors/labels without experimenting cannot score. (n_interventions is
     # the count of APPLIED interventions, passed by the env; None = caller didn't track -> no gate.)
-    evidence_gated = bool(cfg.require_evidence and n_interventions == 0)
     if evidence_gated:
         part_a, part_b = 0.0, 0.0
 
-    reward = cfg.w_a * part_a + cfg.w_b * part_b
+    # LEVER GATE: no credit of any kind unless the correct variable(s) were named. The dense
+    # A/B shaping (and the optional flat bonus) apply only ON TOP of a correct identification.
+    lever_gated = gating and not lever_ok
+    if lever_gated:
+        part_a, part_b = 0.0, 0.0
+
+    if cfg.lever_only:
+        # binary "found the lever" reward; dose quality and mechanism battery are ignored
+        reward = 1.0 if (lever_ok and not evidence_gated) else 0.0
+    else:
+        reward = cfg.w_a * part_a + cfg.w_b * part_b
+        if cfg.lever_gate and lever_ok and not evidence_gated:
+            reward += cfg.lever_bonus
     reward -= cfg.c_invalid * invalid_frac
     if cfg.c_no_evidence and n_interventions == 0:
         reward -= cfg.c_no_evidence
@@ -228,6 +329,7 @@ def compute_reward(struct: Dict[str, Any], world: Dict[str, Any], cat: Catalog,
         "reward": float(reward),
         "part_a": part_a, "part_b": part_b,
         "invalid_id_fraction": invalid_frac,
-        "accepted": bool(g["accepted"]) and not evidence_gated,
+        "accepted": bool(g["accepted"]) and not evidence_gated and not lever_gated,
         "grade": g, "reward_error": False, "evidence_gated": evidence_gated,
+        "lever_gated": lever_gated, **lever,
     }
