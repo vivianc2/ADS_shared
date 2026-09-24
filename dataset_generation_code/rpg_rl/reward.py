@@ -78,10 +78,74 @@ class RewardConfig:
     #   RPG_LEVER_BONUS   -> flat credit added on a correct id in gate mode (keeps a reward step
     #                        for "right knob, poor dose" so GRPO groups don't all collapse to 0).
     # See _lever_check() for the exact sets.
+    #   RPG_LEVER_EXACT=1 -> identification additionally requires NO spurious lever: the answer
+    #                        must name only causal knobs (chosen <= causal). Closes the SHOTGUN
+    #                        hack described below.
+    #   RPG_LEVER_PRECISION=1 -> scale the gated credit by precision = |chosen & causal|/|chosen|;
+    #                        the smooth, gradient-preserving form of the same fix.
+    #
+    # THE SHOTGUN HACK (measured 2026-09-22; personal_docs/results/lever_gate_preflight/ and
+    # personal_docs/rl_logs/reward_lever_gate_2026-09-21.md §9). `chosen` is just the key set of
+    # the recommended intervention and NOTHING caps its size, so an answer that names EVERY
+    # actuator satisfies `any` mode on every world -- and satisfies `full` mode too, since a
+    # superset always contains `must`. The v9 audits make non-causal knobs inert on the latent
+    # goal, so the extras are nearly free in part A as well. Mean reward for "name all actuators
+    # at range-max" (zero causal knowledge) over 12 hard-archetype worlds, perfect battery:
+    #     r1 0.923 | gate_any 0.923 | gate_full 0.923 | lever_only 1.000     (gold = 1.000)
+    # and E[reward | k knobs named] rises monotonically in k under every gated mode (gate_full
+    # 0.006 -> 0.811 for k = 1 -> 8). So the gate as first written does not isolate
+    # identification; it multiplies the incentive to name more knobs, which is far easier to
+    # learn than finding the cause. Turn RPG_LEVER_EXACT or RPG_LEVER_PRECISION on for ANY run
+    # whose read is the `lever_ok` rate.
     lever_gate: bool = field(default_factory=lambda: os.environ.get("RPG_LEVER_GATE", "0") not in ("", "0", "false", "False"))
     lever_only: bool = field(default_factory=lambda: os.environ.get("RPG_LEVER_ONLY", "0") not in ("", "0", "false", "False"))
     lever_mode: str = field(default_factory=lambda: os.environ.get("RPG_LEVER_MODE", "full"))
     lever_bonus: float = field(default_factory=lambda: float(os.environ.get("RPG_LEVER_BONUS", "0.0")))
+    lever_exact: bool = field(default_factory=lambda: os.environ.get("RPG_LEVER_EXACT", "0") not in ("", "0", "false", "False"))
+    lever_precision: bool = field(default_factory=lambda: os.environ.get("RPG_LEVER_PRECISION", "0") not in ("", "0", "false", "False"))
+    # RPG_LEVER_MAX_EXTRA=<int>: tolerance form of lever_exact -- identification additionally
+    # requires |chosen - causal| <= max_extra. -1 (default) = unbounded = pre-2026-09-22 behaviour;
+    # 0 == lever_exact. Measured trade-off (E[reward | k knobs named], hard archetypes):
+    #   gate_any                 0.21 -> 0.84 over k=1..8   ramp UP    (shotgun is optimal)
+    #   + precision              0.21 -> 0.31               ramp flat  (density kept, weak pull)
+    #   + exact (max_extra=0)    0.21 -> 0.00               ramp DOWN  (but near-zero density
+    #                                                        from base, i.e. all-zero groups)
+    #   + precision, max_extra=1 peaks at k = |causal|       correct shape: density at k<=|causal|+1
+    #                                                        and nothing to gain past the truth
+    # For a from-base run on the hard archetypes use RPG_LEVER_PRECISION=1 RPG_LEVER_MAX_EXTRA=1.
+    lever_max_extra: int = field(default_factory=lambda: int(os.environ.get("RPG_LEVER_MAX_EXTRA", "-1")))
+    # RPG_LEVER_SCALE = none | precision | jaccard | recall. What the gated credit is multiplied by.
+    #   recall    = (|chosen & must| / |must|) * precision  -- RECOMMENDED for the hard archetypes.
+    #   precision = |chosen & causal| / |chosen|            (punishes spurious levers only)
+    #   jaccard   = |chosen & causal| / |chosen | causal|   (punishes spurious AND missing levers)
+    # RPG_LEVER_PRECISION=1 is sugar for scale=precision. Measured on the base 9B over the 120
+    # held-out hard-archetype worlds (n=8, 2026-09-22 P0, results/lever_gate_preflight/):
+    # the model names 0.82 levers against a causal set of 2.33 -- 74% of answers name exactly ONE
+    # knob, and when it names one it is causal ~76% of the time. So `any` is already satisfied
+    # 57.7% of the time while `full` sits at 0.9%: on these archetypes the deficit is
+    # COMPLETENESS (naming every co-cause), not picking a non-causal knob. A binary any-gate
+    # therefore gates on something the policy mostly already does, and gate_full is an all-zero
+    # reward. `jaccard` grades the thing that actually has headroom -- mean 0.269, with 59.4% of
+    # episodes strictly between 0 and 1, i.e. a dense gradient -- while still scoring a
+    # name-everything shotgun at only |causal|/n_actuators (~0.29).
+    lever_scale: str = field(default_factory=lambda: os.environ.get("RPG_LEVER_SCALE", "none"))
+    # RPG_W_ID=<float> (default 0 = off). When > 0 AND gating, identification becomes an ADDITIVE
+    # reward term instead of a multiplier on A/B:
+    #     reward = w_id*(recall*precision) + w_a*part_a*s + w_b*part_b*s      (s = the scale above)
+    # WHY ADDITIVE (measured 2026-09-22 on the 960 real base-9B rollouts, results/lever_gate_preflight/):
+    # a multiplicative recall term multiplies two small quantities and CRUSHES the GRPO signal --
+    # mean within-group std over the 120 val worlds falls to 0.076 with 18% of groups degenerate
+    # (all 8 identical), against 0.171 / 0% for r1. Additive keeps it: 0.162 / 0%.
+    # It also fixes an ordering bug. Under a multiplier, "both co-causes, bad dose" can score BELOW
+    # "one co-cause, good dose" -- backwards for a run whose target is completeness. And on
+    # hidden_subtype part_a is NOT monotone in recall (measured part_a: 0.128 at recall 0, 0.049 at
+    # recall 0.33), so multiplying the two is incoherent there.
+    # The deeper reason identification needs its OWN term: on synergy_pair the synergy is
+    # super-additive (RPG_SYNERGY_SOFT=20), so part_a is near-binary -- measured part_a 0.000 /
+    # 0.118 / 0.477 at recall 0 / 0.5 / 1.0. Naming one of two co-causes buys almost no part_a, so
+    # part_a alone gives GRPO no gradient toward the second one. The additive term supplies it.
+    # Recommended: RPG_W_ID=0.5 RPG_W_A=0.3 RPG_W_B=0.2 (gold still = 1.0).
+    w_id: float = field(default_factory=lambda: float(os.environ.get("RPG_W_ID", "0.0")))
 
 
 def _num(x, default=None):
@@ -209,11 +273,18 @@ def lever_sets(world: Dict[str, Any], gold: Dict[str, Any]):
 
 
 def _lever_check(answer: Dict[str, Any], world: Dict[str, Any], gold: Dict[str, Any],
-                 mode: str = "full") -> Dict[str, Any]:
+                 mode: str = "full", exact: bool = False,
+                 max_extra: int = -1) -> Dict[str, Any]:
     """Did the canonical answer name the correct variable(s) to intervene on? Total —
     never raises. Levers are read from the answer itself (scalar actions ∪ the policy's
     treatment), independent of which grading variant later wins, so a spurious/stripped
-    policy cannot change the identification verdict."""
+    policy cannot change the identification verdict.
+
+    ``exact=True`` (== ``max_extra=0``) additionally requires that NO non-causal knob was named
+    (chosen <= causal); ``max_extra=n`` allows n spurious knobs before the verdict flips.
+    Without it, naming every actuator passes both `any` and `full` -- see the SHOTGUN HACK note
+    on RewardConfig. ``lever_precision`` / ``lever_jaccard`` are always returned as diagnostics:
+    a run whose `lever_ok` climbs while precision falls is learning to shotgun, not to identify."""
     causal, must = lever_sets(world, gold)
     scm_acts = set(getattr(world.get("scm"), "actuators", {}) or {})
     chosen = set((answer.get("recommended_intervention") or {}).keys())
@@ -223,13 +294,28 @@ def _lever_check(answer: Dict[str, Any], world: Dict[str, Any], gold: Dict[str, 
     if scm_acts:
         chosen &= scm_acts
     hit = chosen & causal
+    extra = chosen - causal
     if mode == "any":
         ok = bool(hit)
     else:                              # "full" (default)
         ok = bool(hit) and must <= chosen
-    return {"lever_ok": ok, "lever_mode": mode,
+    # anti-shotgun: bound the number of spurious levers (exact == max_extra 0)
+    cap = 0 if exact else max_extra
+    if cap >= 0:
+        ok = ok and len(extra) <= cap
+    union = chosen | causal
+    return {"lever_ok": ok, "lever_mode": mode, "lever_exact": bool(exact),
+            "lever_max_extra": int(cap),
+            "lever_precision": (len(hit) / len(chosen)) if chosen else 0.0,
+            "lever_jaccard": (len(hit) / len(union)) if union else 0.0,
+            # Recall is graded against `must` -- the levers the archetype's skill REQUIRES all of --
+            # NOT against `causal`. `causal` is a superset that even the gold answer does not name
+            # in full (subtype: |causal|=3, gold names 2), so a causal-recall or Jaccard reward
+            # scores the ORACLE below 1.0 (measured: 0.944). `must` is satisfied by gold by
+            # construction. Single-cause worlds have must == {} -> fall back to the binary hit.
+            "lever_recall": (len(chosen & must) / len(must)) if must else (1.0 if hit else 0.0),
             "chosen_levers": sorted(chosen), "causal_levers": sorted(causal),
-            "must_levers": sorted(must), "extra_levers": sorted(chosen - causal)}
+            "must_levers": sorted(must), "extra_levers": sorted(extra)}
 
 
 def compute_reward(struct: Dict[str, Any], world: Dict[str, Any], cat: Catalog,
@@ -243,7 +329,9 @@ def compute_reward(struct: Dict[str, Any], world: Dict[str, Any], cat: Catalog,
     # grading, so it is available on the error path too and is independent of which grading
     # variant wins below.
     gating = bool(cfg.lever_gate or cfg.lever_only)
-    lever = _lever_check(answer, world, gold, mode=cfg.lever_mode)
+    lever = _lever_check(answer, world, gold, mode=cfg.lever_mode,
+                         exact=gating and cfg.lever_exact,
+                         max_extra=cfg.lever_max_extra if gating else -1)
     lever_ok = bool(lever["lever_ok"])
     evidence_gated = bool(cfg.require_evidence and n_interventions == 0)
 
@@ -293,7 +381,13 @@ def compute_reward(struct: Dict[str, Any], world: Dict[str, Any], cat: Catalog,
         # paid out (subject to the evidence gate) even when the oracle could not grade.
         reward = -cfg.c_invalid * invalid_frac
         if cfg.lever_only and lever_ok and not evidence_gated:
-            reward += 1.0
+            _sc = (cfg.lever_scale or "none").lower()
+            if cfg.lever_precision and _sc == "none":
+                _sc = "precision"
+            reward += (float(lever["lever_recall"]) * float(lever["lever_precision"])
+                       if _sc == "recall" else
+                       float(lever["lever_jaccard"]) if _sc == "jaccard" else
+                       float(lever["lever_precision"]) if _sc == "precision" else 1.0)
         return {
             "reward": float(reward),
             "part_a": 0.0, "part_b": 0.0,
@@ -314,13 +408,42 @@ def compute_reward(struct: Dict[str, Any], world: Dict[str, Any], cat: Catalog,
     if lever_gated:
         part_a, part_b = 0.0, 0.0
 
+    # PRECISION SCALING (opt-in, anti-shotgun): the smooth alternative to lever_exact. Gated
+    # credit is multiplied by |chosen & causal| / |chosen|, so every spurious knob dilutes the
+    # payout instead of riding along free. Only active while gating, so r1 stays bit-identical.
+    scale = (cfg.lever_scale or "none").lower()
+    if cfg.lever_precision and scale == "none":      # back-compat sugar
+        scale = "precision"
+    if not gating or scale == "none":
+        prec = 1.0
+    elif scale == "recall":
+        # completeness x precision: gold -> 1.0, one co-cause of two -> 0.5, shotgun -> |causal|/|chosen|
+        prec = float(lever["lever_recall"]) * float(lever["lever_precision"])
+    elif scale == "jaccard":
+        prec = float(lever["lever_jaccard"])
+    else:
+        prec = float(lever["lever_precision"])
+    if prec != 1.0:
+        part_a *= prec
+        part_b *= prec
+
     if cfg.lever_only:
         # binary "found the lever" reward; dose quality and mechanism battery are ignored
-        reward = 1.0 if (lever_ok and not evidence_gated) else 0.0
+        reward = prec if (lever_ok and not evidence_gated) else 0.0
+    elif gating and cfg.w_id > 0.0:
+        # ADDITIVE identification term (see RewardConfig.w_id). part_a/part_b were already
+        # multiplied by `prec` above; the identification term carries its own recall*precision.
+        if lever_ok and not evidence_gated:
+            id_term = cfg.w_id * float(lever["lever_recall"]) * float(lever["lever_precision"])
+        else:
+            id_term = 0.0
+        reward = id_term + cfg.w_a * part_a + cfg.w_b * part_b
+        if cfg.lever_gate and lever_ok and not evidence_gated:
+            reward += cfg.lever_bonus * prec
     else:
         reward = cfg.w_a * part_a + cfg.w_b * part_b
         if cfg.lever_gate and lever_ok and not evidence_gated:
-            reward += cfg.lever_bonus
+            reward += cfg.lever_bonus * prec
     reward -= cfg.c_invalid * invalid_frac
     if cfg.c_no_evidence and n_interventions == 0:
         reward -= cfg.c_no_evidence

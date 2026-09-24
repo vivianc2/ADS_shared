@@ -114,9 +114,16 @@ class RPGSkyEnv(BaseTextEnv):
             observations=observations,
             reward=float(reward),
             done=bool(done),
-            metadata={k: info.get(k) for k in
-                      ("part_a", "part_b", "accepted", "turn_type", "n_interventions",
-                       "reward_error", "lever_ok", "lever_gated")},
+            # lever_precision / n_extra_levers are the SHOTGUN-HACK detectors (see
+            # reward.RewardConfig): a run whose lever_ok climbs while lever_precision falls and
+            # n_extra_levers rises is learning to name every knob, not to identify the cause.
+            # Keep them on the dashboard for every gated run.
+            metadata={**{k: info.get(k) for k in
+                         ("part_a", "part_b", "accepted", "turn_type", "n_interventions",
+                          "reward_error", "lever_ok", "lever_gated", "lever_precision",
+                          "lever_jaccard")},
+                      "n_chosen_levers": len(info.get("chosen_levers") or []),
+                      "n_extra_levers": len(info.get("extra_levers") or [])},
         )
 
     def _belief_phi(self, action: str) -> float:

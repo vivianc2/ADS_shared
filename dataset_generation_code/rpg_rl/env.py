@@ -275,7 +275,10 @@ YOUR MEMORY
         rec["reward_breakdown"] = {k: rw.get(k) for k in ("reward", "part_a", "part_b",
                                                           "invalid_id_fraction", "accepted",
                                                           "lever_ok", "lever_gated",
-                                                          "chosen_levers", "causal_levers")}
+                                                          "lever_precision", "lever_jaccard",
+                                                          "lever_max_extra",
+                                                          "chosen_levers", "causal_levers",
+                                                          "must_levers", "extra_levers")}
         rec["forced_no_answer"] = forced and not struct
         if rec.get("action_type") is None or "action_type" not in rec:
             rec.setdefault("action_type", "forced")
