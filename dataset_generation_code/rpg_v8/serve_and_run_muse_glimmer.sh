@@ -2,9 +2,9 @@
 #
 # serve_and_run_muse_glimmer.sh
 #
-# One-shot: serve Meta's Muse-Glimmer-30B with vLLM (OpenAI-compatible) and run
-# the v8 72-world validation set through the existing run_batch_v6.py harness
-# (--backend vllm). Meant to be pulled onto a GPU server and run as-is.
+# One-shot: serve Muse-Glimmer-30B with vLLM (OpenAI-compatible) and run the v8
+# 72-world validation set through the existing run_batch_v6.py harness
+# (--backend vllm).
 #
 #   cd .../dataset_generation_code/rpg_v8
 #   bash serve_and_run_muse_glimmer.sh
@@ -13,58 +13,129 @@
 # talks to the model over HTTP only, so this script starts vLLM, waits for it to
 # be healthy, runs the 72 worlds, prints the summary, then shuts the server down.
 #
-# Prereqs on the server (NOT installed here):
-#   - Python env with: vllm (recent enough to know model_type "muse_glimmer";
-#     if not, set MODEL_IMPL=transformers to use vLLM's transformers backend),
-#     plus the harness deps (boto3, openai). transformers>=5.15 is required.
-#   - GPU(s) with enough memory for a 30B bf16 model (~60GB weights + KV cache).
-#     Single 80GB card works for modest context; for the full 128K context or
-#     smaller cards, use TENSOR_PARALLEL>=2 or a quantized MODEL (see README).
-#   - HF access to the (likely gated) repo: `huggingface-cli login` or HF_TOKEN.
+# ---------------------------------------------------------------------------
+# THIS BOX IS SHARED. Read before changing GPU settings.
+# ---------------------------------------------------------------------------
+# The 8x L40S here are mostly other people's jobs. This script pins itself to
+# CUDA_DEVICES (default "1") and refuses to start if that GPU is already busy.
+# Do NOT set TENSOR_PARALLEL to "all visible GPUs" -- vLLM grabs
+# GPU_MEM_UTIL of each card's TOTAL memory and will OOM into co-tenants.
 #
+# Prereqs (built by the `glimmer` conda env -- see README notes at bottom):
+#   - vllm >= 0.27.1 AND transformers >= 5.15. vLLM has NO native muse_glimmer
+#     kernel (checked v0.27.1 and main), so MODEL_IMPL=transformers is REQUIRED,
+#     not optional. transformers 5.15 is what actually ships the modeling code.
+#   - Enough VRAM. Full bf16 is ~60GB (the model card targets 64GB VRAM), so it
+#     needs the 2x48GB L40S pair with TENSOR_PARALLEL=2. It does NOT fit one
+#     card -- for a single GPU use RedHatAI/Muse-Glimmer-30B-FP8-block (~30GB).
+#     NVFP4 repos are Blackwell-only -- useless on Ada L40S.
 set -euo pipefail
 
 # --------------------------------------------------------------------------- #
 # CONFIG (override by exporting before running)
 # --------------------------------------------------------------------------- #
-MODEL="${MODEL:-meta-models/Muse-Glimmer-30B}"      # HF repo id (or local path / quant repo)
+MODEL="${MODEL:-meta-models/Muse-Glimmer-30B}"      # full bf16, ~60GB -- needs the 2x48GB pair below.
+                                                    # On ONE card instead, use
+                                                    # RedHatAI/Muse-Glimmer-30B-FP8-block (~30GB).
 SERVED_NAME="${SERVED_NAME:-muse-glimmer}"          # name vLLM advertises == --model passed to harness
-PORT="${PORT:-8000}"                                # vLLM default; matches VLLM_DEFAULT_BASE_URL
-WORLDS_DIR="${WORLDS_DIR:-rpg_v8_fast_worlds}"       # the 72-world set (8x9 archetypes)
+                                                     # (also what openai_llm.py's preset matches on)
+CUDA_DEVICES="${CUDA_DEVICES:-0,1}"                 # physical GPU(s) to use. ONLY use cards you own.
+TENSOR_PARALLEL="${TENSOR_PARALLEL:-2}"             # must equal the number of ids in CUDA_DEVICES
+PORT="${PORT:-8020}"                                # 8000/8001/8077 are in use on this box
+WORLDS_DIR="${WORLDS_DIR:-rpg_v8_fast_worlds}"      # the 72-world set (8x9 archetypes)
 OUTDIR="${OUTDIR:-out_muse_glimmer_72}"             # per-world results + summary.json land here
-MAX_MODEL_LEN="${MAX_MODEL_LEN:-131072}"            # full model context (avoid truncation). Lower to save KV memory.
-MAX_NEW_TOKENS="${MAX_NEW_TOKENS:-8192}"            # generation cap per turn (avoid clipping long answers)
+MAX_MODEL_LEN="${MAX_MODEL_LEN:-65536}"             # ~36GB left for KV after bf16 weights across 2 cards.
+                                                    # Model ceiling is 131072; raise if runs truncate.
+MAX_NEW_TOKENS="${MAX_NEW_TOKENS:-8192}"            # per-turn generation cap. Glimmer is a reasoning model;
+                                                    # 2500 (the old harness default) clips it mid-think.
 CONCURRENCY="${CONCURRENCY:-8}"                     # worlds in flight; exploits vLLM continuous batching
-DTYPE="${DTYPE:-bfloat16}"
-GPU_MEM_UTIL="${GPU_MEM_UTIL:-0.90}"
-MODEL_IMPL="${MODEL_IMPL:-}"                          # set to "transformers" if your vLLM lacks native muse_glimmer
-TRUST_REMOTE_CODE="${TRUST_REMOTE_CODE:-0}"          # set to 1 only if the repo requires it
-SKIP_SERVE="${SKIP_SERVE:-0}"                         # 1 = a vLLM server is already up at VLLM_BASE_URL
-NO_RESOLVER="${NO_RESOLVER:-0}"                       # 1 = pass --no-resolver-llm (see README on grading)
-HEALTH_TIMEOUT_S="${HEALTH_TIMEOUT_S:-1800}"         # how long to wait for weights to load + server ready
+DTYPE="${DTYPE:-auto}"                              # auto: respect the checkpoint's own dtype
+GPU_MEM_UTIL="${GPU_MEM_UTIL:-0.92}"                # fraction of the PINNED card only
+MODEL_IMPL="${MODEL_IMPL:-transformers}"            # REQUIRED: no native vLLM muse_glimmer support
+TRUST_REMOTE_CODE="${TRUST_REMOTE_CODE:-0}"
+SKIP_SERVE="${SKIP_SERVE:-0}"                       # 1 = a vLLM server is already up at VLLM_BASE_URL
+NO_RESOLVER="${NO_RESOLVER:-0}"                     # 1 = pass --no-resolver-llm (see grading notes)
+HEALTH_TIMEOUT_S="${HEALTH_TIMEOUT_S:-2400}"        # weights load + torch.compile on a cold cache is slow
+FORCE_GPU="${FORCE_GPU:-0}"                         # 1 = skip the "GPU is busy" guard. Think first.
+CONDA_ENV="${CONDA_ENV:-glimmer}"
 
-# tensor parallelism: default to every visible GPU
-_gpus=$(nvidia-smi -L 2>/dev/null | wc -l | tr -d ' ' || echo 1)
-[ -z "$_gpus" ] || [ "$_gpus" -lt 1 ] && _gpus=1
-TENSOR_PARALLEL="${TENSOR_PARALLEL:-$_gpus}"
-
+# Use the glimmer env unless the caller already pointed PYTHON somewhere.
+if [ -z "${PYTHON:-}" ]; then
+  _conda_sh="/home/vivianchen/miniconda3/etc/profile.d/conda.sh"
+  [ -f "$_conda_sh" ] && . "$_conda_sh" && conda activate "$CONDA_ENV"
+fi
 PY="${PYTHON:-python}"
+
+# CUDA forward compatibility. vLLM >= 0.21 pins a torch built for CUDA 13,
+# which normally demands driver >= 580 -- this box runs 570.153.02 (CUDA 12.8),
+# so torch.cuda.is_available() is False without this. cuda-compat-13-0 ships a
+# userspace libcuda.so.580 that works against the older kernel module (supported
+# on datacenter GPUs; L40S qualifies). Purely user-local: no root, no driver
+# change, nothing visible to the other tenants on this box.
+CUDA_COMPAT_DIR="${CUDA_COMPAT_DIR:-/home/vivianchen/opt/cuda-13.0-compat/compat}"
+if [ -f "$CUDA_COMPAT_DIR/libcuda.so.1" ]; then
+  export LD_LIBRARY_PATH="$CUDA_COMPAT_DIR:${LD_LIBRARY_PATH:-}"
+else
+  echo "!! CUDA_COMPAT_DIR=$CUDA_COMPAT_DIR missing libcuda.so.1."
+  echo "   Re-extract with:"
+  echo "     curl -sLO https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-compat-13-0_580.178.04-1ubuntu1_amd64.deb"
+  echo "     dpkg-deb -x cuda-compat-13-0_*.deb /tmp/cc && cp -r /tmp/cc/usr/local/cuda-13.0 ~/opt/cuda-13.0-compat"
+  exit 1
+fi
+
+export CUDA_VISIBLE_DEVICES="$CUDA_DEVICES"
 export HF_HUB_ENABLE_HF_TRANSFER="${HF_HUB_ENABLE_HF_TRANSFER:-1}"
 export VLLM_BASE_URL="http://localhost:${PORT}/v1"
 export VLLM_API_KEY="${VLLM_API_KEY:-EMPTY}"
 
+_n_worlds=$(ls "$WORLDS_DIR"/world_*.json 2>/dev/null | wc -l | tr -d ' ')
+
 echo "=========================================================="
 echo " Muse-Glimmer-30B  ->  v8 72-world validation set"
 echo "  model            : $MODEL  (served as '$SERVED_NAME')"
-echo "  worlds           : $WORLDS_DIR  ($(ls "$WORLDS_DIR"/world_*.json 2>/dev/null | wc -l | tr -d ' ') worlds)"
+echo "  model-impl       : $MODEL_IMPL"
+echo "  worlds           : $WORLDS_DIR  ($_n_worlds worlds)"
 echo "  outdir           : $OUTDIR"
-echo "  tensor-parallel  : $TENSOR_PARALLEL GPU(s)"
+echo "  GPU(s)           : CUDA_VISIBLE_DEVICES=$CUDA_DEVICES  tensor-parallel=$TENSOR_PARALLEL"
 echo "  max-model-len    : $MAX_MODEL_LEN   max-new-tokens: $MAX_NEW_TOKENS"
 echo "  concurrency      : $CONCURRENCY"
 echo "  base url         : $VLLM_BASE_URL"
+echo "  python           : $($PY -c 'import sys;print(sys.executable)')"
 echo "  resolver         : $([ "$NO_RESOLVER" = 1 ] && echo disabled || echo 'harness default (Bedrock Opus if AWS_BEARER_TOKEN_BEDROCK set, else reuse agent)')"
 echo "=========================================================="
 
+# --------------------------------------------------------------------------- #
+# 0. Preflight
+# --------------------------------------------------------------------------- #
+if [ "$_n_worlds" -ne 72 ]; then
+  echo "!! expected 72 worlds in $WORLDS_DIR, found $_n_worlds"; exit 1
+fi
+
+_n_dev=$(echo "$CUDA_DEVICES" | tr ',' '\n' | grep -c .)
+if [ "$_n_dev" -ne "$TENSOR_PARALLEL" ]; then
+  echo "!! TENSOR_PARALLEL=$TENSOR_PARALLEL but CUDA_DEVICES lists $_n_dev GPU(s). These must match."
+  exit 1
+fi
+
+if [ "$SKIP_SERVE" != "1" ] && [ "$FORCE_GPU" != "1" ]; then
+  for dev in $(echo "$CUDA_DEVICES" | tr ',' ' '); do
+    used=$(nvidia-smi --id="$dev" --query-gpu=memory.used --format=csv,noheader,nounits 2>/dev/null || echo 0)
+    if [ "${used:-0}" -gt 2000 ]; then
+      echo "!! GPU $dev already has ${used}MiB in use -- someone (maybe you) is on it:"
+      nvidia-smi --id="$dev" --query-compute-apps=pid,used_memory --format=csv 2>/dev/null
+      echo "   Free it, pick another card you own, or re-run with FORCE_GPU=1."
+      exit 1
+    fi
+  done
+fi
+
+if [ "$SKIP_SERVE" != "1" ] && (command -v ss >/dev/null && ss -tln 2>/dev/null | grep -q ":${PORT} "); then
+  echo "!! port $PORT is already bound. Pick another PORT."; exit 1
+fi
+
+# --------------------------------------------------------------------------- #
+# 1. Serve
+# --------------------------------------------------------------------------- #
 SERVER_PID=""
 cleanup() {
   if [ -n "$SERVER_PID" ] && kill -0 "$SERVER_PID" 2>/dev/null; then
@@ -75,9 +146,6 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-# --------------------------------------------------------------------------- #
-# 1. Serve
-# --------------------------------------------------------------------------- #
 if [ "$SKIP_SERVE" != "1" ]; then
   serve_args=(
     serve "$MODEL"
@@ -87,6 +155,7 @@ if [ "$SKIP_SERVE" != "1" ]; then
     --max-model-len "$MAX_MODEL_LEN"
     --tensor-parallel-size "$TENSOR_PARALLEL"
     --gpu-memory-utilization "$GPU_MEM_UTIL"
+    --max-num-seqs "$CONCURRENCY"
   )
   [ "$TRUST_REMOTE_CODE" = "1" ] && serve_args+=(--trust-remote-code)
   [ -n "$MODEL_IMPL" ] && serve_args+=(--model-impl "$MODEL_IMPL")
@@ -111,6 +180,14 @@ if [ "$SKIP_SERVE" != "1" ]; then
 else
   echo ">> SKIP_SERVE=1: assuming a vLLM server is already up at $VLLM_BASE_URL"
 fi
+
+# Smoke-test one completion before committing to a 72-world run.
+echo ">> smoke test..."
+curl -sf "http://localhost:${PORT}/v1/chat/completions" \
+  -H 'Content-Type: application/json' \
+  -d "{\"model\":\"$SERVED_NAME\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply with the single word: ready\"}],\"max_tokens\":2048}" \
+  | head -c 600 || { echo "!! smoke test failed"; exit 1; }
+echo
 
 # --------------------------------------------------------------------------- #
 # 2. Run the 72-world batch through the existing harness

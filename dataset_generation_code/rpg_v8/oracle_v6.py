@@ -13,6 +13,18 @@ The counterfactual battery and grader mirror v5, generalized to actuators.
 
 from __future__ import annotations
 
+# --- FROZEN LEGACY COPY (warning added 2026-09-24) -------------------------------------------
+# rpg_v8/ is frozen at 2026-08-14 and is NOT the current benchmark (that is rpg_v9/). Having this
+# directory ahead of rpg_v9 on sys.path silently evaluated every personal_docs driver.py run on v8
+# (see personal_docs/RPG_VERSIONS_READ_ME_FIRST.md). Set RPG_ALLOW_V8=1 to silence this warning
+# when you genuinely want v8 (reproducing old numbers / v8 result dumps).
+import os as _os, sys as _sys
+if _os.environ.get("RPG_ALLOW_V8", "0") in ("", "0"):
+    print(f"[rpg_v8] WARNING: importing FROZEN v8 module {__file__} - current code is rpg_v9/. "
+          "Set RPG_ALLOW_V8=1 if intended.", file=_sys.stderr, flush=True)
+# ------------------------------------------------------------------------------------------------
+
+
 import itertools
 from typing import Any, Dict, List, Optional, Tuple
 

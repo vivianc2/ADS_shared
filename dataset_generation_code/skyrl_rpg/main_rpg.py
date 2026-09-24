@@ -46,7 +46,12 @@ def _rpg_env_vars() -> dict:
     happened to be started. Ray propagates a task's runtime_env to the actors it creates.
     """
     return {k: v for k, v in os.environ.items()
-            if k.startswith("RPG_") or k in ("HF_HOME", "PYTORCH_CUDA_ALLOC_CONF")}
+            if k.startswith("RPG_") or k in ("HF_HOME", "PYTORCH_CUDA_ALLOC_CONF",
+                                               # box fixes from the H200 session (reward_lever_gate log
+                                               # §10.6/§10.10): Ray strips LD_PRELOAD from inherited worker
+                                               # env; TileLang JIT needs the CUDA/cccl include paths.
+                                               "LD_PRELOAD", "LD_LIBRARY_PATH", "CUDA_HOME", "CUDA_PATH",
+                                               "CPATH", "FLA_TILELANG")}
 
 
 def main() -> None:

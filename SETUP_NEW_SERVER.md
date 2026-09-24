@@ -26,7 +26,9 @@ rpgrl/
 ```
 cd ~/rpgrl
 git clone https://github.com/NovaSky-AI/SkyRL.git
-cd SkyRL && git checkout bce9ee9a        # the commit this box uses (for dep/behavior parity)
+cd SkyRL && git checkout 7eac0e83c96660e0820cb187f959ebe456c3d4ee   # was bce9ee9a (Aug-10), which has a colocated multi-engine port bug; see personal_docs infra/BOX_PANDO_ORIENTATION_2026-09-21.md
+# with 7eac0e83: re-add "scipy>=1.17.1" to pyproject.toml, use box2_working_uv.lock (personal_docs box_sync/), `uv sync --frozen --extra fsdp`,
+# `uv pip install pandas boto3`, and `export UV_PROJECT_ENVIRONMENT=<SkyRL>/.venv` before launching (else Ray workers get an empty venv).
 ```
 
 ## 3. Recreate the RPG launcher symlink

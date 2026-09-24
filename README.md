@@ -7,6 +7,15 @@ also carries the free-text evaluation harness and a lot of committed run outputs
 **If you read one thing:** the current pipeline is **v9**, and the step-by-step to
 reproduce it on a fresh box is in [`SETUP_NEW_SERVER.md`](SETUP_NEW_SERVER.md).
 
+> **⚠️ 2026-09-24 — two version bugs, read before running or quoting anything**
+> 1. The parquets in `rpg_v9/data_v9_deleaked/`, `rpg_v9/experiment_datasets/rl_train/` (except
+>    `rl_hard_lever_ds*`), `data_v9_neutral/`, `rpg_v9_fast_think/`, `story_ablation/` were rendered by pre-2026-08-30
+>    code and their stored prompts no longer match the worlds current code rebuilds. Use
+>    `rpg_v9/experiment_datasets/v9_rebuilt_2026-09-24/`; `skyrl_rpg/env.py` now refuses stale rows.
+> 2. The personal_docs eval harness (`driver.py`) imported **`rpg_v8/`** modules ahead of `rpg_v9/` until
+>    2026-09-24. `rpg_v8/sampler.py` and `rpg_v8/oracle_v6.py` now print a warning when imported.
+> Full explanation and which results are v8 vs v9: personal_docs `RPG_VERSIONS_READ_ME_FIRST.md`.
+
 ## Which version is current
 
 The world generator evolved `v6 → v7 → v8 → v9`, each a copy-forward of the last.
@@ -14,7 +23,7 @@ The world generator evolved `v6 → v7 → v8 → v9`, each a copy-forward of th
 
 | Path | What it is | Status |
 |---|---|---|
-| `dataset_generation_code/rpg_v9/` | Current world generator (sampler, oracle, engine) + the committed de-leaked dataset in `data_v9_deleaked/{train,validation}.parquet` | **current** |
+| `dataset_generation_code/rpg_v9/` | Current world generator (sampler, oracle, engine). Datasets: `experiment_datasets/v9_rebuilt_2026-09-24/` (current); `data_v9_deleaked/` (**stale prompts**, provenance only) | **current** |
 | `dataset_generation_code/rpg_rl/` | RL layer: id-space environment, reward, world stream, splits, id-space eval | **current** |
 | `dataset_generation_code/skyrl_rpg/` | SkyRL integration: dataset builder, env registration, and the `run_rpg.sh` launcher | **current** (the trainer) |
 | `framework_code/` | Free-text / API evaluation harness (`evaluate_advanced.py`, `evaluate_zero_shot.py`) | **current** (eval) |

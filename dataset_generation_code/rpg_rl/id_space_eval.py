@@ -80,14 +80,17 @@ def main():
     def m(xs):
         xs = [x for x in xs if x is not None]
         return sum(xs)/len(xs) if xs else float("nan")
-    print("\n%-20s %4s %8s %8s %8s %8s" % ("archetype","n","reward","partA%","benefit","partB"))
+    # passA% = share of rollouts with raw benefit >= 0.90 = oracle_v6.grade's part-A pass rule (part_a here is
+    # post-gate/scaled reward component, so it is not used for the pass rate).
+    # FIX 2026-09-24: was `1.0 if x["part_a"]`, i.e. ANY benefit > 0 counted as a pass (inflated).
+    print("\n%-20s %4s %8s %8s %8s %8s" % ("archetype","n","reward","passA%","benefit","partB"))
     allr=[]
     for a in sorted(by):
         gs=[x for x in by[a] if "error" not in x]; allr+=gs
         print("%-20s %4d %8.3f %7.0f%% %8.3f %8.3f" % (a, len(by[a]), m([x["reward"] for x in gs]),
-              100*m([1.0 if x["part_a"] else 0.0 for x in gs]), m([x.get("benefit") for x in gs]), m([x["part_b"] for x in gs])))
+              100*m([1.0 if (x.get("benefit") or 0.0) >= 0.90 else 0.0 for x in gs]), m([x.get("benefit") for x in gs]), m([x["part_b"] for x in gs])))
     print("%-20s %4d %8.3f %7.0f%% %8.3f %8.3f" % ("OVERALL", len(allr), m([x["reward"] for x in allr]),
-          100*m([1.0 if x["part_a"] else 0.0 for x in allr]), m([x.get("benefit") for x in allr]), m([x["part_b"] for x in allr])))
+          100*m([1.0 if (x.get("benefit") or 0.0) >= 0.90 else 0.0 for x in allr]), m([x.get("benefit") for x in allr]), m([x["part_b"] for x in allr])))
     errs=[r for r in rows if "error" in r]
     if errs: print("ERRORS:", len(errs), errs[:3])
 
