@@ -30,6 +30,21 @@ from typing import Any, Dict, List, Optional, Tuple
 from engine import WorldSCM
 from sim_v6 import SimV6
 from run_agent_v6 import _parse_action, _tag          # reuse the VERIFIED parser
+
+
+def _restore_think_open(text: str) -> str:
+    """FIX 2026-09-24 (pando). Qwen3.5's chat template ends the generation prompt with
+    '<|im_start|>assistant\n<think>\n', so under SkyRL the model's OUTPUT holds only the closing
+    '</think>'. The parser strips complete <think>...</think> pairs only, so an <action> the model
+    DRAFTED while thinking survived; with the committed action that made two <action> tags -> the
+    multi-action rule rejected the turn ("no valid <action> parsed"). Measured on the a4 step-0 eval
+    (Qwen3.5-9B, 360 episodes): 346/1862 turns (19%) unparsed, 176 of them valid actions recovered by
+    this fix. If '</think>' appears with no '<think' before it, re-attach the opening tag so the
+    private reasoning is stripped as intended. No-op for text without an unmatched '</think>'."""
+    head, sep, _ = text.partition("</think>")
+    if sep and "<think" not in head:
+        return "<think>" + text
+    return text
 from catalog import build_catalog, Catalog
 from reward import compute_reward, RewardConfig
 
@@ -169,6 +184,7 @@ YOUR MEMORY
         if self._done:
             raise RuntimeError("step() called on a finished episode")
         self._turn += 1
+        model_text = _restore_think_open(model_text)
         self._memory = _tag(model_text, "memory") or self._memory
         atype, payload = _parse_action(model_text)
         rec: Dict[str, Any] = {"turn": self._turn, "action_type": atype, "raw": model_text}
@@ -285,11 +301,19 @@ YOUR MEMORY
         # reward of ANSWERED episodes. Motivation (2026-09-24): blind screening of every control scores
         # part_a 0.75 on v9 held-out while the base 9B tries ~3 of ~7 controls; the outcome-only reward
         # never pays for the experimentation the task needs.
-        tested = set()
+        # FIX 2026-09-24 (pando): a control counts as tested only when it was intervened on ALONE. The
+        # first version took the union over all experiments, so ONE joint experiment setting every
+        # control earned the full bonus (probe: 1.150, same as screening each control singly) while
+        # telling the agent almost nothing about which control matters. The union is still logged.
+        tested, union = set(), set()
         for t in self.turns:
-            tested |= set(((t.get("result") or {}).get("applied_intervention") or {}).keys())
+            applied = set(((t.get("result") or {}).get("applied_intervention") or {}).keys())
+            union |= applied
+            if len(applied) == 1:
+                tested |= applied
         n_act = max(1, len(self.cat.actuator_ids()))
         rw["coverage"] = min(1.0, len(tested & set(self.cat.a_name2id)) / n_act)
+        rw["coverage_union"] = min(1.0, len(union & set(self.cat.a_name2id)) / n_act)
         # Paid only for an answered episode that passed the reward's own gates: at least one intervention
         # (evidence gate) and, when the lever gate is on, a causally real lever named (lever_ok).
         gated = bool(self.reward_cfg.lever_gate or self.reward_cfg.lever_only)
@@ -302,7 +326,8 @@ YOUR MEMORY
                                                           "lever_precision", "lever_jaccard",
                                                           "lever_max_extra",
                                                           "chosen_levers", "causal_levers",
-                                                          "must_levers", "extra_levers", "coverage")}
+                                                          "must_levers", "extra_levers", "coverage",
+                                                          "coverage_union")}
         rec["forced_no_answer"] = forced and not struct
         if rec.get("action_type") is None or "action_type" not in rec:
             rec.setdefault("action_type", "forced")

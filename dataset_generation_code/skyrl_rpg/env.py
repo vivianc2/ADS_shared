@@ -131,7 +131,7 @@ class RPGSkyEnv(BaseTextEnv):
             metadata={**{k: info.get(k) for k in
                          ("part_a", "part_b", "accepted", "turn_type", "n_interventions",
                           "reward_error", "lever_ok", "lever_gated", "lever_precision",
-                          "lever_jaccard", "coverage")},
+                          "lever_jaccard", "coverage", "coverage_union")},
                       "n_chosen_levers": len(info.get("chosen_levers") or []),
                       "n_extra_levers": len(info.get("extra_levers") or [])},
         )
