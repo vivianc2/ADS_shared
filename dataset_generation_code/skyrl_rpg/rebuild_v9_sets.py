@@ -9,7 +9,8 @@ personal_docs/results/RPG_V9_DATASET_DRIFT_2026-09-23.md.
 Modes (run from dataset_generation_code/, RPG_SYNERGY_SOFT=20):
   verify   <parquet>...                 count rows whose stored prompt != env.reset()
   rebuild  <in.parquet> <out.parquet>   same rows/seeds, prompt re-rendered by current code
-  balanced <out.parquet> --per_arch 30  held-out-skin test set, every archetype, seeds 43M+
+  balanced <out.parquet> --per_arch 30  N accepted worlds per archetype, every archetype, cycling (archetype, skin)
+                                        cells in seed order; --skins heldout (default) | train; --label = extra_info.split
 
     PYTHONPATH=rpg_rl:rpg_v9 RPG_SYNERGY_SOFT=20 python skyrl_rpg/rebuild_v9_sets.py verify a.parquet
 """
@@ -31,7 +32,7 @@ import pyarrow as pa                                  # noqa: E402
 import pyarrow.parquet as pq                          # noqa: E402
 from sampler import sample_world, ARCHETYPES          # noqa: E402
 from generate_v7 import audit                         # noqa: E402
-from splits import HELDOUT_SKINS                      # noqa: E402
+from splits import HELDOUT_SKINS, train_skins         # noqa: E402
 from env import RPGEnv, SYSTEM_PROMPT                 # noqa: E402
 
 SYSTEM_MSG = {"role": "system", "content": SYSTEM_PROMPT}
@@ -104,7 +105,7 @@ def rebuild(src, dst, workers, force=False):
 
 
 def _bal_job(args):
-    seed, skin, arch = args
+    seed, skin, arch, label = args
     try:
         w = sample_world(seed, skin=skin, archetype=arch)
         res = audit(w)
@@ -117,14 +118,14 @@ def _bal_job(args):
     return {"data_source": "rpg_v9", "prompt": [SYSTEM_MSG, {"role": "user", "content": env.reset()}],
             "env_class": "rpg", "reward_spec": {"method": "rule", "ground_truth": ""},
             "extra_info": {"seed": int(seed), "skin": skin, "archetype": arch, "max_turns": 32,
-                           "budget": 15, "split": "heldout_balanced"}}
+                           "budget": 15, "split": label}}
 
 
-def balanced(dst, per_arch, seed0, workers):
-    skins = sorted(HELDOUT_SKINS)
+def balanced(dst, per_arch, seed0, workers, skins="heldout", label="heldout_balanced"):
+    skins = sorted(HELDOUT_SKINS) if skins == "heldout" else sorted(train_skins())
     cells = [(a, s) for a in ARCHETYPES for s in skins]
-    attempts = int(per_arch * len(ARCHETYPES) / 0.5) + 64
-    jobs = [(seed0 + i, cells[i % len(cells)][1], cells[i % len(cells)][0]) for i in range(attempts)]
+    attempts = int(per_arch * len(ARCHETYPES) / 0.3) + 64     # first per_arch per archetype in seed order: more attempts only extends the tail
+    jobs = [(seed0 + i, cells[i % len(cells)][1], cells[i % len(cells)][0], label) for i in range(attempts)]
     with Pool(workers) as pool:
         res = pool.map(_bal_job, jobs, chunksize=2)
     keep, cnt = [], Counter()
@@ -148,13 +149,15 @@ def main():
     ap.add_argument("--seed0", type=int, default=43_000_000)
     ap.add_argument("--workers", type=int, default=32)
     ap.add_argument("--force", action="store_true", help="rebuild even rows with a rewritten SITUATION")
+    ap.add_argument("--skins", choices=["heldout", "train"], default="heldout", help="balanced: which skin family")
+    ap.add_argument("--label", default="heldout_balanced", help="balanced: extra_info.split value")
     a = ap.parse_args()
     if a.mode == "verify":
         verify(a.paths, a.workers)
     elif a.mode == "rebuild":
         rebuild(a.paths[0], a.paths[1], a.workers, a.force)
     else:
-        balanced(a.paths[0], a.per_arch, a.seed0, a.workers)
+        balanced(a.paths[0], a.per_arch, a.seed0, a.workers, a.skins, a.label)
 
 
 if __name__ == "__main__":
