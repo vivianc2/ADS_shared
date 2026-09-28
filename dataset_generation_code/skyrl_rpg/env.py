@@ -94,6 +94,16 @@ class RPGSkyEnv(BaseTextEnv):
     def init(self, prompt):
         # The dataset prompt already holds [system(SYSTEM_PROMPT), user(first_obs)];
         # nothing to modify.
+        # DRIFT GUARD (2026-09-24): the stored first observation carries the ONLY copy of the id
+        # catalog (later turns are id-only), so a parquet built with older generator code silently
+        # shows the policy a different catalog than the world this env executes. Pre-745c110
+        # parquets did exactly that on ~half the worlds. Fail loudly unless RPG_ALLOW_STALE_PROMPT=1.
+        stored = next((m.get("content", "") for m in reversed(prompt or []) if m.get("role") == "user"), "")
+        stored = stored.strip().removesuffix("/no_think").strip()     # rpg_dataset.py RPG_NO_THINK
+        if stored != self._first_obs.strip():
+            if os.environ.get("RPG_ALLOW_STALE_PROMPT", "0") in ("", "0"):
+                raise RuntimeError("RPG dataset prompt != env.reset() for this world (stale parquet; "
+                                   "rebuild with skyrl_rpg/rebuild_v9_sets.py)")
         return prompt, {}
 
     def step(self, action: str) -> BaseTextEnvStepOutput:
@@ -114,9 +124,16 @@ class RPGSkyEnv(BaseTextEnv):
             observations=observations,
             reward=float(reward),
             done=bool(done),
-            metadata={k: info.get(k) for k in
-                      ("part_a", "part_b", "accepted", "turn_type", "n_interventions",
-                       "reward_error")},
+            # lever_precision / n_extra_levers are the SHOTGUN-HACK detectors (see
+            # reward.RewardConfig): a run whose lever_ok climbs while lever_precision falls and
+            # n_extra_levers rises is learning to name every knob, not to identify the cause.
+            # Keep them on the dashboard for every gated run.
+            metadata={**{k: info.get(k) for k in
+                         ("part_a", "part_b", "accepted", "turn_type", "n_interventions",
+                          "reward_error", "lever_ok", "lever_gated", "lever_precision",
+                          "lever_jaccard", "coverage", "coverage_union")},
+                      "n_chosen_levers": len(info.get("chosen_levers") or []),
+                      "n_extra_levers": len(info.get("extra_levers") or [])},
         )
 
     def _belief_phi(self, action: str) -> float:

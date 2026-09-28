@@ -30,6 +30,21 @@ from typing import Any, Dict, List, Optional, Tuple
 from engine import WorldSCM
 from sim_v6 import SimV6
 from run_agent_v6 import _parse_action, _tag          # reuse the VERIFIED parser
+
+
+def _restore_think_open(text: str) -> str:
+    """FIX 2026-09-24 (pando). Qwen3.5's chat template ends the generation prompt with
+    '<|im_start|>assistant\n<think>\n', so under SkyRL the model's OUTPUT holds only the closing
+    '</think>'. The parser strips complete <think>...</think> pairs only, so an <action> the model
+    DRAFTED while thinking survived; with the committed action that made two <action> tags -> the
+    multi-action rule rejected the turn ("no valid <action> parsed"). Measured on the a4 step-0 eval
+    (Qwen3.5-9B, 360 episodes): 346/1862 turns (19%) unparsed, 176 of them valid actions recovered by
+    this fix. If '</think>' appears with no '<think' before it, re-attach the opening tag so the
+    private reasoning is stripped as intended. No-op for text without an unmatched '</think>'."""
+    head, sep, _ = text.partition("</think>")
+    if sep and "<think" not in head:
+        return "<think>" + text
+    return text
 from catalog import build_catalog, Catalog
 from reward import compute_reward, RewardConfig
 
@@ -54,6 +69,15 @@ Observation and code alone CANNOT establish causation — you must INTERVENE to 
 
 Do not trust a control just because the outcome reading went up — verify it actually changed the CAUSE (the mechanism proxy moves). A control that only lifts the reading without changing the cause has sign 0, and recommending it as the fix is wrong.
 """
+
+
+# Turn at which the "commit within 1-2 turns" DIRECTIVE starts firing (2026-08-17 truncation fix). Default 6
+# = historical behaviour. RPG_COMMIT_NUDGE_TURN=0 disables it (2026-09-24: the base 9B answers at ~turn 7 using
+# ~5/15 experiments, while blind screening of every control scores far higher — the nudge may be truncating
+# exploration; only disable it together with a context budget large enough to hold the extra turns).
+import os as _os
+_COMMIT_NUDGE_TURN = int(_os.environ.get("RPG_COMMIT_NUDGE_TURN", "6"))
+_W_COVER = float(_os.environ.get("RPG_W_COVER", "0.0"))      # coverage bonus weight, see _terminal
 
 
 @dataclass
@@ -122,7 +146,7 @@ class RPGEnv:
         elif self._n_interv == 0 and self._used >= 3:
             directive = ('\nDIRECTIVE: you have run no INTERVENTION — observation alone cannot '
                          'establish causation; intervene to test a cause.\n')
-        elif self._turn >= 6 and self._n_interv >= 1:
+        elif _COMMIT_NUDGE_TURN > 0 and self._turn >= _COMMIT_NUDGE_TURN and self._n_interv >= 1:
             # TRUNCATION FIX (2026-08-17): the total-context budget (~max_input_length) is exhausted
             # around turn ~8-9 by verbose thinking-ON turns, well before the turn/budget caps fire above,
             # so episodes used to run out mid-investigation with NO answer (stop_reason=length -> 0 reward,
@@ -160,6 +184,7 @@ YOUR MEMORY
         if self._done:
             raise RuntimeError("step() called on a finished episode")
         self._turn += 1
+        model_text = _restore_think_open(model_text)
         self._memory = _tag(model_text, "memory") or self._memory
         atype, payload = _parse_action(model_text)
         rec: Dict[str, Any] = {"turn": self._turn, "action_type": atype, "raw": model_text}
@@ -271,9 +296,38 @@ YOUR MEMORY
         struct = answer_struct if isinstance(answer_struct, dict) else {}
         rw = compute_reward(struct, self.world, self.cat, self.gold, self.battery,
                             cfg=self.reward_cfg, n_interventions=self._n_interv)
+        # Experimental COVERAGE = share of the world's controls the agent actually intervened on
+        # (always logged). RPG_W_COVER>0 (default 0 = off, reward unchanged) adds w*coverage to the
+        # reward of ANSWERED episodes. Motivation (2026-09-24): blind screening of every control scores
+        # part_a 0.75 on v9 held-out while the base 9B tries ~3 of ~7 controls; the outcome-only reward
+        # never pays for the experimentation the task needs.
+        # FIX 2026-09-24 (pando): a control counts as tested only when it was intervened on ALONE. The
+        # first version took the union over all experiments, so ONE joint experiment setting every
+        # control earned the full bonus (probe: 1.150, same as screening each control singly) while
+        # telling the agent almost nothing about which control matters. The union is still logged.
+        tested, union = set(), set()
+        for t in self.turns:
+            applied = set(((t.get("result") or {}).get("applied_intervention") or {}).keys())
+            union |= applied
+            if len(applied) == 1:
+                tested |= applied
+        n_act = max(1, len(self.cat.actuator_ids()))
+        rw["coverage"] = min(1.0, len(tested & set(self.cat.a_name2id)) / n_act)
+        rw["coverage_union"] = min(1.0, len(union & set(self.cat.a_name2id)) / n_act)
+        # Paid only for an answered episode that passed the reward's own gates: at least one intervention
+        # (evidence gate) and, when the lever gate is on, a causally real lever named (lever_ok).
+        gated = bool(self.reward_cfg.lever_gate or self.reward_cfg.lever_only)
+        if _W_COVER > 0 and struct and self._n_interv > 0 and (not gated or rw.get("lever_ok")):
+            rw["reward"] = float(rw["reward"]) + _W_COVER * rw["coverage"]
         rec["answer_struct"] = struct
-        rec["reward_breakdown"] = {k: rw[k] for k in ("reward", "part_a", "part_b",
-                                                      "invalid_id_fraction", "accepted")}
+        rec["reward_breakdown"] = {k: rw.get(k) for k in ("reward", "part_a", "part_b",
+                                                          "invalid_id_fraction", "accepted",
+                                                          "lever_ok", "lever_gated",
+                                                          "lever_precision", "lever_jaccard",
+                                                          "lever_max_extra",
+                                                          "chosen_levers", "causal_levers",
+                                                          "must_levers", "extra_levers", "coverage",
+                                                          "coverage_union")}
         rec["forced_no_answer"] = forced and not struct
         if rec.get("action_type") is None or "action_type" not in rec:
             rec.setdefault("action_type", "forced")

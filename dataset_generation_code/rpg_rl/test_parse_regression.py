@@ -22,5 +22,14 @@ check("_canon_sign(0)=='0'", _canon_sign(0)=="0")
 check("_canon_sign('none')=='0'", _canon_sign("none")=="0")
 check("_canon_sign(1)=='+'", _canon_sign(1)=="+")
 check("_canon_sign('-1')=='-'", _canon_sign("-1")=="-")
+# 4) SkyRL/Qwen3.5: the opening <think> is in the PROMPT, the output has only </think>. A draft action
+#    inside the reasoning must not turn a valid committed action into a multi-action parse failure.
+from env import _restore_think_open
+_sk = 'draft: <action type="intervene">{"actions":[]}</action>\n</think>\n<action type="measure">{"ids":["m0"]}</action>\n<memory>x</memory>'
+a,_=_parse_action(_restore_think_open(_sk))
+check("SkyRL output (no <think> open) with draft action -> committed 'measure'", a=="measure")
+check("_restore_think_open is a no-op on balanced / think-free text",
+      _restore_think_open('<think>a</think><action type="measure">{}</action>')=='<think>a</think><action type="measure">{}</action>'
+      and _restore_think_open('<action type="measure">{}</action>')=='<action type="measure">{}</action>')
 print("ALL PARSE/GRADE REGRESSION TESTS PASS")
 if __name__=="__main__": pass

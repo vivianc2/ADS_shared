@@ -81,8 +81,17 @@ _THINK_OPEN_RE = re.compile(r'<think\b[^>]*>.*$', re.DOTALL | re.IGNORECASE)  # 
 
 
 def _strip_think(raw: str) -> str:
-    """Remove private <think> reasoning so only the committed turn is parsed."""
-    return _THINK_OPEN_RE.sub(" ", _THINK_RE.sub(" ", raw))
+    """Remove private <think> reasoning so only the committed turn is parsed.
+
+    FIX 2026-09-24: with Qwen3.5 thinking ON the opening <think> is part of the generation PROMPT (chat template),
+    so the returned completion is "reasoning ... </think> committed output" with an ORPHAN closing tag. The two
+    regexes above need an opening tag, so nothing was stripped and actions drafted inside the reasoning were parsed:
+    on 360 base-9B rollouts 13% of turns executed/rejected a different action than the one committed, and 8.6% of
+    episodes were ended by a drafted <action type="answer">. Everything up to the last orphan </think> is reasoning."""
+    t = _THINK_OPEN_RE.sub(" ", _THINK_RE.sub(" ", raw))
+    if re.search(r"</think\s*>", t, re.IGNORECASE):
+        t = re.split(r"</think\s*>", t, flags=re.IGNORECASE)[-1]
+    return t
 
 
 def _parse_action(raw: str):

@@ -29,6 +29,10 @@ _MODEL_PRESETS: List[Dict[str, Any]] = [
      "extra_body": {"top_k": 0, "min_p": 0.0}},
     {"matches": ["deepseek-v4-pro"], "temperature": 1.0, "top_p": 0.95,
      "extra_body": {"reasoning_effort": "high", "thinking": {"type": "enabled"}}},
+    # Muse-Glimmer-30B model card, "Best Practices": temp 1.0 / top_p 0.95 /
+    # top_k 64. Matches the served name ("muse-glimmer") and any repo id.
+    {"matches": ["muse-glimmer", "muse_glimmer", "glimmer"], "temperature": 1.0,
+     "top_p": 0.95, "extra_body": {"top_k": 64}},
 ]
 
 

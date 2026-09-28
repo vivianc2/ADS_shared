@@ -16,7 +16,7 @@ NUM_GPUS="${NUM_GPUS:-4}"
 MODEL="${MODEL:-Qwen/Qwen3.5-9B}"    # larger model (e.g. 27B) may need more GPUs / lower mem-util
 LOGGER="${LOGGER:-console}"
 
-uv run --isolated --extra fsdp -m examples.train.rpg.main_rpg \
+uv run --no-sync --extra fsdp -m examples.train.rpg.main_rpg \
   data.train_data="['$DATA_DIR/train.parquet']" \
   data.val_data="['$DATA_DIR/validation.parquet']" \
   trainer.algorithm.advantage_estimator="grpo" \
@@ -53,7 +53,7 @@ uv run --isolated --extra fsdp -m examples.train.rpg.main_rpg \
   trainer.project_name="rpg_v9" \
   trainer.run_name="rpg_qwen3.5_9b_grpo_lora" \
   trainer.ckpt_path="/work/rl_ckpt/rpg_skyrl" \
-  $@
+  "$@"
 
 # --- refinements to add once the base run works (confirm exact flag names in this SkyRL
 #     build; our design doc §11/§13):
