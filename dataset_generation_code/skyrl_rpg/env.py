@@ -40,6 +40,7 @@ from sampler import sample_world            # rpg_v9/sampler.py                 
 from generate_v7 import audit               # rpg_v9/generate_v7.py              # noqa: E402
 import json, re                                                                     # noqa: E402
 from reward import compute_reward, RewardConfig  # rpg_rl/reward.py                  # noqa: E402
+from prefill import prefill as run_prefill, resolve_k, spec_from_env as prefill_spec  # rpg_rl/prefill.py  # noqa: E402
 _BELIEF_RE = re.compile(r"<belief>\s*(\{.*?\})\s*</belief>", re.DOTALL)  # BG2 per-turn belief graph
 
 
@@ -74,6 +75,7 @@ class RPGSkyEnv(BaseTextEnv):
         # Unique per rollout instance (mkdtemp) so the G concurrent samples of one seed
         # don't clobber each other's experiment_<n>.csv. Cleaned up when the episode ends.
         import tempfile
+        self._seed = int(info["seed"])
         self._data_dir = tempfile.mkdtemp(prefix="rpg_ep_",
                                           dir=os.environ.get("RPG_DATA_ROOT") or None)
         self._rpg = build_rpg_env(
@@ -104,6 +106,20 @@ class RPGSkyEnv(BaseTextEnv):
             if os.environ.get("RPG_ALLOW_STALE_PROMPT", "0") in ("", "0"):
                 raise RuntimeError("RPG dataset prompt != env.reset() for this world (stale parquet; "
                                    "rebuild with skyrl_rpg/rebuild_v9_sets.py)")
+        # PREFILL (2026-10-01, opt-in, default OFF): RPG_PREFILL_K = int | full | rand runs the first k
+        # experiments of a scripted screen (rpg_rl/prefill.py) AFTER the drift guard and appends them to the
+        # prompt. SkyRL treats everything init() returns as prompt (no loss on the scripted turns); the env's
+        # budget/turn/intervention counters include them.
+        spec = prefill_spec()
+        if spec not in ("", "0"):
+            import random as _random
+            k = resolve_k(spec, self._rpg, _random.Random(hash((self._seed, os.getpid(), id(self)))))
+            if k > 0:
+                suffix = "\n/no_think" if os.environ.get("RPG_NO_THINK") else ""
+                msgs, done = run_prefill(self._rpg, k, obs_suffix=suffix)
+                if done:
+                    raise RuntimeError("RPG prefill ended the episode (budget cap broken)")
+                prompt = list(prompt) + msgs
         return prompt, {}
 
     def step(self, action: str) -> BaseTextEnvStepOutput:
