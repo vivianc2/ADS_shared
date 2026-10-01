@@ -58,18 +58,21 @@ class Catalog:
         self.a_name2id = {v: k for k, v in self.a_id2name.items()}
 
     # ---- id -> canonical name (reward path) ----
+    # All four lookups are TOTAL: anything that is not a string (the model can emit any JSON value, e.g.
+    # {"actuator": {"id": "a3"}}) is simply "not found". FIX 2026-10-01: a dict id raised
+    # `TypeError: unhashable type` inside RPGEnv.step and killed the whole SkyRL run (pando v7, step 26).
     def measurable_name(self, mid: str) -> Optional[str]:
-        return self.m_id2name.get(mid)
+        return self.m_id2name.get(mid) if isinstance(mid, str) else None
 
     def actuator_name(self, aid: str) -> Optional[str]:
-        return self.a_id2name.get(aid)
+        return self.a_id2name.get(aid) if isinstance(aid, str) else None
 
     # ---- name -> id (for building gold/eval answers in id-space) ----
     def measurable_id(self, name: str) -> Optional[str]:
-        return self.m_name2id.get(name)
+        return self.m_name2id.get(name) if isinstance(name, str) else None
 
     def actuator_id(self, name: str) -> Optional[str]:
-        return self.a_name2id.get(name)
+        return self.a_name2id.get(name) if isinstance(name, str) else None
 
     def measurable_ids(self) -> List[str]:
         return list(self.m_id2name)
