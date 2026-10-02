@@ -35,6 +35,16 @@ def _worker(code: str, csv_map: Dict[str, str], carried: Dict[str, Any], result_
     import pickle
     import traceback
 
+    # Run inside the episode's data dir (where its experiment CSVs live), not the caller's cwd: model code that writes
+    # files (e.g. df.to_csv("x.csv")) used to land in the driver/SkyRL working directory, i.e. inside the repos
+    # (2026-10-01: stray experiment_*.csv in personal_docs/tooling and pando's harness dir). Files the model writes
+    # still persist across its code turns within one episode (same dir); with no experiment yet, use a temp dir.
+    import tempfile
+    try:
+        _wd = os.path.dirname(next(iter(csv_map.values()))) if csv_map else tempfile.mkdtemp(prefix="rpg_code_")
+        os.chdir(_wd)
+    except Exception:
+        pass
     import numpy as _np
     import pandas as _pd
     try:

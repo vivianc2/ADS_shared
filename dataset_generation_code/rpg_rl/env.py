@@ -78,6 +78,7 @@ CRUCIAL — the reported OUTCOME OF INTEREST is a SURROGATE metric that can be g
 import os as _os
 _COMMIT_NUDGE_TURN = int(_os.environ.get("RPG_COMMIT_NUDGE_TURN", "6"))
 _W_COVER = float(_os.environ.get("RPG_W_COVER", "0.0"))      # coverage bonus weight, see _terminal
+_PASS_BONUS = float(_os.environ.get("RPG_PASS_BONUS", "0.0"))  # +bonus if part_a >= 0.9 (opt-in, 2026-10-02), see _terminal
 
 
 @dataclass
@@ -319,6 +320,12 @@ YOUR MEMORY
         gated = bool(self.reward_cfg.lever_gate or self.reward_cfg.lever_only)
         if _W_COVER > 0 and struct and self._n_interv > 0 and (not gated or rw.get("lever_ok")):
             rw["reward"] = float(rw["reward"]) + _W_COVER * rw["coverage"]
+        # PASS BONUS (2026-10-02, opt-in, default 0 = off): +RPG_PASS_BONUS when the answer passes part A (benefit >= 0.9).
+        # Why: with the gated reward only ~27% of the within-group advantage variance is the pass event (reward replay on
+        # 09-24/10-01 eval groups); +0.5 raises it to ~55%, +1.0 to ~72%, with rank_acc ~1.0
+        # (personal_docs scripts/week5/pass_weighted_replay.py). Same gates as the coverage bonus (answered, intervened).
+        if _PASS_BONUS > 0 and struct and self._n_interv > 0 and float(rw.get("part_a") or 0.0) >= 0.9:
+            rw["reward"] = float(rw["reward"]) + _PASS_BONUS
         rec["answer_struct"] = struct
         rec["reward_breakdown"] = {k: rw.get(k) for k in ("reward", "part_a", "part_b",
                                                           "invalid_id_fraction", "accepted",

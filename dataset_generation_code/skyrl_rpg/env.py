@@ -106,6 +106,16 @@ class RPGSkyEnv(BaseTextEnv):
             if os.environ.get("RPG_ALLOW_STALE_PROMPT", "0") in ("", "0"):
                 raise RuntimeError("RPG dataset prompt != env.reset() for this world (stale parquet; "
                                    "rebuild with skyrl_rpg/rebuild_v9_sets.py)")
+        # SYSTEM PROMPT OVERRIDE (2026-10-01, opt-in, default OFF): RPG_SYSTEM_PROMPT_FILE = path -> replace the
+        # dataset's system message with the file's text (same semantics as driver.py --system-prompt-file, so one
+        # prompt file serves training and eval, e.g. tooling/v9_reeval/prompts/sys_brief.txt). No parquet rebuild.
+        spf = os.environ.get("RPG_SYSTEM_PROMPT_FILE", "")
+        if spf:
+            with open(spf) as f:
+                sys_txt = f.read()
+            prompt = [({**m, "content": sys_txt} if m.get("role") == "system" else m) for m in (prompt or [])]
+            if not any(m.get("role") == "system" for m in prompt):
+                prompt = [{"role": "system", "content": sys_txt}] + prompt
         # PREFILL (2026-10-01, opt-in, default OFF): RPG_PREFILL_K = int | full | rand runs the first k
         # experiments of a scripted screen (rpg_rl/prefill.py) AFTER the drift guard and appends them to the
         # prompt. SkyRL treats everything init() returns as prompt (no loss on the scripted turns); the env's
@@ -113,7 +123,7 @@ class RPGSkyEnv(BaseTextEnv):
         spec = prefill_spec()
         if spec not in ("", "0"):
             import random as _random
-            k = resolve_k(spec, self._rpg, _random.Random(hash((self._seed, os.getpid(), id(self)))))
+            k = resolve_k(spec, self._rpg, _random.Random(self._seed))   # per-world k (reproducible; same k within a GRPO group)
             if k > 0:
                 suffix = "\n/no_think" if os.environ.get("RPG_NO_THINK") else ""
                 msgs, done = run_prefill(self._rpg, k, obs_suffix=suffix)

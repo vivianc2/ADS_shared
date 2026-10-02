@@ -11,7 +11,8 @@ This is the same screen as personal_docs/tooling/box2_eval_harness/driver.py::_p
 gives pure evidence-use episodes (NEXT_WEEK S2); smaller k gives a reverse curriculum (L4).
 
 Knob: RPG_PREFILL_K = "" / "0" (default: off, behaviour unchanged) | "<int>" | "full" | "rand"
-("rand" = k drawn uniformly from 0..full per episode, seeded by world seed + an episode counter).
+("rand" = k drawn uniformly from 0..full, seeded by the WORLD seed only: reproducible, and every sample of one world
+gets the same k, so a GRPO group compares like with like; k varies across worlds).
 The prefilled turns go through env.step(), so the env's budget, turn and intervention counters
 include them, exactly as if the policy had taken those actions.
 """
