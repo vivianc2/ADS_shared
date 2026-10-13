@@ -76,6 +76,8 @@ def main():
                          "for --backend mock. Match to your server's --max-num-seqs.")
     ap.add_argument("--no-resolver-llm", action="store_true",
                     help="disable the LLM resolver fallback (on by default)")
+    ap.add_argument("--system-prompt-file", default=None,
+                    help="replace the agent SYSTEM_PROMPT with this file's text (see run_agent_v6.py)")
     ap.add_argument("--outdir", required=True)
     ap.add_argument("--resume", action="store_true",
                     help="skip worlds that already have a result_<wid>.json in outdir "
@@ -122,6 +124,8 @@ def main():
         # resolution quality is constant across agent models.
         resolver_llm = build_resolver_llm(args.backend, llm, args.no_resolver_llm)
 
+    sysp = Path(args.system_prompt_file).read_text() if args.system_prompt_file else None
+
     def _run_one(path: str) -> Dict[str, Any]:
         """Run (or resume-load) a single world and return its summary row. Safe to
         call from worker threads: run_world keeps all state local, the LLM/resolver
@@ -137,13 +141,20 @@ def main():
             except Exception as e:
                 logger.warning("resume: could not read %s (%s); re-running", result_file, e)
         data_dir = str(outdir / f"{wid}_data")
+        if (world.get("ground_truth") or {}).get("_world_version") == "v10":
+            # the code tool runs inside this dir (os.getcwd() is visible to agent code); the world id names the
+            # archetype, so v10 data dirs get a neutral name (the result JSON records which one)
+            import hashlib
+            data_dir = str(outdir / f"data_{hashlib.sha1(wid.encode()).hexdigest()[:10]}")
         sim = SimV6(world, resolver_llm=resolver_llm, data_dir=data_dir, precomputed=pre)
         logger.info("=== %s (gold util %.1f) ===", wid, sim.gold["expected_utility"])
         t0 = time.time()
-        res = run_world(sim, llm, args.max_turns, args.budget, args.verbose)
+        res = run_world(sim, llm, args.max_turns, args.budget, args.verbose, system_prompt=sysp)
         res["wall_seconds"] = round(time.time() - t0, 1)
         res["model"] = args.model
         res["world_file"] = path
+        res["data_dir"] = data_dir
+        res["system_prompt_file"] = args.system_prompt_file
         with open(result_file, "w", encoding="utf-8") as f:
             json.dump(res, f, indent=2, default=str)
         return summarize_result(res, world)

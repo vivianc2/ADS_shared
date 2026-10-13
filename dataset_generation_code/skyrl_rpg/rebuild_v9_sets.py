@@ -30,7 +30,7 @@ for _p in (os.path.join(_BASE, os.environ.get("RPG_PROTO", "rpg_v9")), os.path.j
 
 import pyarrow as pa                                  # noqa: E402
 import pyarrow.parquet as pq                          # noqa: E402
-from sampler import sample_world, ARCHETYPES          # noqa: E402
+from sampler import sample_world, ARCHETYPES, _resolve_version, world_kwargs, version_extra_info  # noqa: E402
 from generate_v7 import audit                         # noqa: E402
 from splits import HELDOUT_SKINS, train_skins         # noqa: E402
 from env import RPGEnv, SYSTEM_PROMPT                 # noqa: E402
@@ -38,8 +38,8 @@ from env import RPGEnv, SYSTEM_PROMPT                 # noqa: E402
 SYSTEM_MSG = {"role": "system", "content": SYSTEM_PROMPT}
 
 
-def _first_obs(seed, skin, arch, max_turns=32, budget=15):
-    w = sample_world(int(seed), skin=skin, archetype=arch)
+def _first_obs(seed, skin, arch, max_turns=32, budget=15, info=None):
+    w = sample_world(int(seed), skin=skin, archetype=arch, **world_kwargs(info))
     w["ground_truth"]["_seed"] = int(seed)
     res = audit(w)
     env = RPGEnv(world=w, gold=res["gold"], battery=res["battery"], catalog_seed=int(seed),
@@ -49,7 +49,7 @@ def _first_obs(seed, skin, arch, max_turns=32, budget=15):
 
 def _row_job(row):
     e = row["extra_info"]
-    obs, ok = _first_obs(e["seed"], e["skin"], e["archetype"], e.get("max_turns", 32), e.get("budget", 15))
+    obs, ok = _first_obs(e["seed"], e["skin"], e["archetype"], e.get("max_turns", 32), e.get("budget", 15), e)
     return obs, ok
 
 
@@ -83,6 +83,11 @@ def rebuild(src, dst, workers, force=False):
     Refuses rows whose SITUATION text differs from the generator's (story-ablation sets rewrite it on purpose;
     rebuilding would erase the ablation) unless force=True."""
     rows = _read(src)
+    # rows without a version key are rebuilt at the env's version (RPG_WORLD_VERSION / RPG_V91_VARY_VALUES):
+    # record it in the row, so the env / driver rebuild the same world (the 10-09 v9.1 sets lacked this)
+    for r in rows:
+        if not world_kwargs(r["extra_info"]):
+            r["extra_info"] = {**r["extra_info"], **version_extra_info(_resolve_version(None, None))}
     with Pool(workers) as pool:
         out = pool.map(_row_job, rows, chunksize=2)
     n_changed = n_fail = n_story = 0
@@ -106,8 +111,9 @@ def rebuild(src, dst, workers, force=False):
 
 def _bal_job(args):
     seed, skin, arch, label = args
+    ver = _resolve_version(None, None)  # env RPG_WORLD_VERSION / RPG_V91_VARY_VALUES; recorded in extra_info below
     try:
-        w = sample_world(seed, skin=skin, archetype=arch)
+        w = sample_world(seed, skin=skin, archetype=arch, version=ver)
         res = audit(w)
     except Exception:  # noqa: BLE001
         return None
@@ -115,10 +121,12 @@ def _bal_job(args):
         return None
     env = RPGEnv(world=w, gold=res["gold"], battery=res["battery"], catalog_seed=seed,
                  max_turns=32, budget=15)
+    from generate_v7 import oracle_json
+    orc = {"oracle_json": oracle_json(w, res)} if ver == "v10" else {}
     return {"data_source": "rpg_v9", "prompt": [SYSTEM_MSG, {"role": "user", "content": env.reset()}],
             "env_class": "rpg", "reward_spec": {"method": "rule", "ground_truth": ""},
             "extra_info": {"seed": int(seed), "skin": skin, "archetype": arch, "max_turns": 32,
-                           "budget": 15, "split": label}}
+                           "budget": 15, "split": label, **version_extra_info(ver), **orc}}
 
 
 def balanced(dst, per_arch, seed0, workers, skins="heldout", label="heldout_balanced"):
@@ -126,13 +134,18 @@ def balanced(dst, per_arch, seed0, workers, skins="heldout", label="heldout_bala
     cells = [(a, s) for a in ARCHETYPES for s in skins]
     attempts = int(per_arch * len(ARCHETYPES) / 0.3) + 64     # first per_arch per archetype in seed order: more attempts only extends the tail
     jobs = [(seed0 + i, cells[i % len(cells)][1], cells[i % len(cells)][0], label) for i in range(attempts)]
-    with Pool(workers) as pool:
-        res = pool.map(_bal_job, jobs, chunksize=2)
     keep, cnt = [], Counter()
-    for r in res:                              # first per_arch accepted per archetype, seed order
-        if r and cnt[r["extra_info"]["archetype"]] < per_arch:
-            keep.append(r)
-            cnt[r["extra_info"]["archetype"]] += 1
+    # imap keeps seed order, so stopping once every archetype is full selects exactly the rows a full map would
+    # (first per_arch accepted per archetype in seed order) -- without auditing the whole attempt tail (v10 audits
+    # cost ~20 s per world; v10 acceptance is ~0.9, not ~0.3).
+    with Pool(workers) as pool:
+        for r in pool.imap(_bal_job, jobs, chunksize=2):
+            if r and cnt[r["extra_info"]["archetype"]] < per_arch:
+                keep.append(r)
+                cnt[r["extra_info"]["archetype"]] += 1
+            if all(cnt[a] >= per_arch for a in ARCHETYPES):
+                pool.terminate()
+                break
     short = {a: per_arch - cnt[a] for a in ARCHETYPES if cnt[a] < per_arch}
     assert not short, f"not enough accepted worlds: {short}; raise attempts"
     os.makedirs(os.path.dirname(os.path.abspath(dst)), exist_ok=True)

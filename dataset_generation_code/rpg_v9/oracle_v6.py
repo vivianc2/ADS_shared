@@ -175,6 +175,109 @@ def optimal_policy(scm: WorldSCM, sp: Dict[str, Any], *, n=15000, seed=12345,
     return best
 
 
+def is_v10(world: Dict[str, Any]) -> bool:
+    return (world.get("ground_truth") or {}).get("_world_version") == "v10"
+
+
+def _cont_grid(act, k):
+    lo, hi = act["range"]
+    return [round(float(x), 2) for x in np.linspace(lo, hi, k)]
+
+
+def optimal_intervention_v10(scm: WorldSCM, *, n=15000, seed=12345, eps=1.0, margin=0.3,
+                             screen_points=11, combo_points=5, max_joint=3, top_refine=5) -> Dict[str, Any]:
+    """Gold search for v10 worlds (22-28 controls, many with partial or harmful effects, interior optima).
+    Computed from the equations only -- it never reads the sampler's declared roles.
+      1. screen every control on an `screen_points` grid (finds interior setpoints);
+      2. candidates = controls whose best single setting beats baseline by > eps, plus synergy rescue: an inactive
+         control that, paired with a candidate (both at extremes), beats both singles by > eps. (O(n*k), not
+         O(n^2): an AND pair whose members are BOTH inert alone is not searched -- v10 synergy uses the soft gate,
+         whose members are active alone; checked by v10_audit via the gold reaching the designed optimum.);
+      3. every subset of <= max_joint candidates on a `combo_points` grid; the best `top_refine` subsets get a
+         golden-section refinement of each continuous control;
+      4. coordinate ascent from the best: add a candidate, drop a member, or re-optimise one member, while the
+         utility improves by > margin (catches golds with more than max_joint controls).
+    """
+    base = expected_utility(scm, {}, n=n, seed=seed)
+    acts = [a for a, act in scm.actuators.items() if act.get("op") != "mask"]
+    best_single, best_val, worst_single = {}, {}, {}
+    for a in acts:
+        act = scm.actuators[a]
+        grid = _cont_grid(act, screen_points) if act.get("dtype") == "continuous" else act.get("values", ["off", "on"])
+        us = [(expected_utility(scm, {a: v}, n=n, seed=seed), v) for v in grid]
+        u, v = max(us, key=lambda t: t[0])
+        best_single[a], best_val[a] = u, v
+        worst_single[a] = min(t[0] for t in us)
+    marg = {a: best_single[a] - base for a in acts}
+    cand = [a for a in acts if marg[a] > eps]
+    def _ext(a):
+        act = scm.actuators[a]
+        return act["range"][1] if act.get("dtype") == "continuous" else act.get("values", ["off", "on"])[-1]
+    for b in [a for a in acts if a not in cand]:
+        for a in list(cand):
+            u = expected_utility(scm, {a: best_val[a], b: _ext(b)}, n=n, seed=seed)
+            if (u - best_single[a]) > eps and (u - base) > eps and (u - best_single[b]) > eps:
+                cand.append(b)
+                break
+
+    def refine(iv):
+        iv = dict(iv)
+        for a in list(iv):
+            act = scm.actuators[a]
+            if act.get("dtype") == "continuous":
+                lo, hi = act["range"]
+                x, _ = _golden_section(scm, a, {k: v for k, v in iv.items() if k != a}, lo, hi, n=n, seed=seed)
+                iv[a] = round(float(x), 2)
+        return iv, expected_utility(scm, iv, n=n, seed=seed)
+
+    scored = []
+    for r in range(1, min(max_joint, len(cand)) + 1):
+        for combo in itertools.combinations(cand, r):
+            grids = [(_cont_grid(scm.actuators[a], combo_points) if scm.actuators[a].get("dtype") == "continuous"
+                      else scm.actuators[a].get("values", ["off", "on"])) for a in combo]
+            bu, bp = -1e18, None
+            for point in itertools.product(*grids):
+                u = expected_utility(scm, dict(zip(combo, point)), n=n, seed=seed)
+                if u > bu:
+                    bu, bp = u, point
+            scored.append((bu, dict(zip(combo, bp))))
+    scored.sort(key=lambda t: -t[0])
+    best_iv, best_u = {}, base
+    for _, iv in scored[:top_refine]:
+        riv, ru = refine(iv)
+        if ru > best_u:
+            best_iv, best_u = riv, ru
+    # coordinate ascent (add / drop / re-optimise), bounded
+    for _ in range(4):
+        improved = False
+        for a in cand:
+            if a in best_iv:
+                trial = {k: v for k, v in best_iv.items() if k != a}
+                tu = expected_utility(scm, trial, n=n, seed=seed)
+            else:
+                trial, tu = refine(dict(best_iv, **{a: best_val[a]}))
+            if tu > best_u + margin:
+                best_iv, best_u, improved = trial, tu, True
+        if not improved:
+            break
+    best_iv, best_u = refine(best_iv) if best_iv else (best_iv, best_u)
+    # parsimony: drop members whose removal costs less than max(margin, 1% of the benefit). Without it a
+    # near-tie (e.g. a symptomatic lever adding +0.01 after the root is fixed) puts an irrelevant control in gold.
+    tol = max(margin, 0.01 * max(0.0, best_u - base))
+    pruned = True
+    while pruned and len(best_iv) > 1:
+        pruned = False
+        for a in sorted(best_iv, key=lambda k: best_single[k] if k in best_single else 0.0):
+            trial, tu = refine({k: v for k, v in best_iv.items() if k != a})
+            if tu >= best_u - tol:
+                best_iv, best_u, pruned = trial, tu, True
+                break
+    return {"intervention": best_iv, "expected_utility": best_u, "baseline_utility": base,
+            "active_actuators": cand, "single_utility": {a: round(best_single[a] - base, 3) for a in acts},
+            "single_range": {a: [round(worst_single[a] - base, 3), round(best_single[a] - base, 3)] for a in acts},
+            "single_best_value": best_val}
+
+
 def optimal_gold(world: Dict[str, Any], *, n=15000, seed=12345) -> Dict[str, Any]:
     """World-aware gold. For a hidden-subtype world, the gold is the best
     conditional policy (single doses cannot express it); otherwise the standard
@@ -182,7 +285,8 @@ def optimal_gold(world: Dict[str, Any], *, n=15000, seed=12345) -> Dict[str, Any
     ``intervention`` (the actuator dict the engine can execute), ``expected_utility``,
     ``baseline_utility``, ``active_actuators``, and, for policy worlds, ``policy``."""
     scm: WorldSCM = world["scm"]
-    gold = optimal_intervention(scm, n=n, seed=seed)
+    gold = (optimal_intervention_v10(scm, n=n, seed=seed) if is_v10(world)
+            else optimal_intervention(scm, n=n, seed=seed))
     sp = world["ground_truth"].get("subtype_policy")
     if not sp:
         return gold
@@ -203,6 +307,8 @@ def optimal_gold(world: Dict[str, Any], *, n=15000, seed=12345) -> Dict[str, Any
                 "expected_utility": pol["expected_utility"],
                 "baseline_utility": gold["baseline_utility"],
                 "active_actuators": gold["active_actuators"],
+                # v10 screening diagnostics (absent for v9 golds, so v9 records are unchanged)
+                **{k: gold[k] for k in ("single_utility", "single_range", "single_best_value") if k in gold},
                 "is_conditional_policy": True}
     return gold
 
@@ -244,6 +350,18 @@ def counterfactual_battery(world: Dict[str, Any], *, n=15000, seed=777) -> Dict[
             act_signs[aid] = "0"  # no true-utility effect
             continue
         hi = act["range"][1] if act.get("dtype") == "continuous" else act.get("values", ["off", "on"])[-1]
+        if is_v10(world) and act.get("dtype", "continuous") == "continuous":
+            # v10 (2026-10-12): the effect at the MAXIMUM is the wrong question for setpoint / windowed / turn-down
+            # controls (oxygen at its 30 setpoint helps, at 100 it hurts: v9 scored "-" and marked the agent's "+"
+            # wrong). Sign = "+" if some setting improves the true goal, "-" if moving it can only worsen it,
+            # "0" if no setting moves it (11-point grid over the range, eps as before).
+            lo_, hi_ = act["range"]
+            us = [expected_utility(scm, {aid: lo_ + k * (hi_ - lo_) / 10.0}, n=n, seed=seed) - base for k in range(11)]
+            act_signs[aid] = "+" if max(us) > eps else ("-" if min(us) < -eps else "0")
+            if aid == ((gt.get("subtype_policy") or {}).get("treatment_actuator")):
+                # its uniform doses net ~0, but the conditional policy (a setting per subgroup) improves the goal
+                act_signs[aid] = "+"
+            continue
         u = expected_utility(scm, {aid: hi}, n=n, seed=seed)
         act_signs[aid] = _sign(u - base, eps)
 
@@ -293,7 +411,13 @@ def counterfactual_battery(world: Dict[str, Any], *, n=15000, seed=777) -> Dict[
     lenient = {nm for nm in measurables
                if nm in downstream and nm not in set(gt.get("confounded_decoys", []))}
     lenient |= set(valid_proxies) | {gt["true_mechanism_proxy"]}
+    extra = {}
+    if is_v10(world):
+        # v10: part-B sign items cover the PRIMARY levers (plus whatever the agent opines on), not every control
+        # with a nonzero effect -- with 22-28 controls and a 15-experiment budget an agent cannot test them all.
+        extra["sign_scope"] = sorted(a for a, r in gt["_v10_roles"].items() if r == "primary")
     return {
+        **extra,
         "true_mechanism_proxy": gt["true_mechanism_proxy"],
         "valid_mechanism_proxies": sorted(set(valid_proxies) | {gt["true_mechanism_proxy"]}),
         "lenient_mechanism_proxies": sorted(lenient),
@@ -356,6 +480,8 @@ def _score_battery(battery, answer, recommended=None, strict=True):
     # (pred.get(aid) is None != gold), while inert distractors are only scored if the agent opines
     # on one (false-positive check, via set(pred)). Gold answers sign all actives → still 1.0.
     active = {aid for aid, s in gold_signs.items() if s in ("+", "-")}
+    if "sign_scope" in battery:          # v10: primary levers only (see counterfactual_battery)
+        active &= set(battery["sign_scope"])
     scored = {required} | active | set(pred)
     for aid in scored:
         gold = gold_signs.get(aid, "0")
@@ -463,8 +589,14 @@ def distractor_inertness_audit(world, gold, *, n=20000, seed=555, eps=1.0) -> Di
     # on the surrogate as well as on utility(goal).
     base_S = float(np.mean(scm.sample(n, seed=seed)[scm.outcome]))
     bad = []
+    v10_roles = gt.get("_v10_roles") if gt.get("_world_version") == "v10" else None
     for aid, act in scm.actuators.items():
-        if aid in active or aid == tgt or aid == trap:
+        if v10_roles is not None:
+            # v10: partial / harmful / primary controls are DECLARED non-inert (checked by v10_audit); every
+            # control declared inert or decoy must be inert -- including any the search marked active.
+            if v10_roles.get(aid) not in ("inert", "decoy"):
+                continue
+        elif aid in active or aid == tgt or aid == trap:
             continue
         hi = act["range"][1] if act.get("dtype") == "continuous" else act.get("values", ["off", "on"])[-1]
         marg = expected_utility(scm, {aid: hi}, n=n, seed=seed) - base
@@ -610,6 +742,68 @@ def counterintuitiveness_audit(world, gold, *, n=25000, seed=606, help_margin=3.
     return {"passed": passed, "baseline_utility": round(base, 2), "gold_utility": round(gu, 2),
             "naive_results": results,
             "note": "obvious first move must not meaningfully help"}
+
+
+def v10_audit(world, gold, *, n=20000, seed=4040, eps=1.0) -> Dict[str, Any]:
+    """Checks that a v10 world matches its design (personal_docs plans/V10_WORLDGEN_PLAN_2026-10-12.md §3.4):
+      a  >= 22 controls (budget 15)
+      b  the best combination of symptomatic levers alone recovers < 0.80 of the gold benefit
+      c  >= 2 non-gold controls whose best single setting moves utility by >= 10% of the gold benefit
+      d  every declared harm lever lowers utility by >= eps at its max
+      e  visible windows: in worlds with an over-treatment side effect, the MEASURED outcome at the fix's max is
+         below the measured outcome at the gold dose by >= 3 SE of a 400-unit mean difference
+      f  both control types (level = target measured, dose = target latent) contain a non-inert role
+      g  the gold uses only primary controls
+      h  no control label starts with "set " (v9's label tell)"""
+    scm: WorldSCM = world["scm"]
+    gt = world["ground_truth"]
+    roles = gt["_v10_roles"]
+    base = gold["baseline_utility"]
+    gb = gold["expected_utility"] - base
+    rng_ = gold.get("single_range") or {}
+    res = {}
+    res["a_controls"] = len(scm.actuators) >= 22
+    sym = [a for a, r in roles.items() if r == "symptomatic"]
+    if sym:
+        hi = {a: scm.actuators[a]["range"][1] for a in sym}
+        frac = (expected_utility(scm, hi, n=n, seed=seed) - base) / gb if gb > 1e-6 else 0.0
+        res["b_symptomatic_frac"] = round(frac, 3)
+        res["b_symptomatic"] = frac < 0.80
+    else:
+        res["b_symptomatic"] = True
+    gold_keys = set(k for k in gold["intervention"] if k in scm.actuators)
+    # largest single effect in EITHER direction over the screening grid (a harm lever's best setting is harmless)
+    graded = [a for a in scm.actuators if a not in gold_keys
+              and max(abs(x) for x in rng_.get(a, [0.0, 0.0])) >= 0.10 * gb]
+    res["c_graded_n"] = len(graded)
+    res["c_graded"] = len(graded) >= 2
+    harm_ok = True
+    for a, r in roles.items():
+        if r == "harm":
+            d = expected_utility(scm, {a: scm.actuators[a]["range"][1]}, n=n, seed=seed) - base
+            harm_ok = harm_ok and d <= -eps
+    res["d_harm"] = harm_ok
+    win_ok = True
+    for a, act in scm.actuators.items():
+        se = act.get("side_effect")
+        if se and a in gold_keys and isinstance(gold["intervention"].get(a), (int, float)):
+            iv_g = dict(gold["intervention"])
+            iv_h = dict(iv_g); iv_h[a] = act["range"][1]
+            if abs(iv_h[a] - iv_g[a]) < 5:
+                continue
+            o = lambda iv: scm.measure(scm.sample(n, intervention=iv, seed=seed + 1), [scm.outcome],
+                                       seed=seed + 2, intervention=iv)[scm.outcome]
+            og, oh = o(iv_g), o(iv_h)
+            se_400 = float(np.std(og)) * np.sqrt(2.0 / 400.0)
+            win_ok = win_ok and (float(og.mean()) - float(oh.mean())) >= 3.0 * se_400
+    res["e_window_visible"] = win_ok
+    lvl = lambda a: scm.variables.get(scm.actuators[a]["target"], {}).get("measurable", False)
+    res["f_types"] = (any(lvl(a) and roles[a] != "inert" for a in roles)
+                      and any((not lvl(a)) and roles[a] != "inert" for a in roles))
+    res["g_gold_primary"] = all(roles.get(a) == "primary" for a in gold_keys)
+    res["h_labels"] = not any((act.get("aliases") or [""])[0].lower().startswith("set ") for act in scm.actuators.values())
+    checks = [k for k in res if k[0] in "abcdefgh" and isinstance(res[k], bool)]
+    return {"passed": all(res[k] for k in checks), **res}
 
 
 def calibrate(world, *, n=20000, seed=333, proxy_band=(0.35, 0.75), decoy_min_corr=0.32) -> Dict[str, Any]:

@@ -61,9 +61,11 @@ class Resolution:
 
 
 class Resolver:
-    def __init__(self, scm: WorldSCM, llm: Any = None):
+    def __init__(self, scm: WorldSCM, llm: Any = None, display: bool = False):
         self.scm = scm
         self.llm = llm
+        # display=True: values are in each control's physical units (act["units"]: lo..hi), not the internal 0-100
+        self.display = display
         # Precompute alias -> id maps for measurable variables and actuators.
         self.var_aliases: Dict[str, List[str]] = {}
         for name, spec in scm.variables.items():
@@ -386,6 +388,10 @@ class Resolver:
                           reason="That equipment/additive is not present on this line.",
                           method="alias")
 
+    def _range(self, act: Dict[str, Any]):
+        u = act.get("units") if self.display else None
+        return [u["lo"], u["hi"]] if u else act.get("range", [0, 100])
+
     def _finalize_intervene(self, aid: str, value: Any, request: str, method: str) -> Resolution:
         act = self.scm.actuators[aid]
         v = self._coerce_value(act, value, request)
@@ -393,6 +399,9 @@ class Resolver:
         if v is None:
             # default if the agent didn't give a level
             v = act.get("default")
+            u = act.get("units") if self.display else None
+            if u is not None and isinstance(v, (int, float)):
+                v = round(u["lo"] + float(v) / 100.0 * (u["hi"] - u["lo"]), 4)
         return Resolution("intervene", True,
                           f"apply '{aid}' ({desc}) at {v}", target_id=aid, value=v, method=method)
 
@@ -411,7 +420,7 @@ class Resolver:
         def _from_qualitative(text: str) -> Any:
             t = _norm(text)
             if cont:
-                lo, hi = act.get("range", [0, 100])
+                lo, hi = self._range(act)
                 for word, frac in self._QUAL_FRAC.items():
                     if self._phrase_in(word, t):
                         return round(lo + frac * (hi - lo), 2)
@@ -432,7 +441,7 @@ class Resolver:
                 # numeric or numeric-string -> clamp to range
                 try:
                     fv = float(value)
-                    lo, hi = act.get("range", [0, 100])
+                    lo, hi = self._range(act)
                     return round(float(max(lo, min(hi, fv))), 2)
                 except (TypeError, ValueError):
                     q = _from_qualitative(str(value))  # e.g. "high"
@@ -451,7 +460,7 @@ class Resolver:
         if cont:
             m = re.search(r"(-?\d+(?:\.\d+)?)", request)
             if m:
-                lo, hi = act.get("range", [0, 100])
+                lo, hi = self._range(act)
                 return round(float(max(lo, min(hi, float(m.group(1))))), 2)
         return _from_qualitative(request)
 

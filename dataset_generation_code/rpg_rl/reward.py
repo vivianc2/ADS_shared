@@ -204,7 +204,7 @@ def _to_canonical_answer(struct: Dict[str, Any], cat: Catalog):
         nm = a(item.get("actuator"))
         val = _num(item.get("value"))
         if nm is not None and val is not None:
-            rec[nm] = val
+            rec[nm] = cat.value_to_internal(item.get("actuator"), val)     # v10: display units -> internal
 
     answer: Dict[str, Any] = {"recommended_intervention": rec, "structured": {}}
 
@@ -214,11 +214,12 @@ def _to_canonical_answer(struct: Dict[str, Any], cat: Catalog):
         tname = a(pol.get("treatment"))
         sname = m(pol.get("stratifier"))
         if tname is not None and sname is not None:
+            tid, sid = pol.get("treatment"), pol.get("stratifier")
             answer["recommended_policy"] = {
                 "treatment": tname, "stratifier": sname,
-                "threshold": _num(pol.get("threshold"), 50.0),
-                "dose_if_ge": _num(pol.get("dose_if_ge"), 0.0),
-                "dose_if_lt": _num(pol.get("dose_if_lt"), 0.0)}
+                "threshold": cat.measure_to_internal(sid, _num(pol.get("threshold"), 50.0)),
+                "dose_if_ge": cat.value_to_internal(tid, _num(pol.get("dose_if_ge"), 0.0)),
+                "dose_if_lt": cat.value_to_internal(tid, _num(pol.get("dose_if_lt"), 0.0))}
 
     st: Dict[str, Any] = {}
     if struct.get("proxy") is not None:
@@ -266,6 +267,11 @@ def lever_sets(world: Dict[str, Any], gold: Dict[str, Any]):
     sp = gt.get("subtype_policy")
     if sp and gold.get("is_conditional_policy") and sp.get("treatment_actuator"):
         must.add(sp["treatment_actuator"])
+    if gt.get("_world_version") == "v10":
+        # v10 worlds also contain symptomatic-relief and small-harm controls, which move the goal but are not
+        # the cause; only the declared PRIMARY levers count as identifying the cause.
+        roles = gt.get("_v10_roles") or {}
+        causal = {a for a in causal if roles.get(a) == "primary"}
     if scm_acts:                       # never require a lever the world cannot execute
         causal &= scm_acts
         must &= scm_acts

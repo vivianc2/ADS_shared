@@ -93,6 +93,9 @@ class RPGEnv:
     catalog_seed: int = 0
     reward_cfg: RewardConfig = field(default_factory=RewardConfig)
     data_dir: Optional[str] = None
+    # v10 units: the agent sees and gives values in physical units (catalog ranges, readings, answers). False keeps
+    # the internal 0-100 scale -- for scripted reference policies only. No effect on worlds without units (v9).
+    display_units: bool = True
 
     # runtime state
     scm: WorldSCM = field(init=False)
@@ -114,8 +117,12 @@ class RPGEnv:
         # reward. (It may still be constructed inside SimV6 but is not invoked here.)
         self.sim = SimV6(self.world, resolver_llm=None,
                          precomputed={"gold": self.gold, "battery": self.battery},
-                         data_dir=self.data_dir)
-        self.cat = build_catalog(self.world, self.scm, seed=self.catalog_seed)
+                         data_dir=self.data_dir, display_units=self.display_units)
+        self.cat = build_catalog(self.world, self.scm, seed=self.catalog_seed, display_units=self.display_units)
+        if (self.world.get("ground_truth") or {}).get("_world_version") == "v10":
+            # code-tool CSVs in id space (v9 unchanged for reproducibility; its CSVs carry canonical names)
+            self.sim.csv_columns = {**self.cat.m_name2id,
+                                    **{f"do_{k}": f"do_{v}" for k, v in self.cat.a_name2id.items()}}
 
     # ---- catalog text shown every turn ----
     def _catalog_block(self) -> str:
@@ -125,6 +132,10 @@ class RPGEnv:
             meta = self.cat.a_meta[aid]
             rng = meta.get("range")
             span = f" range {rng}" if rng else (f" values {meta.get('values')}" if meta.get("values") else "")
+            if meta.get("units"):
+                from sampler import fmt_num
+                u = meta["units"]
+                span = f" range {fmt_num(u['lo'])} to {fmt_num(u['hi'])} {u['unit']}"
             acts.append(f"  {aid}: {self.cat.a_desc[aid]}{span}")
         return ("MEASURABLE SIGNALS (ids):\n" + ms +
                 "\n\nCONTROLS (ids):\n" + "\n".join(acts))

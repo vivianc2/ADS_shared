@@ -56,6 +56,11 @@ class BedrockLLM:
     def last_finish_reason(self) -> Optional[str]:
         return getattr(self._tls, "finish_reason", None)
 
+    @property
+    def last_usage(self) -> Optional[Dict[str, Any]]:
+        """Bedrock token usage of this thread's last call ({inputTokens, outputTokens, ...})."""
+        return getattr(self._tls, "usage", None)
+
     def __post_init__(self):
         region = self.region_name or os.environ.get("AWS_DEFAULT_REGION", "us-west-2")
         # Most local runs authenticate via an AWS profile, env credentials, or
@@ -134,7 +139,7 @@ class BedrockLLM:
         inference_config: Dict[str, Any] = {
             "maxTokens": max_new_tokens or self.max_new_tokens,
         }
-        if self._supports_temperature():
+        if self._supports_temperature() and self.temperature is not None:   # None = the model's default
             inference_config["temperature"] = self.temperature
 
         kwargs: Dict[str, Any] = {
@@ -146,13 +151,22 @@ class BedrockLLM:
             kwargs["system"] = system_blocks
 
         response = self.client.converse(**kwargs)
-        self._tls.finish_reason = "length" if response.get("stopReason") == "max_tokens" else "stop"
-        return response["output"]["message"]["content"][0]["text"].strip()
+        stop = response.get("stopReason")
+        self._tls.finish_reason = "length" if stop == "max_tokens" else "stop"
+        self._tls.usage = response.get("usage")
+        # Newer models (Opus 5.x) put a reasoningContent block before the text block, so content[0] is not the
+        # answer: join every text block. A filtered reply has no text -> raise with the stop reason.
+        blocks = response["output"]["message"].get("content", []) or []
+        text = "\n".join(b["text"] for b in blocks if "text" in b).strip()
+        if not text:
+            raise RuntimeError(f"no text in Bedrock reply (stopReason={stop})")
+        return text
 
     def _supports_temperature(self) -> bool:
         """Some current Bedrock inference profiles reject temperature."""
         model_id = self.model_id.lower()
         # Opus 4.7+ inference profiles reject an explicit temperature; omit it
         # for the whole 4.x Opus line to stay safe as new profiles ship.
-        blocked = ("claude-opus-4-7", "claude-opus-4-8", "claude-opus-4-9")
+        # Opus 5.x rejects it too ("`temperature` is deprecated for this model", 2026-10-12).
+        blocked = ("claude-opus-4-7", "claude-opus-4-8", "claude-opus-4-9", "claude-opus-5")
         return not any(b in model_id for b in blocked)

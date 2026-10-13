@@ -36,17 +36,20 @@ for _p in (os.path.join(_BASE, "rpg_rl"), os.path.join(_BASE, os.environ.get("RP
 from skyrl_gym.envs.base_text_env import BaseTextEnv, BaseTextEnvStepOutput  # noqa: E402
 
 from env import RPGEnv, SYSTEM_PROMPT       # rpg_rl/env.py  (RL environment)   # noqa: E402
-from sampler import sample_world            # rpg_v9/sampler.py                  # noqa: E402
-from generate_v7 import audit               # rpg_v9/generate_v7.py              # noqa: E402
+from sampler import sample_world, world_kwargs   # rpg_v9/sampler.py            # noqa: E402
+from generate_v7 import audit, oracle_from_json   # rpg_v9/generate_v7.py        # noqa: E402
 import json, re                                                                     # noqa: E402
 from reward import compute_reward, RewardConfig  # rpg_rl/reward.py                  # noqa: E402
 from prefill import prefill as run_prefill, resolve_k, spec_from_env as prefill_spec  # rpg_rl/prefill.py  # noqa: E402
 _BELIEF_RE = re.compile(r"<belief>\s*(\{.*?\})\s*</belief>", re.DOTALL)  # BG2 per-turn belief graph
 
 
+_ORACLE_CACHE: Dict[Any, Dict[str, Any]] = {}
+
+
 def build_rpg_env(seed: int, skin: str, archetype: str,
                   max_turns: int = 32, budget: int = 15,
-                  data_dir: str = None) -> RPGEnv:
+                  data_dir: str = None, vary_values=None, version=None, oracle_json=None) -> RPGEnv:
     """Deterministically rebuild one world and wrap it in a fresh RPGEnv (gold/battery
     precomputed by the audit, so no per-episode oracle recompute).
 
@@ -55,9 +58,27 @@ def build_rpg_env(seed: int, skin: str, archetype: str,
     variables never exist) — that was the training-path bug where the prompt advertised a
     dead tool. G=8 rollouts of the same seed run concurrently, so the dir must be unique
     per rollout instance (not keyed by seed) to avoid CSV filename collisions."""
-    world = sample_world(int(seed), skin=skin, archetype=archetype)
+    # vary_values (v9.1 value randomisation): from the row's extra_info when present; None ->
+    # sampler falls back to env RPG_V91_VARY_VALUES. Carried explicitly because the first
+    # observation is identical on/off, so the drift guard below cannot catch a mismatch.
+    world = sample_world(int(seed), skin=skin, archetype=archetype, vary_values=vary_values, version=version)
     world["ground_truth"]["_seed"] = int(seed)
-    res = audit(world)                       # returns gold + battery regardless of ok
+    # The oracle is pure in (seed, skin, archetype, version) and costs ~1 s (v9) to ~30 s (v10) per world, and
+    # GRPO resets each world G times: cache gold + battery per process. calibrate() (inside audit) also mutates
+    # the SCM (proxy noise, confounder loading), so a cache hit must replay it on the fresh world.
+    key = (int(seed), skin, archetype, world["ground_truth"].get("_world_version") or
+           ("v9.1" if "_v91_values" in world["ground_truth"] else "v9"))
+    hit = _ORACLE_CACHE.get(key)
+    if hit is None and oracle_json:          # precomputed at dataset build (v10 rows)
+        res = oracle_from_json(world, oracle_json)
+        _ORACLE_CACHE[key] = res
+    elif hit is None:
+        res = audit(world)                   # returns gold + battery regardless of ok
+        _ORACLE_CACHE[key] = res
+    else:
+        from oracle_v6 import calibrate
+        calibrate(world)
+        res = hit
     return RPGEnv(world=world, gold=res["gold"], battery=res["battery"],
                   catalog_seed=int(seed), max_turns=int(max_turns), budget=int(budget),
                   data_dir=data_dir)
@@ -81,7 +102,7 @@ class RPGSkyEnv(BaseTextEnv):
         self._rpg = build_rpg_env(
             seed=info["seed"], skin=info["skin"], archetype=info["archetype"],
             max_turns=int(info.get("max_turns", 32)), budget=int(info.get("budget", 15)),
-            data_dir=self._data_dir)
+            data_dir=self._data_dir, oracle_json=info.get("oracle_json"), **world_kwargs(info))
         self.max_turns = self._rpg.max_turns
         # reset now so the very first step advances the correct world state; the first
         # observation is identical to the one baked into the dataset prompt (determinism).

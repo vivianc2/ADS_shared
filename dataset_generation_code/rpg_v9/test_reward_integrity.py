@@ -47,7 +47,8 @@ def _build(seed: int, skin: str, archetype: str):
     res = audit(w)
     if not res["ok"]:
         return None
-    sim = SimV6(w, resolver_llm=None, precomputed={"gold": res["gold"], "battery": res["battery"]})
+    sim = SimV6(w, resolver_llm=None, precomputed={"gold": res["gold"], "battery": res["battery"]},
+                display_units=False)   # answers below are on the internal scale (v10 units: test_units_v10.py)
     return w, sim, res["gold"], res["battery"]
 
 
@@ -203,7 +204,9 @@ def run():
         proxy_alias = _alias(scm, proxy)
         verbose_proxy = f"{proxy_alias} (the key downstream marker of the true mechanism)"
         signs = {}
-        for aid in gold.get("active_actuators", []):
+        # every scored lever: the screened actives plus v10's sign scope (which adds e.g. a subtype treatment whose
+        # population-average screen is ~0 but whose conditional policy is a real "+" lever)
+        for aid in list(gold.get("active_actuators", [])) + list(battery.get("sign_scope", [])):
             s = battery["actuator_sign_predictions"].get(aid, "0")
             if s in ("+", "-"):
                 signs[_alias(scm, aid)] = s

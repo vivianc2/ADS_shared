@@ -47,7 +47,9 @@ class Catalog:
     a_id2name: Dict[str, str]
     m_desc: Dict[str, str]           # measurable id -> neutral description
     a_desc: Dict[str, str]           # actuator id   -> neutral description
-    a_meta: Dict[str, Dict[str, Any]] = field(default_factory=dict)  # id -> {op,dtype,range,values}
+    a_meta: Dict[str, Dict[str, Any]] = field(default_factory=dict)  # id -> {op,dtype,range,values[,units]}
+    # v10 units: measurable id -> {"unit","lo","hi"} for measured levels of a level control (display scale)
+    m_units: Dict[str, Dict[str, Any]] = field(default_factory=dict)
 
     # ---- reverse maps (built in __post_init__) ----
     m_name2id: Dict[str, str] = field(default_factory=dict)
@@ -73,6 +75,25 @@ class Catalog:
 
     def actuator_id(self, name: str) -> Optional[str]:
         return self.a_name2id.get(name) if isinstance(name, str) else None
+
+    # ---- v10 units: values in an id-space answer are in display units when a_meta carries "units" ----
+    def value_to_internal(self, aid: str, v: Any) -> Any:
+        u = (self.a_meta.get(aid) or {}).get("units") if isinstance(aid, str) else None
+        if u is None or isinstance(v, bool) or not isinstance(v, (int, float)):
+            return v
+        return round(min(100.0, max(0.0, (float(v) - u["lo"]) / (u["hi"] - u["lo"]) * 100.0)), 4)
+
+    def value_to_display(self, aid: str, x: Any) -> Any:
+        u = (self.a_meta.get(aid) or {}).get("units") if isinstance(aid, str) else None
+        if u is None or isinstance(x, bool) or not isinstance(x, (int, float)):
+            return x
+        return round(u["lo"] + float(x) / 100.0 * (u["hi"] - u["lo"]), 4)
+
+    def measure_to_internal(self, mid: str, v: Any) -> Any:
+        u = self.m_units.get(mid) if isinstance(mid, str) else None
+        if u is None or isinstance(v, bool) or not isinstance(v, (int, float)):
+            return v
+        return (float(v) - u["lo"]) / (u["hi"] - u["lo"]) * 100.0
 
     def measurable_ids(self) -> List[str]:
         return list(self.m_id2name)
@@ -109,7 +130,7 @@ def _neutral_actuator_desc(act: Dict[str, Any]) -> str:
     return aliases[0] if aliases else "an adjustable control"
 
 
-def build_catalog(world: Dict[str, Any], scm, *, seed: int) -> Catalog:
+def build_catalog(world: Dict[str, Any], scm, *, seed: int, display_units: bool = True) -> Catalog:
     """Assign opaque ids to a world's measurables and actuators. Order is shuffled by
     a per-world seed so id POSITION carries no information (m0 is not 'the first/most
     important' signal). Deterministic in (world_id, seed)."""
@@ -121,6 +142,13 @@ def build_catalog(world: Dict[str, Any], scm, *, seed: int) -> Catalog:
     m_id2name = {f"m{i}": nm for i, nm in enumerate(measurables)}
     m_desc = {f"m{i}": _neutral_measurable_desc(scm.variables[nm])
               for i, nm in enumerate(measurables)}
+    m_units = {}
+    if display_units:
+        for i, nm in enumerate(measurables):
+            u = scm.variables[nm].get("units")
+            if u:
+                m_units[f"m{i}"] = dict(u)
+                m_desc[f"m{i}"] = f"{m_desc[f'm{i}']} ({u['unit']})"
 
     actuators = list(scm.actuators)
     rng.shuffle(actuators)
@@ -132,10 +160,13 @@ def build_catalog(world: Dict[str, Any], scm, *, seed: int) -> Catalog:
         act = scm.actuators[aid]
         a_meta[f"a{i}"] = {"op": act.get("op"), "dtype": act.get("dtype", "continuous"),
                            "range": act.get("range"), "values": act.get("values")}
+        if display_units and act.get("units"):
+            u = act["units"]
+            a_meta[f"a{i}"].update(units=dict(u), range=[u["lo"], u["hi"]])
 
     return Catalog(
         world_id=world["world_id"], outcome=scm.outcome,
         outcome_direction="higher_is_better" if scm.higher_is_better else "lower_is_better",
         m_id2name=m_id2name, a_id2name=a_id2name,
-        m_desc=m_desc, a_desc=a_desc, a_meta=a_meta,
+        m_desc=m_desc, a_desc=a_desc, a_meta=a_meta, m_units=m_units,
     )

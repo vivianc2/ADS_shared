@@ -82,7 +82,7 @@ def run():
     for seed, skin, arch in CASES:
         s, w, res = _find_world(seed, skin, arch)
         gold, battery = res["gold"], res["battery"]
-        cat = build_catalog(w, w["scm"], seed=s)
+        cat = build_catalog(w, w["scm"], seed=s, display_units=False)   # gold answers are on the internal scale
         tag = f"[{skin}/{arch}/{s}]"
         causal, must = lever_sets(w, gold)
         gt = w["ground_truth"]

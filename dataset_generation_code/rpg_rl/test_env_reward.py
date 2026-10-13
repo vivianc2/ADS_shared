@@ -87,7 +87,7 @@ def run():
             continue
         n += 1
         tag = f"{skin}/{arch}/{seed}"
-        cat = build_catalog(w, w["scm"], seed=seed)
+        cat = build_catalog(w, w["scm"], seed=seed, display_units=False)   # gold answers are on the internal scale
 
         # ---- 1. GOLD answer in id-space -> reward ~1.0 (reward path is faithful) ----
         gstruct = _gold_answer_ids(w, gold, battery, cat)

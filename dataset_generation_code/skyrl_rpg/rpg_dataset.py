@@ -30,6 +30,7 @@ for _p in (os.path.join(_BASE, "rpg_rl"), os.path.join(_BASE, os.environ.get("RP
 from datasets import Dataset                       # noqa: E402
 from env import SYSTEM_PROMPT                       # noqa: E402
 from world_stream import WorldStream                # noqa: E402
+from sampler import _resolve_version, version_extra_info   # noqa: E402  (RPG_WORLD_VERSION / RPG_V91_VARY_VALUES)
 
 SYSTEM_MSG = {"role": "system", "content": SYSTEM_PROMPT}
 
@@ -53,6 +54,9 @@ def _rows(split: str, n: int, seed0: int, archetypes, max_turns: int, budget: in
             "extra_info": {
                 "seed": int(b.seed), "skin": b.skin, "archetype": b.archetype,
                 "max_turns": int(max_turns), "budget": int(budget), "split": split,
+                # v9.1: the world stream built these with RPG_V91_VARY_VALUES; record it so the
+                # env rebuilds the same worlds (prompts are identical on/off -> no drift guard)
+                **version_extra_info(_resolve_version(None, None)),
             },
         })
     print(f"[{split}] built {len(rows)} rows (acceptance {stream.acceptance():.0%}); "

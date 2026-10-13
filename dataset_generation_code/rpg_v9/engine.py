@@ -129,7 +129,20 @@ def _subtype_effect(m, v, n):
     return float(m.get("gain", 1.0)) * (dose / float(m.get("scale", 100.0))) * sign
 
 
-_MECH = {"linear": _linear, "saturating": _saturating, "hill": _hill,
+def _damped(m, v, n):
+    """v10 symptomatic-relief node: damage above a healthy offset, reduced multiplicatively by treatments.
+        out = max(0, x - offset) * prod_i (1 - p_i * clip(dose_i, 0, 100) / 100)
+    ``x`` is the last mediator of the harmful chain; ``offset`` its value when the root cause is removed, so the
+    damage (and hence any relief) is ~0 once the root is fixed -- symptomatic treatments help only while the
+    cause persists. Doses are latent nodes set by "set" actuators, so the relief composes correctly with a root
+    fix in the same experiment (a scale op on this node would freeze it at its pre-fix value)."""
+    out = np.clip(v[m["of"]] - float(m.get("offset", 0.0)), 0.0, None)
+    for f in m.get("factors", []):
+        out = out * (1.0 - float(f["p"]) * np.clip(v[f["dose"]], 0.0, 100.0) / 100.0)
+    return out
+
+
+_MECH = {"linear": _linear, "damped": _damped, "saturating": _saturating, "hill": _hill,
          "soft_threshold": _soft_threshold, "interaction": _interaction,
          "gated_and": _gated_and, "abs": _abs,
          "subtype_effect": _subtype_effect,
@@ -155,6 +168,15 @@ def _parse_kw(expr, key, default):
 
 def eval_expr(expr: str, d: float) -> float:
     e = expr.strip()
+    # "lin" (v9.1 opt-in, sampler vary_values): a "turn it DOWN" fix -- factor d/k, i.e. the
+    # untouched process sits at dose k (factor 1), lowering removes the cause (0 at d=0) and
+    # raising past k makes it worse. No v9 world uses it, so v9 worlds evaluate unchanged.
+    if e.startswith("lin("):
+        return d / max(_parse_kw(e, "k", 0.5), 1e-9)
+    # "partial" (v10 opt-in): symptomatic relief -- scale factor 1 - p*d, i.e. at full dose the
+    # target is reduced by the fraction p (< 1), never removed. No v9/v9.1 world uses it.
+    if e.startswith("partial("):
+        return 1.0 - _parse_kw(e, "p", 0.3) * d
     if e.startswith("1-sat"):
         return 1.0 - _sat(d, _parse_kw(e, "k", 0.66))
     if e.startswith("sat"):
@@ -199,6 +221,12 @@ class WorldSCM:
     # deliberately ignored under any actuator intervention, so the oracle's
     # interventional ground truth is never selection-distorted.
     selection: Optional[Dict[str, Any]] = None
+    # v10 opt-in: apply actuator SIDE EFFECTS before re-propagating descendants, so a side effect
+    # on the latent goal (e.g. an over-treatment penalty) also reaches the measured outcome. Default
+    # False = the v9 behaviour, where side effects are added after re-propagation and the observed
+    # outcome never sees them (the "invisible overdose" defect; personal_docs
+    # results/week6_ygg/BLIND_SCRIPT_DEEP_DIVE_2026-10-09.md §6a). Serialised only when True.
+    propagate_side_effects: bool = False
 
     # ---- serialization ----
     def to_dict(self) -> Dict[str, Any]:
@@ -208,13 +236,16 @@ class WorldSCM:
             d["goal"] = self.goal
         if self.selection is not None:
             d["selection"] = self.selection
+        if self.propagate_side_effects:
+            d["propagate_side_effects"] = True
         return d
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "WorldSCM":
         return cls(variables=d["variables"], actuators=d["actuators"],
                    outcome=d["outcome"], higher_is_better=bool(d.get("higher_is_better", True)),
-                   goal=d.get("goal"), selection=d.get("selection"))
+                   goal=d.get("goal"), selection=d.get("selection"),
+                   propagate_side_effects=bool(d.get("propagate_side_effects", False)))
 
     # ---- catalogs ----
     def measurable_vars(self) -> List[str]:
@@ -411,6 +442,24 @@ class WorldSCM:
                             float(pol.get("dose_if_lt", 0.0)))
             vals[ps["target"]] = dose.astype(float)
             edited.add(ps["target"])
+
+        if self.propagate_side_effects and side_adds:
+            # v10: walk the graph once in topological order; recompute every descendant of an
+            # edited node (as before), and add each side effect AT its target right after that
+            # target's own value is final -- so the target first reflects the main effect (e.g. the
+            # fixed root) and its descendants (e.g. the measured outcome) then see the side effect.
+            side_by_t: Dict[str, float] = {}
+            for sa in side_adds:
+                side_by_t[sa["target"]] = side_by_t.get(sa["target"], 0.0) + eval_expr(sa["expr"], sa["d"])
+            # descendants of the edited nodes (the side-effect target is recomputed only if it is one)
+            # plus descendants of the side-effect targets (which must see the added effect)
+            desc = self._descendants(edited) | self._descendants(set(side_by_t))
+            for nm in self._topo():
+                if nm not in edited and nm in desc and "mech" in self.variables[nm]:
+                    vals[nm] = _MECH[self.variables[nm]["mech"]["form"]](self.variables[nm]["mech"], vals, n)
+                if nm in side_by_t:
+                    vals[nm] = vals[nm] + side_by_t[nm] * np.ones(n)
+            return vals
 
         if edited:
             desc = self._descendants(edited)

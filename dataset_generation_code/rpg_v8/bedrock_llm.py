@@ -121,28 +121,36 @@ class BedrockLLM:
         max_new_tokens: Optional[int] = None,
     ) -> str:
         """Generate a response from a full message list (supports multi-turn)."""
+        return self.generate_messages_full(messages, max_new_tokens=max_new_tokens)[0]
+
+    def generate_messages_full(self, messages: List[Dict[str, Any]],
+                               max_new_tokens: Optional[int] = None):
+        """(text, reasoning, stop_reason). Newer models (Opus 5.x) return a reasoningContent block before the text
+        block, so the text is joined from every text block (content[0] is not the answer); a filtered reply has no
+        text and raises with the stop reason instead of an IndexError."""
         system_blocks, converse_msgs = self._to_bedrock_messages(messages)
-        inference_config: Dict[str, Any] = {
-            "maxTokens": max_new_tokens or self.max_new_tokens,
-        }
+        inference_config: Dict[str, Any] = {"maxTokens": max_new_tokens or self.max_new_tokens}
         if self._supports_temperature():
             inference_config["temperature"] = self.temperature
-
-        kwargs: Dict[str, Any] = {
-            "modelId": self.model_id,
-            "messages": converse_msgs,
-            "inferenceConfig": inference_config,
-        }
+        kwargs: Dict[str, Any] = {"modelId": self.model_id, "messages": converse_msgs,
+                                  "inferenceConfig": inference_config}
         if system_blocks:
             kwargs["system"] = system_blocks
-
         response = self.client.converse(**kwargs)
-        return response["output"]["message"]["content"][0]["text"].strip()
+        blocks = response["output"]["message"].get("content", []) or []
+        text = "\n".join(b["text"] for b in blocks if "text" in b).strip()
+        reasoning = "\n".join((b["reasoningContent"].get("reasoningText") or {}).get("text", "")
+                              for b in blocks if "reasoningContent" in b).strip()
+        stop = response.get("stopReason")
+        if not text:
+            raise RuntimeError(f"no text in Bedrock reply (stopReason={stop})")
+        return text, reasoning, stop
 
     def _supports_temperature(self) -> bool:
         """Some current Bedrock inference profiles reject temperature."""
         model_id = self.model_id.lower()
         # Opus 4.7+ inference profiles reject an explicit temperature; omit it
         # for the whole 4.x Opus line to stay safe as new profiles ship.
-        blocked = ("claude-opus-4-7", "claude-opus-4-8", "claude-opus-4-9")
+        # Opus 5.x rejects it too ("`temperature` is deprecated for this model", 2026-10-12).
+        blocked = ("claude-opus-4-7", "claude-opus-4-8", "claude-opus-4-9", "claude-opus-5")
         return not any(b in model_id for b in blocked)

@@ -111,15 +111,25 @@ def run_code(code: str, csv_map: Dict[str, str], carried: Optional[Dict[str, Any
     result_q = ctx.Queue()
     proc = ctx.Process(target=_worker, args=(code, csv_map, carried, result_q))
     proc.start()
-    proc.join(timeout=timeout)
+    # FIX 2026-10-12: read the result BEFORE joining. A child that put more than a pipe buffer (~64 KB: stdout + the
+    # carried variables, e.g. a list of DataFrames or a statsmodels fit) into the queue cannot exit until the parent
+    # reads it, so the old join-then-get order deadlocked until the timeout and reported "[TIMEOUT ...]" for trivial
+    # code (7 of 7 timeouts in the 2026-10-12 Opus v10 run; each snippet reruns in ~1 s with this order).
+    import queue as _queue
+    try:
+        out, new_vars = result_q.get(timeout=timeout)
+    except _queue.Empty:
+        if proc.is_alive():
+            proc.terminate()
+            proc.join(timeout=5)
+            return (f"[TIMEOUT: execution exceeded {timeout}s]", {})
+        return ("[NO OUTPUT: worker died without returning a result]", {})
+    except Exception:
+        proc.join(timeout=5)
+        return ("[NO OUTPUT: worker died without returning a result]", {})
+    proc.join(timeout=5)
     if proc.is_alive():
         proc.terminate()
-        proc.join(timeout=5)
-        return (f"[TIMEOUT: execution exceeded {timeout}s]", {})
-    try:
-        out, new_vars = result_q.get(timeout=2.0)
-    except Exception:
-        return ("[NO OUTPUT: worker died without returning a result]", {})
     if len(out) > max_chars:
         out = out[:max_chars] + f"\n[...output truncated at {max_chars} chars]"
     return (out, new_vars)

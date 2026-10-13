@@ -27,7 +27,7 @@ from sampler import sample_world, FEATURES, ARCHETYPES
 from skins import skin_names
 from oracle_v6 import (calibrate, optimal_gold, counterfactual_battery,
                        decoy_audit, proxy_signal_audit, distractor_inertness_audit,
-                       gold_selfconsistency_audit, counterintuitiveness_audit)
+                       gold_selfconsistency_audit, counterintuitiveness_audit, is_v10, v10_audit)
 
 SCHEMA_VERSION = "rpg_scm_v7"
 
@@ -53,10 +53,30 @@ def audit(world) -> Dict[str, Any]:
         "gold_selfconsistency": gold_selfconsistency_audit(world, gold),
         "counterintuitiveness": counterintuitiveness_audit(world, gold),
     }
+    if is_v10(world):
+        audits["v10"] = v10_audit(world, gold)
     ok = all(a["passed"] for a in audits.values())
     fails = [k for k, a in audits.items() if not a["passed"]]
     return {"ok": ok, "fails": fails, "calib": calib, "gold": gold,
             "battery": battery, "audits": audits}
+
+
+def oracle_json(world, res) -> str:
+    """Gold + battery of an audited world as a JSON string, for dataset rows (extra_info["oracle_json"]), so
+    rollouts / evals need not re-run the oracle (v10: 10-40 s per world). Checked against world_id on use."""
+    return json.dumps({"world_id": world["world_id"], "gold": res["gold"], "battery": res["battery"]},
+                      default=_json_default, sort_keys=True)
+
+
+def oracle_from_json(world, text: str) -> Dict[str, Any]:
+    """Inverse of oracle_json: replay calibrate() (it mutates the SCM: proxy noise, confounder loading -- the
+    stored gold was computed on the calibrated SCM) and return {gold, battery}. Raises if the stored oracle
+    belongs to a different world (wrong seed / skin / archetype / version / generator code)."""
+    d = json.loads(text)
+    if d.get("world_id") != world["world_id"]:
+        raise RuntimeError(f"stored oracle is for {d.get('world_id')}, not {world['world_id']}")
+    calibrate(world)
+    return {"gold": d["gold"], "battery": d["battery"]}
 
 
 def to_record(world, res) -> Dict[str, Any]:

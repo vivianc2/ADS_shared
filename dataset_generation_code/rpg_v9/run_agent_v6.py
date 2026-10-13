@@ -34,11 +34,15 @@ from typing import Any, Dict, List, Optional
 
 # bedrock_llm.py may live either in the sibling framework_code/ (in-repo layout)
 # or alongside this file (packaged/standalone layout). Add both to the path so
-# `from bedrock_llm import BedrockLLM` works in either case.
+# `from bedrock_llm import BedrockLLM` works in either case. THIS directory must come first: each insert goes to
+# position 0, and the old order (_HERE, framework_code) made framework_code/bedrock_llm.py win -- that copy has no
+# last_finish_reason (truncation never recorded for Bedrock agents) and no Opus 5.x handling (fixed 2026-10-12).
 _HERE = Path(__file__).resolve().parent
-for _cand in (_HERE, _HERE.parents[1] / "framework_code"):
-    if str(_cand) not in sys.path:
-        sys.path.insert(0, str(_cand))
+for _cand in (_HERE.parents[1] / "framework_code", _HERE):
+    # move to the front even if already present (a script's own dir is on sys.path but after an inserted entry)
+    while str(_cand) in sys.path:
+        sys.path.remove(str(_cand))
+    sys.path.insert(0, str(_cand))
 
 try:
     from worlds_v6 import ALL_WORLDS_V6  # built-in templates (v6 layout only)
@@ -229,6 +233,68 @@ Next:
 </memory>"""
 
 
+
+def _v10_prompt(p: str) -> str:
+    """SYSTEM_PROMPT for v10 worlds (2026-10-12): values in physical units, direction-free signs, and no <reasoning>
+    block (only <action>/<memory> are parsed; Bedrock returns content_filtered for Opus 5.5 with that line)."""
+    reps = [
+        ("   measure the result. Give a level/dose when relevant (a number, or words like\n   low/moderate/high):",
+         "   measure the result. Give each level/dose as a number in the units the situation report\n"
+         "   lists for that control (e.g. 4.5 for '... adjustable 0-15 L/min'):"),
+        ("- For actuator_sign_predictions use the request phrasing you used; sign is the\n"
+         "  effect on the TRUE UNDERLYING OBJECTIVE (not merely the reported metric):\n"
+         "  + improves it, - worsens it, 0 = no true effect (e.g. a reading-only mover).",
+         "- For actuator_sign_predictions use the request phrasing you used; sign is the\n"
+         "  control's effect on the TRUE UNDERLYING OBJECTIVE (not merely the reported metric):\n"
+         "  + = some setting of it improves the objective (even if other settings hurt),\n"
+         "  - = changing it can only worsen the objective, 0 = no true effect (e.g. a reading-only mover)."),
+        ("Output EXACTLY these three blocks each turn:\n<reasoning>your scientific thinking and why this action</reasoning>\n",
+         "Output EXACTLY these two blocks each turn:\n"),
+        # the harness grades a conditional policy (recommended_policy_text, see _resolve_answer_policy) but the v9
+        # prompt never said so, so hidden-subtype worlds could not be passed in the free-text eval (found 2026-10-12)
+        ('     "recommended_intervention_text":[{"request":"add a chelating additive","value":66}],\n',
+         '     "recommended_intervention_text":[{"request":"add a chelating additive","value":66}],\n'
+         '     "recommended_policy_text":{"treatment":"<control>","stratifier":"<measured signal>","threshold":<value>,\n'
+         '                                "dose_if_ge":<value>,"dose_if_lt":<value>},   (OPTIONAL, see notes)\n'),
+        # statements that must be TRUE for v10 worlds (audit 2026-10-13): not every world is industrial; rejections
+        # have one wording; small variables do carry between code turns (DataFrames do not)
+        ("You are a senior process scientist called in to diagnose a failing industrial system.",
+         "You are a senior scientist called in to diagnose a failing system."),
+        ('either return data or explain why it can\'t be done (e.g. "no\nassay for that", "no actuator connected", "not present on this line").',
+         'either return data or say that nothing on this system matches the request.'),
+        ("Each code turn runs in a FRESH\n   namespace: the experiment_<id>_df variables are always available, but variables YOU\n"
+         "   define do not carry to the next code turn -- so one code turn per analysis is enough.",
+         "Each code turn runs in a FRESH\n   process: the experiment_<id>_df variables are always available; small variables you\n"
+         "   define may carry over, but DataFrames do not -- recompute what you need in each code turn."),
+        # part B is a discovery task, so say what it grades (2026-10-13): the agent must also find alternative levers
+        # of the same cause and name decoys precisely, not only engineer a fix
+        ("A good loop is: design an experiment",
+         "HOW YOUR ANSWER IS GRADED. (1) The fix: your recommended intervention is applied and must restore the TRUE\n"
+         "objective (close to the best achievable). (2) Your causal account, which needs real discovery:\n"
+         "  - true_mechanism_proxy: the measured signal that is a genuine downstream marker of the hidden cause;\n"
+         "  - confounded_decoys: EVERY measured signal that correlates with the outcome but does not cause it (each\n"
+         "    missing decoy and each wrongly listed signal lowers the score);\n"
+         "  - actuator_sign_predictions: the sign of EVERY control that acts on the hidden cause -- your fix AND any\n"
+         "    alternative lever on the same cause (e.g. an upstream setting and a treatment of the same cause); a\n"
+         "    causal lever you leave out counts as wrong. Any other control you list (one that only relieves\n"
+         "    symptoms, harms, or does nothing) is checked too.\n"
+         "So use your experiments to find out which controls and signals are causally connected to the hidden cause,\n"
+         "not only which setting raises the outcome.\n\n"
+         "A good loop is: design an experiment"),
+        ("- Only state findings you actually observed in returned data.",
+         "- If a treatment helps some units and harms others, the best fix may be CONDITIONAL: give it only to units on\n"
+         "  one side of a measured marker. Recommend that with recommended_policy_text (dose_if_ge applies where the\n"
+         "  marker >= threshold, dose_if_lt where it is below; all values in the units of the situation report).\n"
+         "- Only state findings you actually observed in returned data."),
+    ]
+    for a, b in reps:
+        assert p.count(a) == 1, a[:60]
+        p = p.replace(a, b)
+    return p
+
+
+SYSTEM_PROMPT_V10 = _v10_prompt(SYSTEM_PROMPT)
+
 class MockScientistV6:
     """Deterministic stand-in: probes a couple of things then answers with gold
     + battery ground truth. Verifies the harness/resolver/grader wiring only."""
@@ -240,6 +306,11 @@ class MockScientistV6:
     def prime(self, sim: SimV6):
         self.calls = 0
         self.sim = sim
+
+    def _marker_to_display(self, var: str, x: float) -> float:
+        """A policy threshold on the internal scale -> the marker's display units (when the world has units)."""
+        u = self.sim.scm.variables.get(var, {}).get("units") if self.sim.display else None
+        return round(u["lo"] + float(x) / 100.0 * (u["hi"] - u["lo"]), 4) if u else x
 
     def _alias(self, actuator_id: str) -> str:
         """First alias of an actuator (what the resolver maps back to it)."""
@@ -262,7 +333,7 @@ class MockScientistV6:
         # Build gold-based answer generically from the sim (works for ANY world).
         gold_iv = self.sim.gold["intervention"]
         # scalar actuator recommendations (skip any per-unit policy entry)
-        rec = [{"request": self._alias(aid), "value": val}
+        rec = [{"request": self._alias(aid), "value": self.sim.act_to_display(aid, val)}   # units (v10)
                for aid, val in gold_iv.items() if not isinstance(val, dict)]
         # conditional-policy entry, if the gold is a stratified policy
         policy_text = None
@@ -273,8 +344,9 @@ class MockScientistV6:
                 marker = gp["marker"]
                 policy_text = {"treatment": self._alias(treat_id),
                                "stratifier": self.sim.scm.variables[marker].get("aliases", [marker])[0],
-                               "threshold": gp["threshold"], "dose_if_ge": gp["dose_if_ge"],
-                               "dose_if_lt": gp["dose_if_lt"]}
+                               "threshold": self._marker_to_display(marker, gp["threshold"]),
+                               "dose_if_ge": self.sim.act_to_display(treat_id, gp["dose_if_ge"]),
+                               "dose_if_lt": self.sim.act_to_display(treat_id, gp["dose_if_lt"])}
         bat = self.sim.battery
         if self.calls == 3 and rec:
             a = {"actions": [rec[0]], "measure": [outcome_alias, proxy_alias]}
@@ -395,7 +467,8 @@ def _resolve_answer_policy(sim: SimV6, pol_text: Dict[str, Any]) -> Dict[str, An
             "dose_if_lt": float(pol_text.get("dose_if_lt", 0.0))}
 
 
-def run_world(sim: SimV6, llm, max_turns: int, budget: int, verbose: bool) -> Dict[str, Any]:
+def run_world(sim: SimV6, llm, max_turns: int, budget: int, verbose: bool,
+              system_prompt: Optional[str] = None) -> Dict[str, Any]:
     pub = sim.public()
     if isinstance(llm, MockScientistV6):
         llm.prime(sim)
@@ -465,14 +538,15 @@ YOUR MEMORY
         # value: a thinking model (Qwen3.6) needs a large cap or turns truncate mid-reasoning
         # and emit no valid action. finish_reason is recorded per turn so a "length"
         # truncation is visible instead of being silently misread as agent failure.
-        raw = llm.generate(SYSTEM_PROMPT, user)
+        raw = llm.generate(system_prompt or (SYSTEM_PROMPT_V10 if sim.v10 else SYSTEM_PROMPT), user)
         dt = round(time.time() - t0, 2)
         finish_reason = getattr(llm, "last_finish_reason", None)
         memory = _tag(raw, "memory") or memory
         reasoning = _tag(raw, "reasoning")
         atype, payload = _parse_action(raw)
         rec: Dict[str, Any] = {"turn": turn, "latency_s": dt, "finish_reason": finish_reason,
-                               "reasoning": reasoning, "memory": memory, "raw": raw}
+                               "reasoning": reasoning, "memory": memory, "raw": raw,
+                               "usage": getattr(llm, "last_usage", None), "prompt_chars": len(user)}
         if atype is None:
             rec["error"] = "no action parsed"
             turns.append(rec)
@@ -534,7 +608,8 @@ YOUR MEMORY
                     key = _norm_req(e["request"])
                     rejected_counts[key] = rejected_counts.get(key, 0) + 1
             rec["result"] = result
-            history.append(json.dumps(result, default=str))
+            history.append(json.dumps(sim.agent_view(result), default=str))
+            rec["shown_to_agent"] = history[-1]
             if verbose:
                 ok = [e["target_id"] for e in result["resolutions"] if e["ok"]]
                 logger.info("turn %d MEASURE -> %s (used %d/%d)", turn, ok, used, budget)
@@ -550,7 +625,8 @@ YOUR MEMORY
                     key = _norm_req(e["request"])
                     rejected_counts[key] = rejected_counts.get(key, 0) + 1
             rec["result"] = result
-            history.append(json.dumps(result, default=str))
+            history.append(json.dumps(sim.agent_view(result), default=str))
+            rec["shown_to_agent"] = history[-1]
             if verbose:
                 logger.info("turn %d INTERVENE %s (used %d/%d, interventions=%d)", turn,
                             result["applied_intervention"], used, budget, n_interventions)
@@ -637,7 +713,8 @@ def _translate_structured(sim: SimV6, st: Dict[str, Any]) -> Dict[str, Any]:
         ar = sim.resolver.resolve_answer_term(req, "intervene")
         key = ar.target_id if (ar.ok and ar.target_id) else req
         rl = req.lower()
-        if any(w in rl for w in _DECREASE) and sign in _FLIP:
+        # v10 signs are direction-free ("+" = some setting helps), so a decrease verb does not flip them
+        if not sim.v10 and any(w in rl for w in _DECREASE) and sign in _FLIP:
             sign = _FLIP[sign]
         signs[key] = sign
     out["actuator_sign_predictions"] = signs
@@ -674,6 +751,10 @@ def main():
                     help="total turns; code turns count here but not against --budget")
     ap.add_argument("--no-resolver-llm", action="store_true",
                     help="disable the LLM resolver fallback (on by default)")
+    ap.add_argument("--system-prompt-file", default=None,
+                    help="replace SYSTEM_PROMPT with this file's text (e.g. Opus 5.5 on Bedrock returns "
+                         "content_filtered for the standard prompt's <reasoning> line; personal_docs "
+                         "tooling/v9_reeval/prompts/sys_opus55_no_reasoning_tag.txt)")
     ap.add_argument("--out", required=True)
     ap.add_argument("-v", "--verbose", action="store_true")
     args = ap.parse_args()
@@ -699,7 +780,9 @@ def main():
                 sim.gold["expected_utility"], data_dir)
 
     t0 = time.time()
-    res = run_world(sim, llm, args.max_turns, args.budget, args.verbose)
+    sysp = Path(args.system_prompt_file).read_text() if args.system_prompt_file else None
+    res = run_world(sim, llm, args.max_turns, args.budget, args.verbose, system_prompt=sysp)
+    res["system_prompt_file"] = args.system_prompt_file
     res["wall_seconds"] = round(time.time() - t0, 1)
     res["model"] = args.model
 
