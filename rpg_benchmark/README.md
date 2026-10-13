@@ -8,13 +8,12 @@ controls in its own words, and a resolver model maps each request to the world.
 
 ## Data
 
-| split | worlds | domains |
+| split | worlds | |
 |---|---|---|
-| `data/validation` | 270 | clinical, fermentation |
-| `data/test` | 270 | clinical, fermentation |
-| `data/test_other_domains` | 270 | agronomy, aquaculture, battery, bioprocess, catalysis, datacenter, semiconductor, water treatment |
+| `data/test` | 540 | the benchmark: 10 domains, 60 worlds of each of 9 causal structures |
+| `data/validation` | 270 | optional, for development: 30 worlds of each structure |
 
-Each split has 30 worlds of each of 9 causal structures (`index.json` lists domain and structure per file). A world
+`index.json` in each split lists the domain and causal structure of every file. A world
 file holds the situation report, the causal model, and the precomputed best intervention used for grading.
 
 ## Run
