@@ -12,6 +12,8 @@ from botocore.config import Config
 
 logger = logging.getLogger(__name__)
 
+DEGENERATE_STOPS = ("</invoke>\n\n<parameter", "</invoke>\n<parameter")
+
 
 @dataclass
 class BedrockLLM:
@@ -70,9 +72,13 @@ class BedrockLLM:
             if role == "system":
                 system_blocks.append({"text": text})
             else:
+                content = [{"text": text}]
+                # ablation R8 (full history): a cache point after the conversation prefix, Claude models only
+                if msg.get("cache") and "anthropic.claude" in self.model_id.lower():
+                    content.append({"cachePoint": {"type": "default"}})
                 converse_msgs.append({
                     "role": role,
-                    "content": [{"text": text}],
+                    "content": content,
                 })
 
         return system_blocks, converse_msgs
@@ -100,6 +106,10 @@ class BedrockLLM:
         inference_config: Dict[str, Any] = {
             "maxTokens": max_new_tokens or self.max_new_tokens,
         }
+        # v10.1: Sonnet 5.5 sometimes falls into an endless "</invoke>\n<parameter ...>x</parameter>" loop after its
+        # first tool-call block (until max tokens). Stop there; a normal reply never contains these strings.
+        if "anthropic.claude" in self.model_id.lower():
+            inference_config["stopSequences"] = list(DEGENERATE_STOPS)
         if self._supports_temperature() and self.temperature is not None:
             inference_config["temperature"] = self.temperature
 
@@ -113,15 +123,33 @@ class BedrockLLM:
 
         response = self.client.converse(**kwargs)
         stop = response.get("stopReason")
-        self._tls.finish_reason = "length" if stop == "max_tokens" else "stop"
+        self._tls.finish_reason = {"max_tokens": "length", "content_filtered": "content_filtered"}.get(stop, "stop")
         self._tls.usage = response.get("usage")
         blocks = response["output"]["message"].get("content", []) or []
-        text = "\n".join(b["text"] for b in blocks if "text" in b).strip()
+        # v10.2: keep the model's own reasoning text when the API returns it (not redacted)
+        rtxt = [((b.get("reasoningContent") or {}).get("reasoningText") or {}).get("text") for b in blocks]
+        self._tls.reasoning = "\n".join(t for t in rtxt if t) or None
+        # v10.1: reasoning models on Bedrock (GPT-6, Claude Haiku 5.5) can return interleaved reasoning and text
+        # blocks: a draft answer, more reasoning, then the final answer. v10.0 joined all text blocks, so the reply
+        # held two actions and was rejected. Use the last text block (identical to v10.0 when there is only one).
+        texts = [b["text"] for b in blocks if "text" in b and b["text"].strip()]
+        self._tls.text_blocks = texts if len(texts) > 1 else None   # kept in the turn record for audit
+        text = (texts[-1] if texts else "").strip()
         if not text:
             raise RuntimeError(f"no text in Bedrock reply (stopReason={stop})")
         return text
 
+    @property
+    def last_reasoning(self) -> Optional[str]:
+        return getattr(self._tls, "reasoning", None)
+
+    @property
+    def last_text_blocks(self) -> Optional[List[str]]:
+        """All text blocks of the last reply when there were several (None otherwise)."""
+        return getattr(self._tls, "text_blocks", None)
+
     def _supports_temperature(self) -> bool:
         model_id = self.model_id.lower()
-        blocked = ("claude-opus-4-7", "claude-opus-4-8", "claude-opus-4-9", "claude-opus-5")
+        blocked = ("claude-opus-4-7", "claude-opus-4-8", "claude-opus-4-9", "claude-opus-5", "claude-sonnet-5",
+                   "openai.gpt-6")
         return not any(b in model_id for b in blocked)

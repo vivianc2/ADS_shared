@@ -1,0 +1,237 @@
+diff --git a/pyproject.toml b/pyproject.toml
+index 72cc37bc..cd12d724 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -12,6 +12,7 @@ description = "Unified API for training and inference"
+ readme = "README.md"
+ requires-python = ">=3.11"
+ dependencies = [
++    "scipy>=1.17.1",
+     "datasets>=4.0.0",
+     "pillow>=11.3.0",
+     "rich>=14.1.0",
+diff --git a/skyrl/backends/skyrl_train/workers/model_wrapper.py b/skyrl/backends/skyrl_train/workers/model_wrapper.py
+index 8235cddb..429c5311 100644
+--- a/skyrl/backends/skyrl_train/workers/model_wrapper.py
++++ b/skyrl/backends/skyrl_train/workers/model_wrapper.py
+@@ -6,6 +6,7 @@
+ from typing import Optional, Union
+ 
+ import numpy as np
++import os
+ import torch
+ import torch.nn as nn
+ import transformers
+@@ -272,6 +273,39 @@ class HFModelWrapper(nn.Module):
+         position_ids = attention_mask.long().cumsum(-1) - 1
+         position_ids.masked_fill_(attention_mask == 0, 1)
+ 
++        # LOCAL PATCH (ygg 2026-10-23, RL v10; opt-in RLV10_LOGITS_TO_KEEP=1, default off = unchanged): only the last
++        # num_actions + 1 positions' log-probs/entropy are used below (`[:, -num_actions - 1 : -1]`), so ask the model
++        # for logits there only. Step-wise trajectories put a ~10-45k-token prompt in front of each turn, and the full
++        # (B, S, V=248k) fp32 logits OOM'd a 48 GB GPU (42 GiB allocation). Values are identical (lm_head is per position).
++        keep_k = None
++        if (os.environ.get("RLV10_LOGITS_TO_KEEP", "0") == "1" and not self.remove_microbatch_padding
++                and self.sequence_parallel_size == 1):
++            keep_k = (int(max(num_actions)) if isinstance(num_actions, (list, tuple)) else int(num_actions)) + 1
++            keep_k = min(keep_k, sequences.shape[1])
++        _lk = {"logits_to_keep": keep_k} if keep_k is not None else {}
++        # LOCAL PATCH (ygg 2026-10-23, RL v10; opt-in RLV10_CHUNKED_LOGPROBS=1, needs RLV10_LOGITS_TO_KEEP=1): the frozen
++        # lm_head is temporarily replaced (inside the model's own forward, so FSDP unsharding is unchanged) by a chunked
++        # target-log-prob function (rlv10_chunked_logprobs.py): the (B, K, V) logits and their gradient are never
++        # materialised. "logits" then holds the target log-probs (B, K, 1), temperature already applied.
++        chunked = keep_k is not None and os.environ.get("RLV10_CHUNKED_LOGPROBS", "0") == "1"
++        _restore = None
++        if chunked:
++            from skyrl.backends.skyrl_train.workers.rlv10_chunked_logprobs import chunked_target_logprobs
++            lm = getattr(self, "_rlv10_lm_head", None)
++            if lm is None:
++                lm = next(m for n, m in self.model.named_modules() if n.endswith("lm_head"))
++                assert not any(p.requires_grad for p in lm.parameters()), "chunked log-probs assume a frozen lm_head"
++                self._rlv10_lm_head = lm
++            labels_k = torch.roll(sequences, shifts=-1, dims=1)[:, -keep_k:]
++            _wrapper_self = self
++
++            def _lm_forward(h, _lm=lm, _labels=labels_k, _t=temperature):
++                lp, ent = chunked_target_logprobs(h, _lm.weight, _labels, _t)
++                _wrapper_self._rlv10_entropy = ent
++                return lp.unsqueeze(-1)
++            _restore = lm.forward
++            lm.forward = _lm_forward
++
+         sequences_fwd = sequences
+         position_ids_fwd = position_ids
+         attention_mask_fwd = attention_mask
+@@ -321,6 +355,7 @@ class HFModelWrapper(nn.Module):
+                 attention_mask=attention_mask_fwd,
+                 position_ids=None,
+                 **vlm_kwargs,
++                **_lk,
+             )
+         # NOTE (sumanthrh): Once we have position_ids, we don't need attention mask with flash attention.
+         elif self.remove_microbatch_padding and self.attn_implementation == "flash_attention_2":
+@@ -328,17 +363,24 @@ class HFModelWrapper(nn.Module):
+             # Not using attention mask leads to higher perf since flash attention varlen func is enabled
+             output = self.model(sequences_fwd, attention_mask=None, position_ids=position_ids_fwd)
+         else:
+-            output = self.model(sequences_fwd, attention_mask=attention_mask_fwd, position_ids=position_ids_fwd)
++            output = self.model(sequences_fwd, attention_mask=attention_mask_fwd, position_ids=position_ids_fwd, **_lk)
++        if _restore is not None:
++            self._rlv10_lm_head.forward = _restore
+ 
+         logits_BSV = output["logits"]
+-        logits_BSV.div_(temperature)
++        if keep_k is not None:
++            sequences_rolled = sequences_rolled[:, -keep_k:]
++        if chunked:
++            log_probs = logits_BSV.squeeze(-1)
++        else:
++            logits_BSV.div_(temperature)
+ 
+-        # NOTE: this is slightly inaccurate with sample packing because last token from nth seq -> first token of n+1th seq loss is added.
+-        log_probs = logprobs_from_logits(
+-            logits_BSV,
+-            sequences_rolled,
+-            inplace_backward=True,
+-        )
++            # NOTE: this is slightly inaccurate with sample packing because last token from nth seq -> first token of n+1th seq loss is added.
++            log_probs = logprobs_from_logits(
++                logits_BSV,
++                sequences_rolled,
++                inplace_backward=True,
++            )
+ 
+         # gather output if sp > 1
+         if self.sequence_parallel_size > 1:
+@@ -363,13 +405,21 @@ class HFModelWrapper(nn.Module):
+                 # Non-sample packing: pass attention mask to handle padding
+                 # Use attention_mask_fwd which may be sliced (if sequence_parallel_size > 1) or full
+                 entropy_mask = attention_mask_fwd
+-
+-            entropy_BS = self.chunked_entropy_from_logits_fn(
+-                logits_BSV,
+-                requires_grad=entropy_requires_grad,
+-                attention_mask=entropy_mask,
+-                chunk_size=self.logprobs_chunk_size,
+-            )
++                if keep_k is not None and entropy_mask is not None:
++                    entropy_mask = entropy_mask[:, -keep_k:]
++
++            if chunked:
++                # computed inside the chunked function (no gradient; entropy loss is off in RL v10 runs)
++                entropy_BS = self._rlv10_entropy
++                if entropy_mask is not None:
++                    entropy_BS = entropy_BS * entropy_mask.to(entropy_BS.dtype)
++            else:
++                entropy_BS = self.chunked_entropy_from_logits_fn(
++                    logits_BSV,
++                    requires_grad=entropy_requires_grad,
++                    attention_mask=entropy_mask,
++                    chunk_size=self.logprobs_chunk_size,
++                )
+ 
+             if self.sequence_parallel_size > 1:
+                 dim = entropy_BS.ndim - 1
+diff --git a/skyrl/train/generators/skyrl_gym_generator.py b/skyrl/train/generators/skyrl_gym_generator.py
+index 26b1102e..f83ad4d0 100644
+--- a/skyrl/train/generators/skyrl_gym_generator.py
++++ b/skyrl/train/generators/skyrl_gym_generator.py
+@@ -125,9 +125,15 @@ class TurnOutput:
+             Optional[List[float]]: Logprobs for output tokens followed by dummy values (0.0) for
+                 observation tokens. Returns None if output_logprobs is None.
+         """
+-        if not self.output_logprobs:
++        # ygg 2026-10-08: was `if not self.output_logprobs: return None`. An EMPTY list (a turn that generated 0
++        # tokens, e.g. context nearly full) then skipped this turn's obs padding, so rollout_logprobs ended up shorter
++        # than response_ids and validate_generator_output asserted (smoke run m5s1, 12596 vs 12301). Only a real None
++        # means "no logprobs"; lengths are forced to match output_ids.
++        if self.output_logprobs is None:
+             return None
+-        return self.output_logprobs + [0.0] * len(self.obs_ids)
++        lp = list(self.output_logprobs)[: len(self.output_ids)]
++        lp += [0.0] * (len(self.output_ids) - len(lp))
++        return lp + [0.0] * len(self.obs_ids)
+ 
+ 
+ def _split_lists(time_splits: List[Optional[Dict[str, float]]]) -> Optional[Dict[str, List[float]]]:
+diff --git a/skyrl/train/generators/utils.py b/skyrl/train/generators/utils.py
+index c84ea8a5..da5a84b1 100644
+--- a/skyrl/train/generators/utils.py
++++ b/skyrl/train/generators/utils.py
+@@ -798,6 +798,16 @@ def slice_generator_output(
+                 sliced[key] = value
+         elif value is None:
+             sliced[key] = None
++        elif isinstance(value, dict):
++            # LOCAL PATCH (2026-09-22, RPG): `trajectory_time_splits` is typed
++            # Optional[Dict[str, List[float]]] -- a dict of PER-ENTRY lists, e.g.
++            # {"llm": [...], "env": [...]} -- not a per-entry list itself. The loop's
++            # assumption ("every key except rollout_metrics is a per-entry list or None")
++            # is therefore false, and `value[i]` raises KeyError: 0 on the string-keyed
++            # dict. Only reachable when dynamic sampling actually FILTERS a batch, which
++            # is why eval and step 0 are unaffected and it crashes at the first real step.
++            # Slice the inner lists instead. rollout_metrics is handled above.
++            sliced[key] = {k: [v[i] for i in indices] for k, v in value.items()}
+         else:
+             sliced[key] = [value[i] for i in indices]
+     return sliced
+diff --git a/skyrl/train/utils/trainer_utils.py b/skyrl/train/utils/trainer_utils.py
+index 0d91977e..3f0d04b7 100644
+--- a/skyrl/train/utils/trainer_utils.py
++++ b/skyrl/train/utils/trainer_utils.py
+@@ -562,6 +562,12 @@ def handle_filter_sampling(
+         if traj_uid in kept_uids_set:
+             kept_traj_idxs.append(idx)
+ 
++    # ygg 2026-10-08: a batch where every group has constant reward used to crash here
++    # (slice_generator_output asserts on empty indices; R12/v4 died at update 22). Resample instead.
++    if not kept_traj_idxs:
++        logger.info(f"Dynamic sampling: all {len(uid2metric_std)} groups constant in this batch; resampling")
++        return generator_output, uids, True, collected_state
++
+     # Apply filtering to generator output
+     filtered_output = filter_generator_output(generator_output, kept_traj_idxs)
+     filtered_uids = [uids[idx] for idx in kept_traj_idxs]
+diff --git a/uv.lock b/uv.lock
+index 421e83b7..04fc069d 100644
+--- a/uv.lock
++++ b/uv.lock
+@@ -8401,8 +8401,8 @@ resolution-markers = [
+     "python_full_version < '3.12' and sys_platform != 'darwin' and sys_platform != 'linux'",
+ ]
+ dependencies = [
+-    { name = "numpy", version = "2.3.5", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.12' and sys_platform == 'linux' and extra == 'extra-5-skyrl-gpu') or (python_full_version < '3.12' and sys_platform == 'linux' and extra == 'extra-5-skyrl-jax') or (python_full_version < '3.12' and sys_platform == 'linux' and extra == 'extra-5-skyrl-megatron') or (python_full_version < '3.12' and sys_platform == 'linux' and extra == 'extra-5-skyrl-tpu') or (python_full_version >= '3.12' and extra == 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-jax') or (python_full_version >= '3.12' and extra == 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-megatron') or (python_full_version >= '3.12' and extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-megatron') or (python_full_version >= '3.12' and extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-miniswe') or (python_full_version >= '3.12' and extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-tpu') or (python_full_version >= '3.12' and extra == 'extra-5-skyrl-jax' and extra == 'extra-5-skyrl-megatron') or (python_full_version >= '3.12' and extra == 'extra-5-skyrl-megatron' and extra == 'extra-5-skyrl-miniswe') or (python_full_version >= '3.12' and extra == 'extra-5-skyrl-megatron' and extra == 'extra-5-skyrl-tpu') or (python_full_version >= '3.12' and extra == 'extra-5-skyrl-miniswe' and extra == 'extra-5-skyrl-tpu') or (sys_platform != 'linux' and extra == 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-jax') or (sys_platform != 'linux' and extra == 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-megatron') or (sys_platform != 'linux' and extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-megatron') or (sys_platform != 'linux' and extra == 'extra-5-skyrl-jax' and extra == 'extra-5-skyrl-megatron') or (sys_platform != 'linux' and extra == 'extra-5-skyrl-megatron' and extra == 'extra-5-skyrl-miniswe') or (sys_platform != 'linux' and extra == 'extra-5-skyrl-megatron' and extra == 'extra-5-skyrl-tpu') or (sys_platform != 'linux' and extra == 'extra-5-skyrl-gpu' and extra != 'extra-5-skyrl-jax' and extra == 'extra-5-skyrl-miniswe') or (sys_platform != 'linux' and extra == 'extra-5-skyrl-gpu' and extra != 'extra-5-skyrl-jax' and extra == 'extra-5-skyrl-tpu') or (sys_platform != 'linux' and extra != 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-miniswe') or (sys_platform != 'linux' and extra != 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-tpu') or (sys_platform != 'linux' and extra != 'extra-5-skyrl-jax' and extra == 'extra-5-skyrl-miniswe' and extra == 'extra-5-skyrl-tpu') or (sys_platform != 'linux' and extra != 'extra-5-skyrl-gpu' and extra != 'extra-5-skyrl-megatron' and extra == 'extra-5-skyrl-miniswe' and extra == 'extra-5-skyrl-tpu')" },
+-    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.12' and sys_platform != 'linux' and extra == 'extra-5-skyrl-jax') or (python_full_version >= '3.12' and extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-megatron') or (python_full_version >= '3.12' and extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-miniswe') or (python_full_version >= '3.12' and extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-tpu') or (python_full_version >= '3.12' and extra == 'extra-5-skyrl-jax' and extra == 'extra-5-skyrl-megatron') or (python_full_version < '3.12' and extra == 'extra-5-skyrl-gpu' and extra != 'extra-5-skyrl-jax' and extra == 'extra-5-skyrl-megatron') or (python_full_version < '3.12' and extra == 'extra-5-skyrl-gpu' and extra != 'extra-5-skyrl-jax' and extra == 'extra-5-skyrl-miniswe') or (python_full_version < '3.12' and extra == 'extra-5-skyrl-gpu' and extra != 'extra-5-skyrl-jax' and extra == 'extra-5-skyrl-tpu') or (python_full_version < '3.12' and extra != 'extra-5-skyrl-jax' and extra == 'extra-5-skyrl-megatron' and extra == 'extra-5-skyrl-miniswe') or (python_full_version < '3.12' and extra != 'extra-5-skyrl-jax' and extra == 'extra-5-skyrl-megatron' and extra == 'extra-5-skyrl-tpu') or (python_full_version < '3.12' and extra != 'extra-5-skyrl-jax' and extra == 'extra-5-skyrl-miniswe' and extra == 'extra-5-skyrl-tpu') or (python_full_version >= '3.12' and extra == 'extra-5-skyrl-jax' and extra == 'extra-5-skyrl-miniswe' and extra == 'extra-5-skyrl-tpu') or (sys_platform == 'linux' and extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-megatron') or (sys_platform == 'linux' and extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-miniswe') or (sys_platform == 'linux' and extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-tpu') or (sys_platform == 'linux' and extra == 'extra-5-skyrl-jax' and extra == 'extra-5-skyrl-megatron') or (sys_platform == 'linux' and extra == 'extra-5-skyrl-jax' and extra == 'extra-5-skyrl-miniswe' and extra == 'extra-5-skyrl-tpu') or (extra == 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-jax') or (extra == 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-megatron') or (extra == 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-miniswe' and extra == 'extra-5-skyrl-tpu') or (extra == 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-miniswe') or (extra == 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-tpu') or (extra != 'extra-5-skyrl-gpu' and extra != 'extra-5-skyrl-jax' and extra == 'extra-5-skyrl-megatron' and extra == 'extra-5-skyrl-miniswe') or (extra != 'extra-5-skyrl-gpu' and extra != 'extra-5-skyrl-jax' and extra == 'extra-5-skyrl-megatron' and extra == 'extra-5-skyrl-tpu') or (extra != 'extra-5-skyrl-gpu' and extra != 'extra-5-skyrl-jax' and extra == 'extra-5-skyrl-miniswe' and extra == 'extra-5-skyrl-tpu')" },
++    { name = "numpy", version = "2.3.5", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.12' and sys_platform == 'linux') or (python_full_version >= '3.12' and extra == 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-jax') or (python_full_version >= '3.12' and extra == 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-megatron') or (python_full_version >= '3.12' and extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-megatron') or (python_full_version >= '3.12' and extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-miniswe') or (python_full_version >= '3.12' and extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-tpu') or (python_full_version >= '3.12' and extra == 'extra-5-skyrl-jax' and extra == 'extra-5-skyrl-megatron') or (python_full_version >= '3.12' and extra == 'extra-5-skyrl-megatron' and extra == 'extra-5-skyrl-miniswe') or (python_full_version >= '3.12' and extra == 'extra-5-skyrl-megatron' and extra == 'extra-5-skyrl-tpu') or (python_full_version >= '3.12' and extra == 'extra-5-skyrl-miniswe' and extra == 'extra-5-skyrl-tpu') or (sys_platform != 'linux' and extra == 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-jax') or (sys_platform != 'linux' and extra == 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-megatron') or (sys_platform != 'linux' and extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-megatron') or (sys_platform != 'linux' and extra == 'extra-5-skyrl-jax' and extra == 'extra-5-skyrl-megatron') or (sys_platform != 'linux' and extra == 'extra-5-skyrl-megatron' and extra == 'extra-5-skyrl-miniswe') or (sys_platform != 'linux' and extra == 'extra-5-skyrl-megatron' and extra == 'extra-5-skyrl-tpu') or (sys_platform != 'linux' and extra == 'extra-5-skyrl-gpu' and extra != 'extra-5-skyrl-jax' and extra == 'extra-5-skyrl-miniswe') or (sys_platform != 'linux' and extra == 'extra-5-skyrl-gpu' and extra != 'extra-5-skyrl-jax' and extra == 'extra-5-skyrl-tpu') or (sys_platform != 'linux' and extra != 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-miniswe') or (sys_platform != 'linux' and extra != 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-tpu') or (sys_platform != 'linux' and extra != 'extra-5-skyrl-jax' and extra == 'extra-5-skyrl-miniswe' and extra == 'extra-5-skyrl-tpu') or (sys_platform != 'linux' and extra != 'extra-5-skyrl-gpu' and extra != 'extra-5-skyrl-megatron' and extra == 'extra-5-skyrl-miniswe' and extra == 'extra-5-skyrl-tpu')" },
++    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.12' and sys_platform != 'linux') or (python_full_version >= '3.12' and extra == 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-jax') or (python_full_version >= '3.12' and extra == 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-megatron') or (python_full_version >= '3.12' and extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-megatron') or (python_full_version >= '3.12' and extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-miniswe') or (python_full_version >= '3.12' and extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-tpu') or (python_full_version >= '3.12' and extra == 'extra-5-skyrl-jax' and extra == 'extra-5-skyrl-megatron') or (python_full_version >= '3.12' and extra == 'extra-5-skyrl-megatron' and extra == 'extra-5-skyrl-miniswe') or (python_full_version >= '3.12' and extra == 'extra-5-skyrl-megatron' and extra == 'extra-5-skyrl-tpu') or (python_full_version >= '3.12' and extra == 'extra-5-skyrl-miniswe' and extra == 'extra-5-skyrl-tpu') or (sys_platform == 'linux' and extra == 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-jax') or (sys_platform == 'linux' and extra == 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-megatron') or (sys_platform == 'linux' and extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-megatron') or (sys_platform == 'linux' and extra == 'extra-5-skyrl-jax' and extra == 'extra-5-skyrl-megatron') or (sys_platform == 'linux' and extra == 'extra-5-skyrl-megatron' and extra == 'extra-5-skyrl-miniswe') or (sys_platform == 'linux' and extra == 'extra-5-skyrl-megatron' and extra == 'extra-5-skyrl-tpu') or (sys_platform == 'linux' and extra == 'extra-5-skyrl-gpu' and extra != 'extra-5-skyrl-jax' and extra == 'extra-5-skyrl-miniswe') or (sys_platform == 'linux' and extra == 'extra-5-skyrl-gpu' and extra != 'extra-5-skyrl-jax' and extra == 'extra-5-skyrl-tpu') or (sys_platform == 'linux' and extra != 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-miniswe') or (sys_platform == 'linux' and extra != 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-tpu') or (sys_platform == 'linux' and extra != 'extra-5-skyrl-jax' and extra == 'extra-5-skyrl-miniswe' and extra == 'extra-5-skyrl-tpu') or (sys_platform == 'linux' and extra != 'extra-5-skyrl-gpu' and extra != 'extra-5-skyrl-megatron' and extra == 'extra-5-skyrl-miniswe' and extra == 'extra-5-skyrl-tpu')" },
+ ]
+ sdist = { url = "https://files.pythonhosted.org/packages/7a/97/5a3609c4f8d58b039179648e62dd220f89864f56f7357f5d4f45c29eb2cc/scipy-1.17.1.tar.gz", hash = "sha256:95d8e012d8cb8816c226aef832200b1d45109ed4464303e997c5b13122b297c0", size = 30573822, upload-time = "2026-02-23T00:26:24.851Z" }
+ wheels = [
+@@ -8493,8 +8493,8 @@ resolution-markers = [
+     "python_full_version == '3.12.*' and sys_platform != 'darwin' and sys_platform != 'linux'",
+ ]
+ dependencies = [
+-    { name = "numpy", version = "2.3.5", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version == '3.12.*' and platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'extra-5-skyrl-gpu') or (python_full_version == '3.12.*' and platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'extra-5-skyrl-jax') or (python_full_version == '3.12.*' and platform_machine != 'x86_64' and sys_platform == 'linux' and extra != 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-megatron') or (python_full_version == '3.12.*' and platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'extra-5-skyrl-megatron' and extra == 'extra-5-skyrl-tpu') or (python_full_version == '3.12.*' and sys_platform == 'linux' and extra == 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-gpu') or (python_full_version == '3.12.*' and sys_platform == 'linux' and extra != 'extra-5-skyrl-gpu' and extra != 'extra-5-skyrl-jax' and extra == 'extra-5-skyrl-megatron') or (python_full_version == '3.12.*' and sys_platform == 'linux' and extra == 'extra-5-skyrl-fsdp' and extra != 'extra-5-skyrl-jax' and extra != 'extra-5-skyrl-megatron' and extra == 'extra-5-skyrl-tpu') or (python_full_version != '3.12.*' and extra == 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-jax') or (python_full_version != '3.12.*' and extra == 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-megatron') or (python_full_version != '3.12.*' and extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-megatron') or (python_full_version != '3.12.*' and extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-miniswe') or (python_full_version != '3.12.*' and extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-tpu') or (python_full_version != '3.12.*' and extra == 'extra-5-skyrl-jax' and extra == 'extra-5-skyrl-megatron') or (python_full_version != '3.12.*' and extra == 'extra-5-skyrl-megatron' and extra == 'extra-5-skyrl-miniswe') or (python_full_version != '3.12.*' and extra == 'extra-5-skyrl-megatron' and extra == 'extra-5-skyrl-tpu') or (python_full_version != '3.12.*' and extra == 'extra-5-skyrl-miniswe' and extra == 'extra-5-skyrl-tpu') or (platform_machine != 'x86_64' and extra == 'extra-5-skyrl-fsdp' and extra != 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-jax') or (platform_machine != 'x86_64' and extra == 'extra-5-skyrl-fsdp' and extra != 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-megatron') or (platform_machine != 'x86_64' and extra != 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-megatron') or (platform_machine != 'x86_64' and extra != 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-miniswe') or (platform_machine != 'x86_64' and extra != 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-tpu') or (platform_machine != 'x86_64' and extra != 'extra-5-skyrl-fsdp' and extra != 'extra-5-skyrl-megatron' and extra == 'extra-5-skyrl-miniswe' and extra == 'extra-5-skyrl-tpu') or (sys_platform != 'linux' and extra == 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-jax') or (sys_platform != 'linux' and extra == 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-megatron') or (sys_platform != 'linux' and extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-megatron') or (sys_platform != 'linux' and extra == 'extra-5-skyrl-jax' and extra == 'extra-5-skyrl-megatron') or (sys_platform != 'linux' and extra == 'extra-5-skyrl-megatron' and extra == 'extra-5-skyrl-miniswe') or (sys_platform != 'linux' and extra == 'extra-5-skyrl-megatron' and extra == 'extra-5-skyrl-tpu') or (sys_platform != 'linux' and extra == 'extra-5-skyrl-gpu' and extra != 'extra-5-skyrl-jax' and extra == 'extra-5-skyrl-miniswe') or (sys_platform != 'linux' and extra == 'extra-5-skyrl-gpu' and extra != 'extra-5-skyrl-jax' and extra == 'extra-5-skyrl-tpu') or (sys_platform != 'linux' and extra != 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-miniswe') or (sys_platform != 'linux' and extra != 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-tpu') or (sys_platform != 'linux' and extra != 'extra-5-skyrl-jax' and extra == 'extra-5-skyrl-miniswe' and extra == 'extra-5-skyrl-tpu') or (sys_platform != 'linux' and extra != 'extra-5-skyrl-gpu' and extra != 'extra-5-skyrl-megatron' and extra == 'extra-5-skyrl-miniswe' and extra == 'extra-5-skyrl-tpu')" },
+-    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version == '3.12.*' and platform_machine != 'x86_64' and sys_platform == 'linux' and extra != 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-gpu') or (python_full_version == '3.12.*' and platform_machine != 'x86_64' and sys_platform == 'linux' and extra != 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-jax') or (python_full_version == '3.12.*' and platform_machine != 'x86_64' and sys_platform == 'linux' and extra != 'extra-5-skyrl-fsdp' and extra != 'extra-5-skyrl-jax' and extra != 'extra-5-skyrl-megatron' and extra == 'extra-5-skyrl-tpu') or (python_full_version < '3.12' and platform_machine != 'x86_64' and extra == 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-jax') or (python_full_version < '3.12' and platform_machine != 'x86_64' and extra == 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-megatron') or (python_full_version < '3.12' and platform_machine != 'x86_64' and extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-megatron') or (python_full_version < '3.12' and platform_machine != 'x86_64' and extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-miniswe') or (python_full_version < '3.12' and platform_machine != 'x86_64' and extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-tpu') or (python_full_version < '3.12' and platform_machine != 'x86_64' and extra == 'extra-5-skyrl-jax' and extra == 'extra-5-skyrl-megatron') or (python_full_version < '3.12' and platform_machine != 'x86_64' and extra == 'extra-5-skyrl-megatron' and extra == 'extra-5-skyrl-miniswe') or (python_full_version < '3.12' and platform_machine != 'x86_64' and extra == 'extra-5-skyrl-megatron' and extra == 'extra-5-skyrl-tpu') or (python_full_version < '3.12' and platform_machine != 'x86_64' and extra == 'extra-5-skyrl-miniswe' and extra == 'extra-5-skyrl-tpu') or (python_full_version == '3.12.*' and platform_machine != 'x86_64' and extra == 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-jax') or (python_full_version == '3.12.*' and platform_machine != 'x86_64' and extra == 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-megatron') or (python_full_version < '3.13' and platform_machine == 'x86_64' and extra == 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-jax') or (python_full_version < '3.13' and platform_machine == 'x86_64' and extra == 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-megatron') or (python_full_version == '3.12.*' and platform_machine != 'x86_64' and extra == 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-miniswe') or (python_full_version == '3.12.*' and platform_machine != 'x86_64' and extra == 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-tpu') or (python_full_version == '3.12.*' and platform_machine != 'x86_64' and extra == 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-miniswe' and extra == 'extra-5-skyrl-tpu') or (python_full_version < '3.13' and platform_machine == 'x86_64' and extra == 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-miniswe') or (python_full_version < '3.13' and platform_machine == 'x86_64' and extra == 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-tpu') or (python_full_version < '3.13' and platform_machine == 'x86_64' and extra == 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-miniswe' and extra == 'extra-5-skyrl-tpu') or (python_full_version < '3.13' and platform_machine == 'x86_64' and extra != 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-jax' and extra == 'extra-5-skyrl-megatron') or (python_full_version < '3.13' and platform_machine == 'x86_64' and extra != 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-megatron' and extra == 'extra-5-skyrl-miniswe') or (python_full_version < '3.13' and platform_machine == 'x86_64' and extra != 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-megatron' and extra == 'extra-5-skyrl-tpu') or (python_full_version < '3.13' and platform_machine == 'x86_64' and extra != 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-miniswe' and extra == 'extra-5-skyrl-tpu') or (python_full_version == '3.12.*' and platform_machine != 'x86_64' and extra != 'extra-5-skyrl-gpu' and extra != 'extra-5-skyrl-jax' and extra == 'extra-5-skyrl-megatron' and extra == 'extra-5-skyrl-miniswe') or (python_full_version == '3.12.*' and platform_machine != 'x86_64' and extra != 'extra-5-skyrl-gpu' and extra != 'extra-5-skyrl-jax' and extra == 'extra-5-skyrl-megatron' and extra == 'extra-5-skyrl-tpu') or (python_full_version >= '3.12' and sys_platform != 'linux' and extra == 'extra-5-skyrl-jax') or (python_full_version >= '3.13' and sys_platform == 'linux' and extra == 'extra-5-skyrl-gpu') or (python_full_version >= '3.13' and sys_platform == 'linux' and extra == 'extra-5-skyrl-jax') or (python_full_version >= '3.13' and sys_platform == 'linux' and extra == 'extra-5-skyrl-megatron') or (python_full_version >= '3.13' and sys_platform == 'linux' and extra == 'extra-5-skyrl-tpu') or (python_full_version < '3.12' and sys_platform != 'linux' and extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-megatron') or (python_full_version < '3.12' and sys_platform != 'linux' and extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-miniswe') or (python_full_version < '3.12' and sys_platform != 'linux' and extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-tpu') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-megatron') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-miniswe') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-tpu') or (sys_platform != 'linux' and extra == 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-jax') or (sys_platform != 'linux' and extra == 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-megatron') or (sys_platform != 'linux' and extra == 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-miniswe' and extra == 'extra-5-skyrl-tpu') or (sys_platform != 'linux' and extra != 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-jax' and extra == 'extra-5-skyrl-megatron') or (sys_platform != 'linux' and extra != 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-megatron' and extra == 'extra-5-skyrl-miniswe') or (sys_platform != 'linux' and extra != 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-megatron' and extra == 'extra-5-skyrl-tpu') or (sys_platform != 'linux' and extra == 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-miniswe') or (sys_platform != 'linux' and extra == 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-tpu') or (sys_platform != 'linux' and extra != 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-miniswe' and extra == 'extra-5-skyrl-tpu') or (sys_platform != 'linux' and extra == 'extra-5-skyrl-gpu' and extra != 'extra-5-skyrl-jax' and extra == 'extra-5-skyrl-megatron') or (sys_platform != 'linux' and extra == 'extra-5-skyrl-gpu' and extra != 'extra-5-skyrl-jax' and extra == 'extra-5-skyrl-miniswe') or (sys_platform != 'linux' and extra == 'extra-5-skyrl-gpu' and extra != 'extra-5-skyrl-jax' and extra == 'extra-5-skyrl-tpu') or (sys_platform != 'linux' and extra != 'extra-5-skyrl-jax' and extra == 'extra-5-skyrl-megatron' and extra == 'extra-5-skyrl-miniswe') or (sys_platform != 'linux' and extra != 'extra-5-skyrl-jax' and extra == 'extra-5-skyrl-megatron' and extra == 'extra-5-skyrl-tpu') or (sys_platform != 'linux' and extra != 'extra-5-skyrl-jax' and extra == 'extra-5-skyrl-miniswe' and extra == 'extra-5-skyrl-tpu')" },
++    { name = "numpy", version = "2.3.5", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version == '3.12.*' and platform_machine == 'x86_64' and sys_platform == 'linux') or (python_full_version == '3.12.*' and sys_platform == 'linux' and extra == 'extra-5-skyrl-fsdp') or (python_full_version == '3.12.*' and sys_platform == 'linux' and extra != 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-megatron') or (python_full_version != '3.12.*' and extra == 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-jax') or (python_full_version != '3.12.*' and extra == 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-megatron') or (python_full_version != '3.12.*' and extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-megatron') or (python_full_version != '3.12.*' and extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-miniswe') or (python_full_version != '3.12.*' and extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-tpu') or (python_full_version != '3.12.*' and extra == 'extra-5-skyrl-jax' and extra == 'extra-5-skyrl-megatron') or (python_full_version != '3.12.*' and extra == 'extra-5-skyrl-megatron' and extra == 'extra-5-skyrl-miniswe') or (python_full_version != '3.12.*' and extra == 'extra-5-skyrl-megatron' and extra == 'extra-5-skyrl-tpu') or (python_full_version != '3.12.*' and extra == 'extra-5-skyrl-miniswe' and extra == 'extra-5-skyrl-tpu') or (platform_machine != 'x86_64' and extra != 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-megatron') or (platform_machine != 'x86_64' and extra != 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-miniswe') or (platform_machine != 'x86_64' and extra != 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-tpu') or (platform_machine != 'x86_64' and extra != 'extra-5-skyrl-fsdp' and extra != 'extra-5-skyrl-megatron' and extra == 'extra-5-skyrl-miniswe' and extra == 'extra-5-skyrl-tpu') or (sys_platform != 'linux' and extra == 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-jax') or (sys_platform != 'linux' and extra == 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-megatron') or (sys_platform != 'linux' and extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-megatron') or (sys_platform != 'linux' and extra == 'extra-5-skyrl-jax' and extra == 'extra-5-skyrl-megatron') or (sys_platform != 'linux' and extra == 'extra-5-skyrl-megatron' and extra == 'extra-5-skyrl-miniswe') or (sys_platform != 'linux' and extra == 'extra-5-skyrl-megatron' and extra == 'extra-5-skyrl-tpu') or (sys_platform != 'linux' and extra == 'extra-5-skyrl-gpu' and extra != 'extra-5-skyrl-jax' and extra == 'extra-5-skyrl-miniswe') or (sys_platform != 'linux' and extra == 'extra-5-skyrl-gpu' and extra != 'extra-5-skyrl-jax' and extra == 'extra-5-skyrl-tpu') or (sys_platform != 'linux' and extra != 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-miniswe') or (sys_platform != 'linux' and extra != 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-tpu') or (sys_platform != 'linux' and extra != 'extra-5-skyrl-jax' and extra == 'extra-5-skyrl-miniswe' and extra == 'extra-5-skyrl-tpu') or (sys_platform != 'linux' and extra != 'extra-5-skyrl-gpu' and extra != 'extra-5-skyrl-megatron' and extra == 'extra-5-skyrl-miniswe' and extra == 'extra-5-skyrl-tpu')" },
++    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version == '3.12.*' and platform_machine != 'x86_64' and sys_platform == 'linux' and extra != 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-gpu') or (python_full_version == '3.12.*' and platform_machine != 'x86_64' and sys_platform == 'linux' and extra != 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-jax') or (python_full_version == '3.12.*' and platform_machine != 'x86_64' and sys_platform == 'linux' and extra != 'extra-5-skyrl-fsdp' and extra != 'extra-5-skyrl-jax' and extra != 'extra-5-skyrl-megatron') or (python_full_version < '3.12' and platform_machine != 'x86_64' and extra == 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-jax') or (python_full_version < '3.12' and platform_machine != 'x86_64' and extra == 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-megatron') or (python_full_version < '3.12' and platform_machine != 'x86_64' and extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-megatron') or (python_full_version < '3.12' and platform_machine != 'x86_64' and extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-miniswe') or (python_full_version < '3.12' and platform_machine != 'x86_64' and extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-tpu') or (python_full_version < '3.12' and platform_machine != 'x86_64' and extra == 'extra-5-skyrl-jax' and extra == 'extra-5-skyrl-megatron') or (python_full_version < '3.12' and platform_machine != 'x86_64' and extra == 'extra-5-skyrl-megatron' and extra == 'extra-5-skyrl-miniswe') or (python_full_version < '3.12' and platform_machine != 'x86_64' and extra == 'extra-5-skyrl-megatron' and extra == 'extra-5-skyrl-tpu') or (python_full_version < '3.12' and platform_machine != 'x86_64' and extra == 'extra-5-skyrl-miniswe' and extra == 'extra-5-skyrl-tpu') or (python_full_version == '3.12.*' and platform_machine != 'x86_64' and extra == 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-jax') or (python_full_version == '3.12.*' and platform_machine != 'x86_64' and extra == 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-megatron') or (python_full_version < '3.13' and platform_machine == 'x86_64' and extra == 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-jax') or (python_full_version < '3.13' and platform_machine == 'x86_64' and extra == 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-megatron') or (python_full_version < '3.13' and platform_machine == 'x86_64' and extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-megatron') or (python_full_version < '3.13' and platform_machine == 'x86_64' and extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-miniswe') or (python_full_version < '3.13' and platform_machine == 'x86_64' and extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-tpu') or (python_full_version < '3.13' and platform_machine == 'x86_64' and extra == 'extra-5-skyrl-jax' and extra == 'extra-5-skyrl-megatron') or (python_full_version < '3.13' and platform_machine == 'x86_64' and extra == 'extra-5-skyrl-megatron' and extra == 'extra-5-skyrl-miniswe') or (python_full_version < '3.13' and platform_machine == 'x86_64' and extra == 'extra-5-skyrl-megatron' and extra == 'extra-5-skyrl-tpu') or (python_full_version < '3.13' and platform_machine == 'x86_64' and extra == 'extra-5-skyrl-miniswe' and extra == 'extra-5-skyrl-tpu') or (python_full_version == '3.12.*' and platform_machine != 'x86_64' and extra == 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-miniswe') or (python_full_version == '3.12.*' and platform_machine != 'x86_64' and extra == 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-tpu') or (python_full_version == '3.12.*' and platform_machine != 'x86_64' and extra == 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-miniswe' and extra == 'extra-5-skyrl-tpu') or (python_full_version == '3.12.*' and platform_machine != 'x86_64' and extra != 'extra-5-skyrl-gpu' and extra != 'extra-5-skyrl-jax' and extra == 'extra-5-skyrl-megatron' and extra == 'extra-5-skyrl-miniswe') or (python_full_version == '3.12.*' and platform_machine != 'x86_64' and extra != 'extra-5-skyrl-gpu' and extra != 'extra-5-skyrl-jax' and extra == 'extra-5-skyrl-megatron' and extra == 'extra-5-skyrl-tpu') or (python_full_version >= '3.12' and sys_platform != 'linux') or (python_full_version >= '3.13' and sys_platform == 'linux') or (sys_platform != 'linux' and extra == 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-jax') or (sys_platform != 'linux' and extra == 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-megatron') or (sys_platform != 'linux' and extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-megatron') or (sys_platform != 'linux' and extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-miniswe') or (sys_platform != 'linux' and extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-tpu') or (sys_platform != 'linux' and extra == 'extra-5-skyrl-jax' and extra == 'extra-5-skyrl-megatron') or (sys_platform != 'linux' and extra == 'extra-5-skyrl-megatron' and extra == 'extra-5-skyrl-miniswe') or (sys_platform != 'linux' and extra == 'extra-5-skyrl-megatron' and extra == 'extra-5-skyrl-tpu') or (sys_platform != 'linux' and extra == 'extra-5-skyrl-miniswe' and extra == 'extra-5-skyrl-tpu')" },
+ ]
+ sdist = { url = "https://files.pythonhosted.org/packages/a7/25/c2700dfaf6442b4effaa91af24ebce5dc9d31bb4a69706313aae70d72cd0/scipy-1.18.0.tar.gz", hash = "sha256:67b2ad2ad54c72ca6d04975a9b2df8c3638c34ddd5b28738e94fc2b57929d378", size = 30774447, upload-time = "2026-06-19T15:01:43.456Z" }
+ wheels = [
+@@ -8823,6 +8823,8 @@ dependencies = [
+     { name = "pillow" },
+     { name = "rich" },
+     { name = "safetensors" },
++    { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12' or (extra == 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-jax') or (extra == 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-megatron') or (extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-megatron') or (extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-miniswe') or (extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-tpu') or (extra == 'extra-5-skyrl-jax' and extra == 'extra-5-skyrl-megatron') or (extra == 'extra-5-skyrl-megatron' and extra == 'extra-5-skyrl-miniswe') or (extra == 'extra-5-skyrl-megatron' and extra == 'extra-5-skyrl-tpu') or (extra == 'extra-5-skyrl-miniswe' and extra == 'extra-5-skyrl-tpu')" },
++    { name = "scipy", version = "1.18.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12' or (extra == 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-jax') or (extra == 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-megatron') or (extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-megatron') or (extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-miniswe') or (extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-tpu') or (extra == 'extra-5-skyrl-jax' and extra == 'extra-5-skyrl-megatron') or (extra == 'extra-5-skyrl-megatron' and extra == 'extra-5-skyrl-miniswe') or (extra == 'extra-5-skyrl-megatron' and extra == 'extra-5-skyrl-tpu') or (extra == 'extra-5-skyrl-miniswe' and extra == 'extra-5-skyrl-tpu')" },
+     { name = "tokenizers" },
+     { name = "transformers", marker = "sys_platform == 'linux' or (extra == 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-jax') or (extra == 'extra-5-skyrl-fsdp' and extra == 'extra-5-skyrl-megatron') or (extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-megatron') or (extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-miniswe') or (extra == 'extra-5-skyrl-gpu' and extra == 'extra-5-skyrl-tpu') or (extra == 'extra-5-skyrl-jax' and extra == 'extra-5-skyrl-megatron') or (extra == 'extra-5-skyrl-megatron' and extra == 'extra-5-skyrl-miniswe') or (extra == 'extra-5-skyrl-megatron' and extra == 'extra-5-skyrl-tpu') or (extra == 'extra-5-skyrl-miniswe' and extra == 'extra-5-skyrl-tpu')" },
+     { name = "typer" },
+@@ -9149,6 +9151,7 @@ requires-dist = [
+     { name = "s5cmd", marker = "sys_platform == 'linux' and extra == 'aws'", specifier = ">=0.3.3" },
+     { name = "s5cmd", marker = "sys_platform == 'linux' and extra == 'skyrl-train'", specifier = ">=0.3.3" },
+     { name = "safetensors", specifier = ">=0.6.2" },
++    { name = "scipy", specifier = ">=1.17.1" },
+     { name = "setuptools", marker = "extra == 'skyrl-train'" },
+     { name = "skyrl", extras = ["skyrl-train"], marker = "extra == 'fsdp'" },
+     { name = "skyrl", extras = ["skyrl-train"], marker = "extra == 'megatron'" },

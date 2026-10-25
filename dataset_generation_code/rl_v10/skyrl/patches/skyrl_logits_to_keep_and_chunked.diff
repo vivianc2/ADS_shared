@@ -1,0 +1,122 @@
+diff --git a/skyrl/backends/skyrl_train/workers/model_wrapper.py b/skyrl/backends/skyrl_train/workers/model_wrapper.py
+index 8235cddb..429c5311 100644
+--- a/skyrl/backends/skyrl_train/workers/model_wrapper.py
++++ b/skyrl/backends/skyrl_train/workers/model_wrapper.py
+@@ -6,6 +6,7 @@
+ from typing import Optional, Union
+ 
+ import numpy as np
++import os
+ import torch
+ import torch.nn as nn
+ import transformers
+@@ -272,6 +273,39 @@ class HFModelWrapper(nn.Module):
+         position_ids = attention_mask.long().cumsum(-1) - 1
+         position_ids.masked_fill_(attention_mask == 0, 1)
+ 
++        # LOCAL PATCH (ygg 2026-10-23, RL v10; opt-in RLV10_LOGITS_TO_KEEP=1, default off = unchanged): only the last
++        # num_actions + 1 positions' log-probs/entropy are used below (`[:, -num_actions - 1 : -1]`), so ask the model
++        # for logits there only. Step-wise trajectories put a ~10-45k-token prompt in front of each turn, and the full
++        # (B, S, V=248k) fp32 logits OOM'd a 48 GB GPU (42 GiB allocation). Values are identical (lm_head is per position).
++        keep_k = None
++        if (os.environ.get("RLV10_LOGITS_TO_KEEP", "0") == "1" and not self.remove_microbatch_padding
++                and self.sequence_parallel_size == 1):
++            keep_k = (int(max(num_actions)) if isinstance(num_actions, (list, tuple)) else int(num_actions)) + 1
++            keep_k = min(keep_k, sequences.shape[1])
++        _lk = {"logits_to_keep": keep_k} if keep_k is not None else {}
++        # LOCAL PATCH (ygg 2026-10-23, RL v10; opt-in RLV10_CHUNKED_LOGPROBS=1, needs RLV10_LOGITS_TO_KEEP=1): the frozen
++        # lm_head is temporarily replaced (inside the model's own forward, so FSDP unsharding is unchanged) by a chunked
++        # target-log-prob function (rlv10_chunked_logprobs.py): the (B, K, V) logits and their gradient are never
++        # materialised. "logits" then holds the target log-probs (B, K, 1), temperature already applied.
++        chunked = keep_k is not None and os.environ.get("RLV10_CHUNKED_LOGPROBS", "0") == "1"
++        _restore = None
++        if chunked:
++            from skyrl.backends.skyrl_train.workers.rlv10_chunked_logprobs import chunked_target_logprobs
++            lm = getattr(self, "_rlv10_lm_head", None)
++            if lm is None:
++                lm = next(m for n, m in self.model.named_modules() if n.endswith("lm_head"))
++                assert not any(p.requires_grad for p in lm.parameters()), "chunked log-probs assume a frozen lm_head"
++                self._rlv10_lm_head = lm
++            labels_k = torch.roll(sequences, shifts=-1, dims=1)[:, -keep_k:]
++            _wrapper_self = self
++
++            def _lm_forward(h, _lm=lm, _labels=labels_k, _t=temperature):
++                lp, ent = chunked_target_logprobs(h, _lm.weight, _labels, _t)
++                _wrapper_self._rlv10_entropy = ent
++                return lp.unsqueeze(-1)
++            _restore = lm.forward
++            lm.forward = _lm_forward
++
+         sequences_fwd = sequences
+         position_ids_fwd = position_ids
+         attention_mask_fwd = attention_mask
+@@ -321,6 +355,7 @@ class HFModelWrapper(nn.Module):
+                 attention_mask=attention_mask_fwd,
+                 position_ids=None,
+                 **vlm_kwargs,
++                **_lk,
+             )
+         # NOTE (sumanthrh): Once we have position_ids, we don't need attention mask with flash attention.
+         elif self.remove_microbatch_padding and self.attn_implementation == "flash_attention_2":
+@@ -328,17 +363,24 @@ class HFModelWrapper(nn.Module):
+             # Not using attention mask leads to higher perf since flash attention varlen func is enabled
+             output = self.model(sequences_fwd, attention_mask=None, position_ids=position_ids_fwd)
+         else:
+-            output = self.model(sequences_fwd, attention_mask=attention_mask_fwd, position_ids=position_ids_fwd)
++            output = self.model(sequences_fwd, attention_mask=attention_mask_fwd, position_ids=position_ids_fwd, **_lk)
++        if _restore is not None:
++            self._rlv10_lm_head.forward = _restore
+ 
+         logits_BSV = output["logits"]
+-        logits_BSV.div_(temperature)
++        if keep_k is not None:
++            sequences_rolled = sequences_rolled[:, -keep_k:]
++        if chunked:
++            log_probs = logits_BSV.squeeze(-1)
++        else:
++            logits_BSV.div_(temperature)
+ 
+-        # NOTE: this is slightly inaccurate with sample packing because last token from nth seq -> first token of n+1th seq loss is added.
+-        log_probs = logprobs_from_logits(
+-            logits_BSV,
+-            sequences_rolled,
+-            inplace_backward=True,
+-        )
++            # NOTE: this is slightly inaccurate with sample packing because last token from nth seq -> first token of n+1th seq loss is added.
++            log_probs = logprobs_from_logits(
++                logits_BSV,
++                sequences_rolled,
++                inplace_backward=True,
++            )
+ 
+         # gather output if sp > 1
+         if self.sequence_parallel_size > 1:
+@@ -363,13 +405,21 @@ class HFModelWrapper(nn.Module):
+                 # Non-sample packing: pass attention mask to handle padding
+                 # Use attention_mask_fwd which may be sliced (if sequence_parallel_size > 1) or full
+                 entropy_mask = attention_mask_fwd
+-
+-            entropy_BS = self.chunked_entropy_from_logits_fn(
+-                logits_BSV,
+-                requires_grad=entropy_requires_grad,
+-                attention_mask=entropy_mask,
+-                chunk_size=self.logprobs_chunk_size,
+-            )
++                if keep_k is not None and entropy_mask is not None:
++                    entropy_mask = entropy_mask[:, -keep_k:]
++
++            if chunked:
++                # computed inside the chunked function (no gradient; entropy loss is off in RL v10 runs)
++                entropy_BS = self._rlv10_entropy
++                if entropy_mask is not None:
++                    entropy_BS = entropy_BS * entropy_mask.to(entropy_BS.dtype)
++            else:
++                entropy_BS = self.chunked_entropy_from_logits_fn(
++                    logits_BSV,
++                    requires_grad=entropy_requires_grad,
++                    attention_mask=entropy_mask,
++                    chunk_size=self.logprobs_chunk_size,
++                )
+ 
+             if self.sequence_parallel_size > 1:
+                 dim = entropy_BS.ndim - 1

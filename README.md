@@ -4,8 +4,22 @@ This repo holds **RPG**: procedurally-generated scientific-reasoning ("causal-di
 worlds, an oracle/grader for them, and an RL setup that trains a policy to solve them. It
 also carries the free-text evaluation harness and a lot of committed run outputs.
 
-**If you read one thing:** the current pipeline is **v9**, and the step-by-step to
-reproduce it on a fresh box is in [`SETUP_NEW_SERVER.md`](SETUP_NEW_SERVER.md).
+> **Current (2026-10-25): RPG v10.2 = ACED-Repair, the NeurIPS 2026 camera-ready benchmark.**
+>
+> | Path | What it is |
+> |---|---|
+> | `rpg_benchmark/` | The release harness (v10.2; `README.md`, `CHANGELOG.md`). Data: `data/test` (540), `data/validation` (270), `data/core108` and `data/core54` (subsets of test, all 10 domains; `data/build_core_subsets.py`), `data/core54_anon` |
+> | `dataset_generation_code/rl_v10/` | RL on v10: the env is the release loop itself (frozen copy in `bench/`), reward, SkyRL launcher and patches, eval scripts, data builders and manifests. Start at its `README.md` |
+> | `dataset_generation_code/rpg_v9/` | The world generator that builds v10 worlds (`RPG_WORLD_VERSION=v10`); v10 split parquets in `experiment_datasets/v10_benchmark_2026-10-12/` |
+> | `aced_benchmark/` | ACED-Bench (ACED-Query) rerun scripts |
+>
+> **Known issues, open fixes and pending decisions: `personal_docs/KNOWN_ISSUES.md`** (e.g. v10 causal roles are randomised
+> across names, so some required fixes are physically implausible; the setting-correlation cue).
+>
+> Everything below describes the v9 RL line (id-space env `rpg_rl/`, `skyrl_rpg/`) and is kept for provenance.
+
+**v9 (historical):** the step-by-step to reproduce the v9 pipeline on a fresh box is in
+[`SETUP_NEW_SERVER.md`](SETUP_NEW_SERVER.md).
 
 > **⚠️ 2026-09-24 — two version bugs, read before running or quoting anything**
 > 1. The parquets in `rpg_v9/data_v9_deleaked/`, `rpg_v9/experiment_datasets/rl_train/` (except
@@ -19,7 +33,8 @@ reproduce it on a fresh box is in [`SETUP_NEW_SERVER.md`](SETUP_NEW_SERVER.md).
 ## Which version is current
 
 The world generator evolved `v6 → v7 → v8 → v9`, each a copy-forward of the last.
-**v9 is the only current one.** Everything else is kept for provenance, not for running.
+**Superseded 2026-10-12 by v10 (see the box at the top).** Before that, v9 was the only current one; everything
+else is kept for provenance, not for running.
 
 | Path | What it is | Status |
 |---|---|---|

@@ -43,6 +43,7 @@ class Resolver:
         self.scm = scm
         self.llm = llm
         self.display = display
+        self.column_ids: Dict[str, str] = {}   # lower-cased CSV column name -> control id (set by the Simulator)
         self.var_aliases: Dict[str, List[str]] = {}
         for name, spec in scm.variables.items():
             if spec["kind"] in ("observable", "outcome") or spec.get("measurable"):
@@ -187,6 +188,18 @@ class Resolver:
                         hits.setdefault(cid, set()).add(tok)
             return next(iter(hits)) if len(hits) == 1 else None
 
+        # v10.2: the full text first when it is exactly a name or alias (or a control's CSV column); splitting at
+        # hyphens first mapped "chlorine-ammonia ratio" (an alias) through "chlorine" to another control
+        full = _norm(text or "")
+        alias_map = self.var_aliases if kind == "measure" else self.act_aliases
+        exact = [cid for cid, als in alias_map.items() if full and any(_norm(al) == full for al in als)]
+        if kind == "intervene" and not exact and (text or "").strip().lower() in self.column_ids:
+            exact = [self.column_ids[(text or "").strip().lower()]]
+        if len(exact) == 1:
+            if kind == "intervene":
+                return self._finalize_intervene(exact[0], value, text, "exact")
+            return Resolution("measure", True, f"measure '{exact[0]}'", target_id=exact[0], method="exact")
+
         variants = self._answer_variants(text)
         if not variants:
             return _resolve(text or "")
@@ -227,6 +240,10 @@ class Resolver:
         meas_best = meas[0] if meas else (None, 0.0)
         hid_best = hid[0] if hid else (None, 0.0)
 
+        act = self._best_alias(request, self.act_aliases)
+        if act and act[0][1] >= 0.85 and act[0][1] > meas_best[1]:
+            return Resolution("control", False, "is a control", target_id=act[0][0],
+                              reason="That is a control, not a measured signal.", method="alias")
         if hid_best[1] >= 0.85 and hid_best[1] >= meas_best[1]:
             return Resolution("reject", False, f"no assay for '{hid_best[0]}'",
                               reason="That quantity is not directly measurable on this rig; "
@@ -256,6 +273,11 @@ class Resolver:
             r = self._llm_pick(request, "intervene", value=value)
             if r is not None:
                 return r
+        # fallback (no LLM, or its call failed): a control written exactly as its CSV column name (SetFoggingRate)
+        # is that control. The lexical match below cannot read CamelCase names.
+        aid = self.column_ids.get(request.strip().lower())
+        if aid:
+            return self._finalize_intervene(aid, value, request, "column")
         scored = self._best_alias(request, self.act_aliases)
         if scored and scored[0][1] >= 0.85:
             aid = scored[0][0]
@@ -346,6 +368,13 @@ class Resolver:
         return _from_qualitative(request)
 
     def _llm_pick(self, request: str, kind: str, value: Any = None) -> Optional[Resolution]:
+        # v10.2: identical requests within a world are resolved once (cuts resolver calls ~60% and makes a
+        # repeated request map the same way every time)
+        key = (kind, _norm(request or ""))
+        cache = self.__dict__.setdefault("_llm_cache", {})
+        if key in cache:
+            tid, outcome = cache[key]
+            return self._llm_result(tid, outcome, request, kind, value)
         meas_list = "\n".join(f"  M:{cid}: {', '.join(al[:4])}" for cid, al in self.var_aliases.items())
         act_list = "\n".join(f"  A:{aid}: {act.get('description', aid)} "
                              f"[{', '.join(self.act_aliases[aid][:3])}]"
@@ -361,6 +390,8 @@ class Resolver:
             "entry, and classify the outcome. Rules:\n"
             "- If it clearly refers to a MEASURABLE variable and kind is measure -> measure it.\n"
             "- If it clearly refers to an ACTUATOR and kind is intervene -> apply it.\n"
+            "- If kind is measure but it clearly names an ACTUATOR (a control/additive, not a signal) -> "
+            "outcome intervene with that actuator id (its current setting will be reported).\n"
             "- If it refers to a REAL state that has no assay (measure) / no actuator "
             "(intervene) -> reject as no_assay / no_actuator.\n"
             "- If it refers to nothing in these lists -> reject as not_in_world.\n"
@@ -374,8 +405,13 @@ class Resolver:
                 "You map a scientist's free-text request to a fixed catalog of a "
                 "hidden world. Be precise; never invent equipment. JSON only.",
                 prompt, max_new_tokens=2048)
-            m = re.search(r"\{.*\}", raw, re.DOTALL)
-            obj = json.loads(m.group(0)) if m else {}
+            if getattr(self.llm, "last_finish_reason", None) == "content_filtered":
+                # v10.2: a filtered reply can carry a partial text ('{"target":"'); treat it as a failed call
+                raise RuntimeError("resolver reply cut by the content filter (stopReason=content_filtered)")
+            # v10.2: read the first complete JSON object (the resolver model sometimes adds a second object or
+            # text after it, which made the greedy match fail and forced the lexical fallback)
+            i = raw.find("{")
+            obj = json.JSONDecoder().raw_decode(raw[i:])[0] if i >= 0 else {}
         except Exception as e:
             logger.error("RESOLVER LLM CALL FAILED for %r (%s: %s) -> LEXICAL FALLBACK. "
                          "Scores will be deflated by unresolved actions.",
@@ -386,6 +422,17 @@ class Resolver:
             if tid.startswith(pfx):
                 tid = tid[len(pfx):].strip()
                 break
+        res = self._llm_result(tid, outcome, request, kind, value, raw=raw)
+        if res is not None:
+            cache[key] = (tid, outcome)
+        return res
+
+    def _llm_result(self, tid: str, outcome: str, request: str, kind: str, value: Any,
+                    raw: str = "") -> Optional[Resolution]:
+        if kind == "measure" and outcome == "intervene" and tid in self.scm.actuators:
+            # v10.2: a measure request naming a control -> say it is a control (and its level), not "no match"
+            return Resolution("control", False, "is a control (llm)", target_id=tid,
+                              reason="That is a control, not a measured signal.", method="llm")
         if outcome == "measure" and tid in self.var_aliases:
             return Resolution("measure", True, f"measure '{tid}' (llm)", target_id=tid, method="llm")
         if outcome == "intervene" and tid in self.scm.actuators:

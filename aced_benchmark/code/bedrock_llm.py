@@ -23,6 +23,61 @@ from botocore.config import Config
 
 logger = logging.getLogger(__name__)
 
+# 2026-10-20: Bedrock's input filter returns stopReason=content_filtered (no output at all) for Claude Opus 5.5 and
+# Sonnet 5.5 on some ACED prompts. Probes (personal_docs/camera_ready/results_aced/ACED_RERUN_2026-10-20.md) found two
+# triggers, and one format-only adaptation for each, applied to these two models only and to every question of the
+# affected agent (not as a per-question fallback), so that each cell uses one prompt:
+#   (1) the request to write a <reasoning> block before the action, in the Active agent and guess-only prompts (100% of
+#       Opus prompts filtered; renaming the tag or rewording the placeholder does not help). The block request is
+#       dropped; the action / memory blocks and everything else are unchanged, and the model may still reason in prose.
+#   (2) the Modular agent's INIT call (Opus: 36/60 decision and 18/60 structural questions filtered). The INIT
+#       instructions are sent at the top of the user turn instead of as the system prompt; the text is unchanged.
+_FILTERED_FORMAT_MODELS = ("claude-opus-5", "claude-sonnet-5")
+_REASONING_BLOCK_EDITS = (
+    ("<reasoning>[Analysis, updated understanding, hypothesis, decision rationale]</reasoning>\n", ""),
+    ("Output: <reasoning>, <action>, and <scientist_memory> blocks (in that order).",
+     "Output: <action> and <scientist_memory> blocks (in that order)."),
+    ('Output: <reasoning> and <action type="answer"> blocks (in that order).', 'Output: an <action type="answer"> block.'),
+)
+_MODULAR_INIT_PREFIX = "You are a domain-knowledgeable scientist about to start an investigation."
+
+
+def _adapt_for_filter(system_blocks: List[Dict[str, Any]], converse_msgs: List[Dict[str, Any]]) -> tuple:
+    """Apply adaptations (1) and (2) above; returns (system_blocks, converse_msgs, names of the edits applied)."""
+    applied = []
+    def edit(t: str) -> str:
+        for a, b in _REASONING_BLOCK_EDITS:
+            if a in t:
+                t = t.replace(a, b)
+                applied.append("drop_reasoning_block")
+        return t
+    system_blocks = [{"text": edit(b["text"])} for b in system_blocks]
+    converse_msgs = [{"role": m["role"], "content": [{"text": edit(c["text"])} for c in m["content"]]}
+                     for m in converse_msgs]
+    if system_blocks and system_blocks[0]["text"].startswith(_MODULAR_INIT_PREFIX) and converse_msgs \
+            and converse_msgs[0]["role"] == "user":
+        sys_text = "\n\n".join(b["text"] for b in system_blocks)
+        first = converse_msgs[0]
+        converse_msgs = [{"role": "user", "content": [{"text": sys_text + "\n\n" + first["content"][0]["text"]}]}] \
+            + converse_msgs[1:]
+        system_blocks = []
+        applied.append("init_instructions_in_user_turn")
+    return system_blocks, converse_msgs, sorted(set(applied))
+
+
+def _log_usage(model_id: str, response: Dict[str, Any], adapted: List[str]) -> None:
+    """Append one line of token usage per call to $ACED_USAGE_LOG (for cost accounting); no-op when unset."""
+    path = os.environ.get("ACED_USAGE_LOG")
+    if not path:
+        return
+    import json
+    u = response.get("usage") or {}
+    blocks = (response.get("output") or {}).get("message", {}).get("content", []) or []
+    n_text = sum(1 for b in blocks if "text" in b and b["text"].strip())
+    with open(path, "a") as f:
+        f.write(json.dumps({"model": model_id, "stop": response.get("stopReason"), "in": u.get("inputTokens"),
+                            "out": u.get("outputTokens"), "text_blocks": n_text, "adapted": adapted}) + "\n")
+
 
 @dataclass
 class BedrockLLM:
@@ -136,11 +191,28 @@ class BedrockLLM:
         if system_blocks:
             kwargs["system"] = system_blocks
 
+        adapted = []
+        if any(m in self.model_id.lower() for m in _FILTERED_FORMAT_MODELS):
+            sb, cm, adapted = _adapt_for_filter(kwargs.get("system", []), converse_msgs)
+            kwargs["messages"] = cm
+            if sb:
+                kwargs["system"] = sb
+            else:
+                kwargs.pop("system", None)
+
         response = self.client.converse(**kwargs)
+        _log_usage(self.model_id, response, adapted)
         # Newer models (Opus 5.x, GPT-6 on Bedrock) can put a reasoningContent block before the text block,
-        # so content[0] is not always the answer: join every text block.
+        # so content[0] is not always the answer. 2026-10-20: GPT-6 Astra/Sol return several text blocks in 11-18%
+        # of calls. The blocks are NOT draft + final: the first block is the model's action for this turn; after it
+        # the model continues the episode on its own (more hidden reasoning, sometimes a fabricated "tool execution
+        # output", further actions, and a final answer or give-up based on results it never received). Use the
+        # FIRST non-empty text block. (The old code joined all blocks: the agents executed the first action too, but
+        # the code-loop agents kept the fabricated continuation in their message history. Taking the LAST block,
+        # as rpg_benchmark v10.1 does, executes the fabricated continuation: ACED_RERUN_2026-10-20.md.)
         blocks = response["output"]["message"].get("content", []) or []
-        text = "\n".join(b["text"] for b in blocks if "text" in b).strip()
+        texts = [b["text"] for b in blocks if "text" in b and b["text"].strip()]
+        text = (texts[0] if texts else "").strip()
         if not text:
             raise RuntimeError(f"no text in Bedrock reply (stopReason={response.get('stopReason')})")
         return text
@@ -151,6 +223,7 @@ class BedrockLLM:
         # Opus 4.7+ inference profiles reject an explicit temperature; omit it
         # for the whole 4.x Opus line to stay safe as new profiles ship.
         # Opus 5.x / Sonnet 5.x ("`temperature` is deprecated") and GPT-6 on Bedrock reject it too (checked 2026-10-13).
+        # Haiku 5.x too (checked 2026-10-23, A7 leakage audit).
         blocked = ("claude-opus-4-7", "claude-opus-4-8", "claude-opus-4-9", "claude-opus-5", "claude-sonnet-5",
-                   "openai.gpt-6")
+                   "claude-haiku-5", "openai.gpt-6")
         return not any(b in model_id for b in blocked)

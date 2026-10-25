@@ -364,7 +364,9 @@ def _score_battery(battery, answer, recommended=None, strict=True):
     active = {aid for aid, s in gold_signs.items() if s in ("+", "-")}
     if "sign_scope" in battery:
         active &= set(battery["sign_scope"])
-    scored = {required} | active | set(pred)
+    # v10.2: only real controls are scored; a sign for a control that does not exist in this world used to count as
+    # a correct "0" and could pad part B
+    scored = {required} | active | {k for k in pred if k in gold_signs}
     for aid in scored:
         gold = gold_signs.get(aid, "0")
         items.append((f"sign:{aid}", _canon_sign(pred.get(aid)) == _canon_sign(gold)))

@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from simulator import Simulator
-from agent_loop import build_llm, build_resolver_llm, run_world, load_world_file
+from agent_loop import HARNESS_VERSION, build_llm, build_resolver_llm, run_world, load_world_file
 
 logger = logging.getLogger("run_benchmark")
 
@@ -62,6 +62,12 @@ def main():
                     help="disable the LLM resolver fallback (on by default)")
     ap.add_argument("--system-prompt-file", default=None,
                     help="replace the agent system prompt with this file's text")
+    ap.add_argument("--history", choices=["stateless", "full"], default="stateless",
+                    help="ablation R8: 'full' sends the whole conversation each turn (default: last result + memory)")
+    ap.add_argument("--min-answer-turn", type=int, default=None,
+                    help="ablation R6: refuse an answer before this turn (the turn limit still forces one)")
+    ap.add_argument("--prompt-variant", default="",
+                    help="ablations R5/R6b/R10: comma-separated names from agent_loop.PROMPT_VARIANTS")
     ap.add_argument("--outdir", required=True)
     ap.add_argument("--resume", action="store_true",
                     help="skip worlds that already have a result_<wid>.json in outdir "
@@ -104,6 +110,11 @@ def main():
         resolver_llm = build_resolver_llm(args.backend, llm, args.no_resolver_llm, args.resolver_model)
 
     sysp = Path(args.system_prompt_file).read_text() if args.system_prompt_file else None
+    variants = [v for v in args.prompt_variant.split(",") if v]
+    from agent_loop import PROMPT_VARIANTS
+    for v in variants:
+        if v not in PROMPT_VARIANTS:
+            ap.error(f"unknown --prompt-variant {v}; known: {sorted(PROMPT_VARIANTS)}")
 
     def _run_one(path: str) -> Dict[str, Any]:
         world, pre = load_world_file(path)
@@ -123,7 +134,8 @@ def main():
         sim = Simulator(world, resolver_llm=resolver_llm, data_dir=data_dir, precomputed=pre)
         logger.info("=== %s (gold util %.1f) ===", wid, sim.gold["expected_utility"])
         t0 = time.time()
-        res = run_world(sim, llm, args.max_turns, args.budget, args.verbose, system_prompt=sysp)
+        res = run_world(sim, llm, args.max_turns, args.budget, args.verbose, system_prompt=sysp,
+                        history=args.history, min_answer_turn=args.min_answer_turn, prompt_variants=variants)
         res["wall_seconds"] = round(time.time() - t0, 1)
         res["model"] = args.model
         res["world_file"] = path
@@ -159,7 +171,10 @@ def main():
     no_iv = sum(1 for r in rows if (r["interventions"] or 0) == 0)
     suspects = [r for r in rows if r["artifact_suspect"]]
     summary = {
-        "model": args.model, "n_worlds": n, "accepted": acc,
+        "model": args.model, "harness_version": HARNESS_VERSION, "system_prompt_file": args.system_prompt_file,
+        "ablation": {"history": args.history, "min_answer_turn": args.min_answer_turn, "prompt_variants": variants,
+                     "budget": args.budget, "max_turns": args.max_turns},
+        "n_worlds": n, "accepted": acc,
         "accuracy": round(acc / n, 3) if n else 0,
         "partA_utility_ok": pa, "avg_partB": round(sum(r["partB"] for r in rows) / n, 3) if n else 0,
         "hit_turn_cap": caps, "no_intervention_runs": no_iv,

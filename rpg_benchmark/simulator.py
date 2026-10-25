@@ -36,8 +36,20 @@ class Simulator:
         self.act_label: Dict[str, str] = {aid: (act.get("aliases") or [aid])[0]
                                           for aid, act in self.scm.actuators.items()}
         if self.v10:
-            self.csv_columns = {f"do_{aid}": "do_" + "_".join(lab.split())
-                                for aid, lab in self.act_label.items()}
+            # v10.2: every control's column is "Set" + its name in CamelCase (e.g. SetUpperCutoffVoltage), in the
+            # same style as the signal columns. v10.0/10.1 used 'do_upper_cutoff_voltage', and models wrote
+            # 'UpperCutoffVoltage' (44% of their KeyErrors in the gate). The prefix is uniform, so it carries no
+            # information about a control's role.
+            import re as _re
+            camel = lambda t: "".join(w[:1].upper() + w[1:] for w in _re.split(r"[^A-Za-z0-9]+", t) if w)
+            taken = set(self.scm.variables)
+            for aid, lab in self.act_label.items():
+                n = "Set" + (camel(lab) or aid)
+                while n in taken:
+                    n += "_"
+                taken.add(n)
+                self.csv_columns[f"do_{aid}"] = n
+                self.resolver.column_ids[n.lower()] = aid
         self._seed0 = 1000
         self._q = 0
         self.data_dir = Path(data_dir).resolve() if data_dir else None
@@ -95,7 +107,11 @@ class Simulator:
             return None
         import pandas as pd
         df = pd.DataFrame({k: np.asarray(v) for k, v in obs.items()})
-        df.insert(0, "unit_id", range(len(df)))
+        # v10.2: unit ids are unique to the experiment (every experiment draws a fresh batch of units), so
+        # rows of different experiments can't be mistaken for the same units. Integers (experiment * 1000 + row,
+        # e.g. 3000-3399) so df.mean() / np.asarray(df) still work; string ids ('e3_u000') broke them.
+        base = 10 ** max(3, len(str(len(df))))
+        df.insert(0, "unit_id", [exp_id * base + i for i in range(len(df))])
         for aid, val in (intervention or {}).items():
             df[f"do_{aid}"] = val
         if self.csv_columns:
@@ -106,12 +122,20 @@ class Simulator:
                                     "mode": mode, "intervention": dict(intervention or {})}
         return path
 
+    def _control_level(self, aid: str, applied: Optional[Dict[str, Any]] = None) -> Any:
+        if applied and aid in applied:
+            return applied[aid]
+        return self.act_to_display(aid, self.scm.actuators[aid].get("default"))
+
     def measure(self, requests: List[str], intervention: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         self._q += 1
+        requests = [r for r in requests if isinstance(r, str)]
         resolutions = [self.resolver.resolve_measure(r) for r in requests]
         var_ids, echoes = [], []
         for req, res in zip(requests, resolutions):
             echoes.append({"request": req, **res.to_dict()})
+            if res.kind == "control" and res.target_id in self.scm.actuators:
+                echoes[-1]["control_level"] = self._control_level(res.target_id)
             if res.ok and res.target_id:
                 var_ids.append(res.target_id)
         readings = {}
@@ -139,31 +163,53 @@ class Simulator:
                 corr[f"{names[i]}~{names[j]}"] = round(c, 3)
             readings["_correlations"] = corr
             csv_path = self._write_rows(self._q, obs, iv, "measure")
-        return {"mode": "measure", "experiment_id": self._q, "n_units": self.n_sample,
+        if not var_ids:
+            self._q -= 1   # v10.2: nothing ran, so no experiment number is used
+        return {"mode": "measure", "experiment_id": self._q if var_ids else None, "n_units": self.n_sample,
                 "resolutions": echoes, "readings": readings, "raw_csv": csv_path}
 
     def intervene(self, actions: List[Dict[str, Any]], measure_requests: List[str]) -> Dict[str, Any]:
         self._q += 1
         resolutions, iv = [], {}
         for a in actions:
+            if not isinstance(a, dict):
+                continue
             res = self.resolver.resolve_intervene(a.get("request", ""), a.get("value"))
             resolutions.append({"request": a.get("request", ""), **res.to_dict()})
+            if not res.ok and not res.candidates:
+                # v10.2: setting a measured signal -> say so (signals are public), instead of "no match"
+                sig = self.resolver._best_alias(a.get("request", ""), self.resolver.var_aliases)
+                if sig and sig[0][1] >= 0.85:
+                    resolutions[-1].update(kind="signal", target_id=sig[0][0])
             if res.ok and res.target_id:
+                if res.target_id in iv:   # v10.2: the same control twice in one experiment
+                    resolutions[-1].update(ok=False, kind="duplicate", value=None)
+                    continue
                 iv[res.target_id] = res.value
+        measure_requests = [r for r in measure_requests if isinstance(r, str)]
         m_res = [self.resolver.resolve_measure(r) for r in measure_requests]
         m_ids = [r.target_id for r in m_res if r.ok and r.target_id]
         m_echo = [{"request": rq, **rr.to_dict()} for rq, rr in zip(measure_requests, m_res)]
+        for e in m_echo:
+            if e.get("kind") == "control" and e.get("target_id") in self.scm.actuators:
+                e["control_level"] = self._control_level(e["target_id"], iv)
         if self.scm.outcome not in m_ids:
             m_ids.append(self.scm.outcome)
         readings = {}
         csv_path = None
         iv_int = {k: self.act_to_internal(k, v) for k, v in iv.items()}
-        if iv and m_ids:
+        # v10.2: an intervention with no controls is a do-nothing baseline: a fresh representative batch at the
+        # current settings (the prompt tells the agent to compare interventions with each other)
+        baseline = not [a for a in actions if isinstance(a, dict)]
+        if (iv or baseline) and m_ids:
             vals = self.scm.sample(self.n_sample, intervention=iv_int, seed=self._seed0 + self._q)
             obs = self._obs_display(self.scm.measure(vals, m_ids, seed=self._seed0 + 5000 + self._q, intervention=iv_int))
             readings = {k: round(float(np.mean(v)), 3) for k, v in obs.items()}
             csv_path = self._write_rows(self._q, obs, iv, "intervene")
-        out = {"mode": "intervene", "experiment_id": self._q, "n_units": self.n_sample,
+        ran = bool((iv or baseline) and m_ids)
+        if not ran:
+            self._q -= 1   # v10.2: nothing ran, so no experiment number is used
+        out = {"mode": "intervene", "experiment_id": self._q if ran else None, "n_units": self.n_sample,
                 "applied_intervention": iv, "action_resolutions": resolutions,
                 "measurement_resolutions": m_echo, "readings": readings, "raw_csv": csv_path}
         if self.display:
@@ -181,9 +227,22 @@ class Simulator:
         if not self.v10:
             return result
         lab = lambda aid: self.act_label.get(aid, aid)
+        col = lambda aid: self.csv_columns.get(f"do_{aid}", lab(aid))
 
         def echo(e: Dict[str, Any]) -> Dict[str, Any]:
             out = {"request": e.get("request", "")}
+            if e.get("kind") == "control" and e.get("target_id"):
+                out.update(ok=False, interpretation=f"'{lab(e['target_id'])}' is a control, not a measured signal; "
+                           f"it was at {e.get('control_level')} in this experiment. Change it with an intervene action.")
+                return out
+            if e.get("kind") == "signal":
+                out.update(ok=False, interpretation=f"'{e['target_id']}' is a measured signal, not a control; "
+                           "it cannot be set directly.")
+                return out
+            if e.get("kind") == "duplicate":
+                out.update(ok=False, interpretation=f"'{lab(e['target_id'])}' was set more than once in this experiment; "
+                           "only its first setting was applied.")
+                return out
             if not e.get("ok"):
                 if e.get("candidates"):
                     names = [lab(c) if c in self.scm.actuators else c for c in e["candidates"]]
@@ -191,19 +250,30 @@ class Simulator:
                 else:
                     out.update(ok=False, interpretation=self._REJECT_V10)
             elif e.get("kind") == "intervene":
-                out.update(ok=True, interpretation=f"apply '{lab(e['target_id'])}' at {e.get('value')}")
+                out.update(ok=True, interpretation=f"apply '{lab(e['target_id'])}' at {e.get('value')} "
+                                                   f"(column {col(e['target_id'])})")
             else:
                 out.update(ok=True, interpretation=f"measure '{e['target_id']}'")
             return out
 
-        v = {k: result[k] for k in ("mode", "experiment_id", "n_units", "readings") if k in result}
+        keys = ("mode", "experiment_id", "n_units", "readings") if result.get("raw_csv") else ("mode",)
+        v = {k: result[k] for k in keys if k in result}
         for key in ("resolutions", "action_resolutions", "measurement_resolutions"):
             if key in result:
                 v[key] = [echo(e) for e in result[key]]
         if "applied_intervention" in result:
-            v["applied_intervention"] = {lab(a): val for a, val in result["applied_intervention"].items()}
+            # v10.2: keyed by the CSV column name (models wrote the label in CamelCase without "Set", a KeyError)
+            v["applied_intervention"] = {col(a): val for a, val in result["applied_intervention"].items()}
         if result.get("raw_csv"):
-            v["raw_csv"] = f"experiment_{result['experiment_id']}_csv"
+            # v10.2: name the DataFrame the code tool provides (the old "experiment_N_csv" label made models call
+            # pd.read_csv('experiment_N_csv')), list its columns, and say the units are a fresh batch
+            eid = result["experiment_id"]
+            v["data"] = (f"per-unit rows are in experiment_{eid}_df (pandas DataFrame in your code; "
+                         f"file experiment_{eid}.csv). Fresh batch of {result.get('n_units')} units; "
+                         f"unit ids are unique to this experiment.")
+            cols = (self.experiments.get(eid) or {}).get("columns")
+            if cols:
+                v["columns"] = cols
         return v
 
     def grade(self, answer: Dict[str, Any]) -> Dict[str, Any]:

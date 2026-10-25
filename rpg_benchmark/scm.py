@@ -277,6 +277,18 @@ class WorldSCM:
                     set_targets[act["target"]] = float(v)
                 except (TypeError, ValueError):
                     set_targets[act["target"]] = float(act.get("default", 0.0))
+            elif isinstance(v, dict) and "policy" in v:
+                # v10.2: a conditional policy on an additive / scaling control (it used to crash the grader):
+                # each unit gets dose_if_ge or dose_if_lt by its stratifier value, applied below per unit
+                pol = v["policy"]
+                scale_add.append({"target": act["target"], "op": act["op"], "expr": act.get("expr"),
+                                  "policy": pol, "d_ge": actuator_dose(act, pol.get("dose_if_ge", 0.0)),
+                                  "d_lt": actuator_dose(act, pol.get("dose_if_lt", 0.0))})
+                if act.get("side_effect"):
+                    se = act["side_effect"]
+                    side_adds.append({"target": se["target"], "expr": se["expr"], "policy": pol,
+                                      "d_ge": actuator_dose(act, pol.get("dose_if_ge", 0.0)),
+                                      "d_lt": actuator_dose(act, pol.get("dose_if_lt", 0.0))})
             else:
                 d = actuator_dose(act, v)
                 scale_add.append({"target": act["target"], "op": act["op"],
@@ -308,10 +320,20 @@ class WorldSCM:
             else:
                 vals[nm] = np.zeros(n)
 
+        def _per_unit(op, expr_key="expr"):
+            """factor for an op: a scalar, or per unit when the op carries a conditional policy"""
+            expr = op[expr_key]
+            if "policy" not in op:
+                return eval_expr(expr, op["d"]) if expr else 1.0
+            f_ge = eval_expr(expr, op["d_ge"]) if expr else 1.0
+            f_lt = eval_expr(expr, op["d_lt"]) if expr else 1.0
+            strat = vals[op["policy"]["stratifier"]]
+            return np.where(strat >= float(op["policy"]["threshold"]), f_ge, f_lt).astype(float)
+
         edited = set()
         for op in scale_add:
-            t, d = op["target"], op["d"]
-            factor = eval_expr(op["expr"], d) if op["expr"] else 1.0
+            t = op["target"]
+            factor = _per_unit(op)
             if op["op"] == "scale":
                 vals[t] = vals[t] * factor
             elif op["op"] == "add":
@@ -328,9 +350,9 @@ class WorldSCM:
             edited.add(ps["target"])
 
         if self.propagate_side_effects and side_adds:
-            side_by_t: Dict[str, float] = {}
+            side_by_t: Dict[str, Any] = {}
             for sa in side_adds:
-                side_by_t[sa["target"]] = side_by_t.get(sa["target"], 0.0) + eval_expr(sa["expr"], sa["d"])
+                side_by_t[sa["target"]] = side_by_t.get(sa["target"], 0.0) + _per_unit(sa)
             desc = self._descendants(edited) | self._descendants(set(side_by_t))
             for nm in self._topo():
                 if nm not in edited and nm in desc and "mech" in self.variables[nm]:

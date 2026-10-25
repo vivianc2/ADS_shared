@@ -1,10 +1,15 @@
 # Causal discovery benchmark
 
 An agent diagnoses a failing system it has never seen. Each world is a hidden structural causal model with ~25
-adjustable controls and ~26 measurable signals, described only in a plain-language situation report. The agent has
-15 experiments (measure, or intervene on any combination of controls) plus free analysis code, and must find what
-restores the true underlying objective and explain the mechanism. There is no menu: the agent names signals and
-controls in its own words, and a resolver model maps each request to the world.
+adjustable controls and ~26 measurable signals, described in a plain-language situation report. The report names
+every measurable signal (with its unit) and every control (with its usual level or dose and its range); the hidden
+variables are not named. The agent has 15 experiments (measure, or intervene on any combination of controls) plus
+free analysis code, and must find what restores the true underlying objective and explain the mechanism. There are
+no ids or action menus: the agent writes requests in its own words, and a resolver model maps each request to the
+world.
+
+**Version:** harness v10.1 (see `CHANGELOG.md`). Every result file records `harness_version`. The default agent
+prompt is the built-in v10 prompt (`prompts/agent_prompt_v10.txt`).
 
 ## Data
 
@@ -12,9 +17,14 @@ controls in its own words, and a resolver model maps each request to the world.
 |---|---|---|
 | `data/test` | 540 | the benchmark: 10 domains, 60 worlds of each of 9 causal structures |
 | `data/validation` | 270 | optional, for development: 30 worlds of each structure |
+| `data/core108` | 108 | subset of `test`: 12 worlds of each structure, every (structure, domain) pair at least once |
+| `data/core54` | 54 | subset of `core108`: 6 worlds of each structure |
+| `data/core54_anon` | 54 | `core54` with neutral variable names (ablation) |
 
 `index.json` in each split lists the domain and causal structure of every file. A world
 file holds the situation report, the causal model, and the precomputed best intervention used for grading.
+The core subsets hold byte-identical copies of `data/test` files; `python data/build_core_subsets.py` rebuilds
+`core108` and checks both subsets against their selection rule (described in that script).
 
 ## Run
 

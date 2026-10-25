@@ -15,6 +15,9 @@ _MODEL_PRESETS: List[Dict[str, Any]] = [
      "extra_body": {"top_k": 20, "min_p": 0.0}},
     {"matches": ["gpt-oss"], "temperature": 1.0, "top_p": 1.0,
      "extra_body": {"top_k": 0, "min_p": 0.0}},
+    # v10.2: providers' recommended sampling for Gemini 3.x and Gemma 4
+    {"matches": ["gemini"], "temperature": 1.0, "top_p": 0.95},
+    {"matches": ["gemma"], "temperature": 1.0, "top_p": 0.95, "extra_body": {"top_k": 64}},
     {"matches": ["deepseek-v4-pro"], "temperature": 1.0, "top_p": 0.95,
      "extra_body": {"reasoning_effort": "high", "thinking": {"type": "enabled"}}},
 ]
@@ -51,6 +54,14 @@ class OpenAILLM:
     def last_finish_reason(self) -> Optional[str]:
         return getattr(self._tls, "finish_reason", None)
 
+    @property
+    def last_usage(self) -> Optional[Dict[str, Any]]:
+        return getattr(self._tls, "usage", None)
+
+    @property
+    def last_served_model(self) -> Optional[str]:
+        return getattr(self._tls, "served_model", None)
+
     def __post_init__(self):
         from openai import OpenAI
 
@@ -84,17 +95,28 @@ class OpenAILLM:
                           max_new_tokens: Optional[int] = None) -> str:
         kwargs: Dict[str, Any] = {
             "model": self.model_name,
-            "messages": messages,
+            "messages": [{"role": m["role"], "content": m["content"]} for m in messages],
             "max_tokens": max_new_tokens or self.max_new_tokens,
             "temperature": self.temperature,
             "top_p": self.top_p,
         }
         if self.extra_body:
             kwargs["extra_body"] = self.extra_body
-        response = self.client.chat.completions.create(**kwargs)
-        self._tls.finish_reason = response.choices[0].finish_reason
-        msg = response.choices[0].message
-        reasoning = getattr(msg, "reasoning_content", None)
+        # v10.2: retry an empty reply (e.g. Gemini's MALFORMED_FUNCTION_CALL) up to twice before accepting it
+        for attempt in range(3):
+            response = self.client.chat.completions.create(**kwargs)
+            fr = response.choices[0].finish_reason
+            msg = response.choices[0].message
+            if (msg.content or "").strip() or attempt == 2:
+                break
+            logger.warning("empty reply (finish_reason=%s); retrying (%d/2)", fr, attempt + 1)
+        self._tls.finish_reason = fr
+        self._tls.served_model = getattr(response, "model", None)
+        try:
+            self._tls.usage = response.usage.model_dump() if response.usage else None
+        except Exception:
+            self._tls.usage = None
+        reasoning = getattr(msg, "reasoning_content", None) or getattr(msg, "reasoning", None)
         if self.capture_reasoning:
             self._tls.reasoning = reasoning
         content = msg.content or ""
