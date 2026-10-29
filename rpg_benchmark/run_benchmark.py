@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from simulator import Simulator
-from agent_loop import HARNESS_VERSION, build_llm, build_resolver_llm, run_world, load_world_file
+from agent_loop import HARNESS_VERSION, HISTORIES, build_llm, build_resolver_llm, run_world, load_world_file
 
 logger = logging.getLogger("run_benchmark")
 
@@ -62,8 +62,10 @@ def main():
                     help="disable the LLM resolver fallback (on by default)")
     ap.add_argument("--system-prompt-file", default=None,
                     help="replace the agent system prompt with this file's text")
-    ap.add_argument("--history", choices=["stateless", "full"], default="stateless",
-                    help="ablation R8: 'full' sends the whole conversation each turn (default: last result + memory)")
+    ap.add_argument("--history", choices=list(HISTORIES), default="stateless",
+                    help="ablation R8: 'full' sends the whole conversation each turn; 'experiments' shows a record "
+                         "of every experiment's result and drops <memory>; 'experiments_add_memory' shows the same "
+                         "record and keeps <memory> (default: last result + memory)")
     ap.add_argument("--min-answer-turn", type=int, default=None,
                     help="ablation R6: refuse an answer before this turn (the turn limit still forces one)")
     ap.add_argument("--prompt-variant", default="",

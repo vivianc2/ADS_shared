@@ -437,7 +437,8 @@ def _make_agent_prompt_v102(p: str) -> str:
 AGENT_PROMPT = _make_agent_prompt_v102(_make_agent_prompt(SYSTEM_PROMPT))
 
 # v10.2 ablations (week 7). Each variant is a list of exact (old, new) edits on AGENT_PROMPT; the default prompt is
-# unchanged. Selected with run_benchmark.py --prompt-variant (comma-separated) and --history full.
+# unchanged. Selected with run_benchmark.py --prompt-variant (comma-separated) and --history full|experiments|
+# experiments_add_memory.
 _COMBO_NOTE = ("- The best fix may be a COMBINATION, and the best dose may be in the middle\n"
                "  (too much can hurt).")
 _TRAP_SENTENCE = (" The reported outcome is a SURROGATE metric that can be\n"
@@ -474,6 +475,32 @@ _MEMORY_FULL = (
     "  context, so nothing is lost between turns. The <memory> block is still required but is only notes for\n"
     "  yourself. (Your data also stays available to code as experiment_<id>_df.) Re-running the same code only\n"
     "  reproduces the same output.\n")
+# history="experiments": the prompt lists every experiment's result; there is no <memory> block
+_MEMORY_EXPERIMENTS = (
+    "- HISTORY: each turn you are shown the situation report, the budget and turn counters, the list of your\n"
+    "  data, a HISTORICAL RECORD OF EXPERIMENTS with the result of every experiment you have run so far, and the\n"
+    "  result of your LAST action. Earlier code output and your earlier replies are NOT shown again. (Your data\n"
+    "  stays available to code as experiment_<id>_df.) Re-running the same code only reproduces the same output.\n")
+_NO_MEMORY_EDITS = [
+    (_MEMORY_STATELESS, _MEMORY_EXPERIMENTS),
+    ("  </action>), followed by ONE <memory>...</memory> block. Do not use", "  </action>). Do not use"),
+    ("Output EXACTLY these two blocks each turn:\n", "Output EXACTLY this one block each turn:\n"),
+    ("JSON or code</action>\n<memory>\nHypotheses: ...\nRuled out: ...\n"
+     "Confirmed: ... (your findings so far, with the numbers)\nNext: ...\n</memory>", "JSON or code</action>"),
+]
+# history="experiments_add_memory": the record of history="experiments", and the <memory> block is kept
+_MEMORY_EXPERIMENTS_ADD_MEMORY = (
+    "- MEMORY: each turn you are shown the situation report, the budget and turn counters, the list of your data,\n"
+    "  a HISTORICAL RECORD OF EXPERIMENTS with the result of every experiment you have run so far, the result of\n"
+    "  your LAST action, and your <memory> block. Earlier code output and your earlier reasoning are NOT shown\n"
+    "  again. Write every number and finding you will need later into <memory>; apart from the record, it is your\n"
+    "  only record between turns. (Your data stays available to code as experiment_<id>_df.) You write <memory> in\n"
+    "  the same reply as your next action, before that action's result exists. So in every reply, first copy the\n"
+    "  numbers you need from RESULT OF YOUR LAST ACTION into <memory>: next turn that result is replaced by the new\n"
+    "  one. Re-running the same code only reproduces the same output.\n")
+# histories that show the HISTORICAL RECORD OF EXPERIMENTS
+_RECORD_HISTORIES = ("experiments", "experiments_add_memory")
+HISTORIES = ("stateless", "full") + _RECORD_HISTORIES
 
 
 def build_agent_prompt(variants: Optional[List[str]] = None, history: str = "stateless") -> str:
@@ -481,6 +508,10 @@ def build_agent_prompt(variants: Optional[List[str]] = None, history: str = "sta
     edits = [e for v in (variants or []) for e in PROMPT_VARIANTS[v]]
     if history == "full":
         edits.append((_MEMORY_STATELESS, _MEMORY_FULL))
+    elif history == "experiments":
+        edits += _NO_MEMORY_EDITS
+    elif history == "experiments_add_memory":
+        edits.append((_MEMORY_STATELESS, _MEMORY_EXPERIMENTS_ADD_MEMORY))
     for a, b in edits:
         assert p.count(a) == 1, a[:60]
         p = p.replace(a, b)
@@ -622,10 +653,11 @@ def _resolve_answer_policy(sim: Simulator, pol_text: Dict[str, Any]) -> Dict[str
 _TAG_LINE_RE = re.compile(r"\s*</?[A-Za-z_][\w:.-]*\s*/?>\s*")
 
 
-def _not_executed(reason: str, previous: str, format_hint: bool = True) -> str:
+def _not_executed(reason: str, previous: str, format_hint: bool = True, memory: bool = True) -> str:
     """v10.2: what the agent sees after a reply that could not be executed (it used to see nothing new)."""
     return ("YOUR LAST REPLY WAS NOT EXECUTED: " + reason + ".\n"
-            + ("Write exactly ONE action block per turn, closed with </action>, followed by your <memory> block, e.g.\n"
+            + ("Write exactly ONE action block per turn, closed with </action>"
+               + (", followed by your <memory> block" if memory else "") + ", e.g.\n"
                "<action type=\"code\">print(experiment_1_df.describe())</action>\n" if format_hint else "")
             + "No experiment was used.\n\n"
             "THE RESULT BEFORE THAT (repeated):\n" + previous)
@@ -649,14 +681,30 @@ def _data_line(experiments: Dict[int, Dict[str, Any]], sim: Simulator) -> str:
     return "data for code: " + "; ".join(parts)
 
 
+def _experiment_record_entry(eid: int, view: Dict[str, Any]) -> str:
+    """One entry of the history="experiments" record: a header line + the JSON the agent sees for that experiment."""
+    if view.get("mode") == "intervene":
+        applied = view.get("applied_intervention") or {}
+        if applied:
+            head = (f"Intervene on: {', '.join(applied)} with dose: "
+                    f"{', '.join(str(v) for v in applied.values())} resulting the following:")
+        else:
+            head = "Baseline batch (no control changed) resulting the following:"
+    else:
+        head = "Measure only (no intervention) resulting the following:"
+    return f"Experiment {eid}:\n{head}\n{json.dumps(view, default=str)}"
+
+
 def run_world(sim: Simulator, llm, max_turns: int, budget: int, verbose: bool,
               system_prompt: Optional[str] = None, history: str = "stateless",
               min_answer_turn: Optional[int] = None,
               prompt_variants: Optional[List[str]] = None) -> Dict[str, Any]:
     """history="full" (ablation R8) sends the whole conversation each turn instead of last result + memory;
+    history="experiments" shows a record of every experiment's result each turn and drops the <memory> block;
+    history="experiments_add_memory" shows the same record and keeps the <memory> block;
     min_answer_turn (R6) refuses an answer before that turn (unless the turn limit forces it); prompt_variants
     (R5/R6b/R10) are named edits from PROMPT_VARIANTS. The defaults reproduce the v10.2 protocol."""
-    assert history in ("stateless", "full"), history
+    assert history in HISTORIES, history
     ablation = {"history": history, "min_answer_turn": min_answer_turn, "prompt_variants": list(prompt_variants or [])}
     if system_prompt is None and sim.v10 and (history != "stateless" or prompt_variants):
         system_prompt = build_agent_prompt(prompt_variants, history)
@@ -676,6 +724,10 @@ def run_world(sim: Simulator, llm, max_turns: int, budget: int, verbose: bool,
     carried_vars: Dict[str, Any] = {}
     rejected_counts: Dict[str, int] = {}
     forced_answer = False
+    experiment_record: List[str] = []  # history in _RECORD_HISTORIES: one entry per experiment run
+
+    def _nx(reason: str, previous: str, format_hint: bool = True) -> str:
+        return _not_executed(reason, previous, format_hint, memory=history != "experiments")
 
     for turn in range(max_turns):
         remaining = budget - used
@@ -724,6 +776,26 @@ TURNS: {turn}/{max_turns} used; {turns_left} left. INTERVENTIONS run so far: {n_
 RESULT OF YOUR LAST ACTION
 {latest}
 """
+        elif history in _RECORD_HISTORIES:
+            record = "\n\n".join(experiment_record) if experiment_record else "(no experiments yet)"
+            user = f"""SITUATION REPORT
+{pub['scenario']}
+
+OUTCOME OF INTEREST: {pub['outcome_name']} ({pub['outcome_direction']})
+
+BUDGET: {used}/{budget} experiments used; {remaining} left. (code does not cost budget)
+TURNS: {turn}/{max_turns} used; {turns_left} left. INTERVENTIONS run so far: {n_interventions}.
+{_data_line(sim.experiments, sim)}
+{directive_block}
+HISTORICAL RECORD OF EXPERIMENTS
+{record}
+
+RESULT OF YOUR LAST ACTION
+{latest}
+"""
+            if history == "experiments_add_memory":
+                user = user.replace("RESULT OF YOUR LAST ACTION\n", "RESULT OF YOUR LAST ACTION (shown this turn only: "
+                                    "copy what you need into <memory>)\n") + f"\nYOUR MEMORY\n{memory}\n"
         else:
             user = f"""SITUATION REPORT
 {pub['scenario']}
@@ -781,7 +853,7 @@ YOUR MEMORY
         if atype is None:
             rec["error"] = "no action parsed"
             rec["error_detail"] = perr
-            latest = _not_executed(perr, last_result)
+            latest = _nx(perr, last_result)
             rec["shown_next"] = latest
             turns.append(rec)
             continue
@@ -799,7 +871,7 @@ YOUR MEMORY
                 # v10.2: unreadable JSON is not executed (and no experiment is charged); the agent is told
                 rec["error"] = f"json parse: {e}"
                 rec["attempted_action_type"] = atype
-                latest = _not_executed(f"the JSON in your {atype} action could not be read", last_result)
+                latest = _nx(f"the JSON in your {atype} action could not be read", last_result)
                 rec["shown_next"] = latest
                 turns.append(rec)
                 continue
@@ -809,7 +881,7 @@ YOUR MEMORY
             need = _LIST_FIELDS[atype][0]
             rec["error"] = f"{atype} without a {need} list"
             rec["attempted_action_type"] = atype
-            latest = _not_executed(f'your {atype} action needs a "{need}" list'
+            latest = _nx(f'your {atype} action needs a "{need}" list'
                                    + (' (use "actions": [] for a baseline batch with no control changed)'
                                       if atype == "intervene" else ""), last_result)
             rec["shown_next"] = latest
@@ -818,7 +890,7 @@ YOUR MEMORY
         if atype in ("measure", "intervene") and budget_spent:
             rec["error"] = "budget spent"
             rec["attempted_action_type"] = atype
-            latest = _not_executed(f"the experiment budget is spent ({used}/{budget}), so a {atype} can no longer "
+            latest = _nx(f"the experiment budget is spent ({used}/{budget}), so a {atype} can no longer "
                                    "run. Use code to analyse your data, or answer", last_result, format_hint=False)
             rec["shown_next"] = latest
             turns.append(rec)
@@ -826,7 +898,7 @@ YOUR MEMORY
         if atype == "answer" and min_answer_turn is not None and turn < min_answer_turn and not forced_now:
             rec["error"] = "answer before min_answer_turn"
             rec["attempted_action_type"] = atype
-            latest = _not_executed(f"answers are accepted only from turn {min_answer_turn} on (this was turn {turn}); "
+            latest = _nx(f"answers are accepted only from turn {min_answer_turn} on (this was turn {turn}); "
                                    "keep investigating", last_result, format_hint=False)
             rec["shown_next"] = latest
             turns.append(rec)
@@ -960,6 +1032,11 @@ YOUR MEMORY
             rec["not_charged"] = True
         latest = last_result = json.dumps(view, default=str) + (f"\n[note: {note}]" if note else "")
         rec["shown_to_agent"] = latest
+        if history in _RECORD_HISTORIES and result.get("raw_csv"):
+            # the full result goes into the record; the last-action slot points to it instead of repeating it
+            experiment_record.append(_experiment_record_entry(result["experiment_id"], view))
+            latest = last_result = (f"Experiment {result['experiment_id']} -- see HISTORICAL RECORD OF EXPERIMENTS "
+                                    "above." + (f"\n[note: {note}]" if note else ""))
         turns.append(rec)
 
     if grade is None:
